@@ -4,8 +4,8 @@
 
 - Added forward-only `V13__create_knowledge_base.sql`. The task brief's V12 filename was superseded because this branch already contains the applied ownership migration `V12__require_user_ownership.sql`; no Flyway history was rewritten.
 - Added tenant-owned `knowledge_base` records and `knowledge_document` records with UUID keys, a per-base content-hash uniqueness constraint, MySQL status checks, optimistic versions, timestamps, storage keys, parsed text, embedding snapshots, chunk counts, failures, and indexing revisions.
-- Replaced public Spring Data repositories with narrow owner-scoped ports. Only package-private JPA delegates extend `JpaRepository`; package-private adapters are the Spring beans implementing the public ports, which expose only `save` and owner-scoped reads. This prevents later application code from calling unscoped CRUD APIs.
-- The JPA-backed adapters are conditional on an `EntityManagerFactory`. They are absent when JPA auto-configuration is disabled, while a focused context test verifies both public ports register when the JPA infrastructure and delegates are present.
+- Replaced public Spring Data repositories with narrow owner-scoped ports. Only package-private JPA delegates extend `JpaRepository`; package-private adapters implement the public ports, which expose only `save` and owner-scoped reads. This prevents later application code from calling unscoped CRUD APIs.
+- `KnowledgeRepositoryAdapterAutoConfiguration` is a Boot 4 auto-configuration registered through `META-INF/spring/...AutoConfiguration.imports`, ordered after Hibernate and JPA-repository auto-configuration. It creates the two adapters only after both package-private JPA delegates exist; the adapters themselves are not component-scanned.
 - Added document revision fencing. Reindexing increments the revision and clears a prior failure; READY and FAILED completions accept only the active PROCESSING revision. Deletion advances the revision and prevents reindexing, including stale READY and FAILED completions.
 - No upload, parsing, chunk persistence, Qdrant, controller, or application-service behavior was added.
 
@@ -15,7 +15,8 @@
 2. Added `KnowledgeDocumentEntityTest` and `KnowledgeRepositoryTest` before production types existed. The RED run failed compilation exactly because the new entities, statuses, and repositories did not yet exist.
 3. Review remediation added failing public-port reflection and adapter-delegation tests before the safe delegates/adapters existed. The RED compile failed for those missing types; after adding the narrow ports and adapters, the focused suite was GREEN.
 4. Added coverage for failure clearing, stale failure rejection, deletion-fenced completions, and actual MySQL check/FK rejection. The container test is complete but cannot initialize until Docker is available.
-5. The JPA-disabled `InterviewPilotApplicationTest` reproduced the missing-delegate context failure. Adding the `EntityManagerFactory` conditions made that test green; `KnowledgeRepositoryAdapterConditionTest` verifies the adapters remain injectable with JPA infrastructure.
+5. The JPA-disabled `InterviewPilotApplicationTest` reproduced the missing-delegate context failure. A first condition-based repair made it green.
+6. Review found component-scan condition ordering could diverge from Boot's deferred auto-configuration order. The replacement `ApplicationContextRunner` test was RED because the auto-configuration did not exist, then GREEN with Boot ordering: no delegates means no public ports, while delegate beans cause automatic port registration without manually importing adapters or registering an `EntityManagerFactory`.
 
 ## Verification
 
@@ -49,6 +50,8 @@ Testcontainers reported that `dockerDesktopLinuxEngine` does not exist. Starting
 Review remediation commit: `fix: scope knowledge repository ports`
 
 JPA-condition remediation commit: `fix: condition knowledge repository adapters on JPA`
+
+Deferred auto-configuration remediation commit: `fix: auto-configure knowledge repository adapters`
 
 ## Residual risks
 
