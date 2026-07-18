@@ -18,12 +18,15 @@ import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
+import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.common.exception.BusinessException;
 import interview.pilot.common.observability.AiMetrics;
 import interview.pilot.interview.infrastructure.InterviewSessionRepository;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 
 class AsyncTaskServiceMetricsTest {
+  private static final CurrentUser OWNER = new CurrentUser(
+      1L, new UUID(0L, 1L), "owner@example.com", "Owner");
   @Test
   void explicitVersionFenceCountsExactlyOneOptimisticConflict() {
     UUID taskId = UUID.randomUUID();
@@ -31,8 +34,8 @@ class AsyncTaskServiceMetricsTest {
     var captured = task(7L, taskId, sessionId, 3L);
     var changed = task(7L, taskId, sessionId, 4L);
     var tasks = mock(AsyncTaskRepository.class);
-    when(tasks.findByTaskId(taskId)).thenReturn(Optional.of(captured));
-    when(tasks.findById(7L)).thenReturn(Optional.of(changed));
+    when(tasks.findByTaskIdAndUserAccountId(taskId, 1L)).thenReturn(Optional.of(captured));
+    when(tasks.findByIdAndUserAccountId(7L, 1L)).thenReturn(Optional.of(changed));
     var claims = mock(ProcessingClaim.class);
     when(claims.clearTerminal("interview-report:" + sessionId))
         .thenReturn(ProcessingClaim.ClearResult.ABSENT);
@@ -44,7 +47,7 @@ class AsyncTaskServiceMetricsTest {
         tasks, mock(ResumeRepository.class), mock(InterviewSessionRepository.class),
         claims, transactionManager, metrics);
 
-    assertThatThrownBy(() -> service.retry(taskId, UUID.randomUUID()))
+    assertThatThrownBy(() -> service.retry(OWNER, taskId, UUID.randomUUID()))
         .isInstanceOfSatisfying(BusinessException.class,
             error -> org.assertj.core.api.Assertions.assertThat(error.code())
                 .isEqualTo("TASK_RETRY_CONFLICT"));
@@ -54,7 +57,7 @@ class AsyncTaskServiceMetricsTest {
 
   private AsyncTaskEntity task(long id, UUID taskId, UUID sessionId, long version) {
     AsyncTaskEntity task = AsyncTaskEntity.pending(
-        AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + sessionId, "{}");
+        1L, AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + sessionId, "{}");
     task.setId(id);
     task.setTaskId(taskId);
     task.setStatus(AsyncTaskStatus.FAILED);

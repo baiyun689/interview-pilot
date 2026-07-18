@@ -47,6 +47,7 @@ import interview.pilot.ai.provider.AiProviderService;
 import interview.pilot.async.domain.AsyncTaskStatus;
 import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
+import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.interview.api.CreateInterviewRequest;
 import interview.pilot.interview.api.InterviewReportResponse;
 import interview.pilot.interview.api.SubmitAnswerRequest;
@@ -81,6 +82,8 @@ import tools.jackson.databind.ObjectMapper;
 @Testcontainers
 @Import(InterviewJourneyIT.WireMockGatewayConfiguration.class)
 class InterviewJourneyIT {
+  private static final CurrentUser LEGACY_USER = new CurrentUser(
+      1L, new UUID(0L, 1L), "legacy-demo@invalid.local", "Legacy Demo");
   private static final String SCENARIO = "complete-interview-journey";
 
   @Container
@@ -168,7 +171,7 @@ class InterviewJourneyIT {
         "Java backend engineer. Built idempotent APIs with Spring Boot and Redis."
             .getBytes(StandardCharsets.UTF_8));
 
-    var uploaded = uploads.upload(file);
+    var uploaded = uploads.upload(LEGACY_USER, file);
     var resumeTask = tasks.findByTaskId(uploaded.analysisTaskId()).orElseThrow();
     assertThat(resumeAnalysis.handle(uploaded.analysisTaskId()))
         .isEqualTo(ResumeAnalysisHandler.Outcome.TERMINAL);

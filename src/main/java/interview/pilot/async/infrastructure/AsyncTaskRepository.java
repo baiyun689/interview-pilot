@@ -16,7 +16,14 @@ import interview.pilot.async.domain.AsyncTaskType;
 public interface AsyncTaskRepository extends JpaRepository<AsyncTaskEntity, Long> {
   Optional<AsyncTaskEntity> findByTaskId(UUID taskId);
 
+  Optional<AsyncTaskEntity> findByTaskIdAndUserAccountId(UUID taskId, Long userAccountId);
+
+  Optional<AsyncTaskEntity> findByIdAndUserAccountId(Long id, Long userAccountId);
+
   Optional<AsyncTaskEntity> findByTaskTypeAndBizKey(AsyncTaskType type, String bizKey);
+
+  Optional<AsyncTaskEntity> findByTaskTypeAndBizKeyAndUserAccountId(
+      AsyncTaskType type, String bizKey, Long userAccountId);
 
   @Query("""
       select task from AsyncTaskEntity task

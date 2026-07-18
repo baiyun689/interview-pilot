@@ -16,6 +16,7 @@ import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
+import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.common.exception.BusinessException;
 import interview.pilot.common.observability.AiMetrics;
 import interview.pilot.interview.domain.SessionStatus;
@@ -49,12 +50,12 @@ public class AsyncTaskService {
     this.metrics = metrics;
   }
 
-  public AsyncTaskResponse get(UUID taskId) {
-    return transactions.execute(status -> response(requireTask(taskId)));
+  public AsyncTaskResponse get(CurrentUser user, UUID taskId) {
+    return transactions.execute(status -> response(requireTask(user, taskId)));
   }
 
-  public AsyncTaskResponse retry(UUID taskId, UUID traceId) {
-    RetryTarget target = transactions.execute(status -> retryTarget(taskId));
+  public AsyncTaskResponse retry(CurrentUser user, UUID taskId, UUID traceId) {
+    RetryTarget target = transactions.execute(status -> retryTarget(user, taskId));
     ProcessingClaim.ClearResult cleared;
     try {
       cleared = claims.clearTerminal(target.claimKey());
@@ -75,14 +76,14 @@ public class AsyncTaskService {
     }
   }
 
-  private RetryTarget retryTarget(UUID taskId) {
-    AsyncTaskEntity task = requireTask(taskId);
+  private RetryTarget retryTarget(CurrentUser user, UUID taskId) {
+    AsyncTaskEntity task = requireTask(user, taskId);
     requireRetryable(task);
-    return new RetryTarget(task.getId(), task.getVersion(), claimKey(task));
+    return new RetryTarget(task.getId(), requireOwner(user), task.getVersion(), claimKey(task));
   }
 
   private AsyncTaskResponse reset(RetryTarget target) {
-    AsyncTaskEntity task = tasks.findById(target.databaseId())
+    AsyncTaskEntity task = tasks.findByIdAndUserAccountId(target.databaseId(), target.userAccountId())
         .orElseThrow(() -> notFound());
     if (task.getVersion() != target.version()) {
       metrics.optimisticLockConflict();
@@ -91,7 +92,7 @@ public class AsyncTaskService {
     requireRetryable(task);
     if (task.getTaskType() == AsyncTaskType.RESUME_ANALYSIS) {
       Long resumeId = parseResumeId(task.getBizKey());
-      var resume = resumes.findById(resumeId)
+      var resume = resumes.findByIdAndUserAccountId(resumeId, target.userAccountId())
           .orElseThrow(() -> conflict("TASK_STATE_INVALID", "Task state is inconsistent"));
       if (resume.getStatus() != ResumeStatus.FAILED) {
         throw conflict("TASK_STATE_INVALID", "Task state is inconsistent");
@@ -146,8 +147,15 @@ public class AsyncTaskService {
     }
   }
 
-  private AsyncTaskEntity requireTask(UUID taskId) {
-    return tasks.findByTaskId(taskId).orElseThrow(this::notFound);
+  private AsyncTaskEntity requireTask(CurrentUser user, UUID taskId) {
+    return tasks.findByTaskIdAndUserAccountId(taskId, requireOwner(user)).orElseThrow(this::notFound);
+  }
+
+  private static Long requireOwner(CurrentUser user) {
+    if (user == null || user.databaseId() == null) {
+      throw new IllegalArgumentException("Authenticated user is required");
+    }
+    return user.databaseId();
   }
 
   private AsyncTaskResponse response(AsyncTaskEntity task) {
@@ -164,5 +172,5 @@ public class AsyncTaskService {
     return new BusinessException(code, message, HttpStatus.CONFLICT);
   }
 
-  private record RetryTarget(Long databaseId, long version, String claimKey) {}
+  private record RetryTarget(Long databaseId, Long userAccountId, long version, String claimKey) {}
 }

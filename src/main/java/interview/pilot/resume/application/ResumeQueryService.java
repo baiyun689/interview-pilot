@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
+import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.common.exception.BusinessException;
 import interview.pilot.resume.api.ResumeResponse;
 import interview.pilot.resume.domain.ResumeProfile;
@@ -36,23 +37,23 @@ public class ResumeQueryService {
   }
 
   @Transactional(readOnly = true)
-  public List<ResumeResponse> list() {
-    return resumeRepository.findAllByOrderByCreatedAtDesc().stream()
+  public List<ResumeResponse> list(CurrentUser user) {
+    return resumeRepository.findAllByUserAccountIdOrderByCreatedAtDesc(requireOwner(user)).stream()
         .map(this::toResponse)
         .toList();
   }
 
   @Transactional(readOnly = true)
-  public ResumeResponse get(Long resumeId) {
-    ResumeEntity resume = resumeRepository.findById(resumeId)
+  public ResumeResponse get(CurrentUser user, Long resumeId) {
+    ResumeEntity resume = resumeRepository.findByIdAndUserAccountId(resumeId, requireOwner(user))
         .orElseThrow(() -> new BusinessException(
             "RESUME_NOT_FOUND", "Resume not found", HttpStatus.NOT_FOUND));
     return toResponse(resume);
   }
 
   private ResumeResponse toResponse(ResumeEntity resume) {
-    var task = taskRepository.findByTaskTypeAndBizKey(
-        AsyncTaskType.RESUME_ANALYSIS, "resume:" + resume.getId())
+    var task = taskRepository.findByTaskTypeAndBizKeyAndUserAccountId(
+        AsyncTaskType.RESUME_ANALYSIS, "resume:" + resume.getId(), resume.getUserAccountId())
         .orElseThrow(() -> new BusinessException(
             "ANALYSIS_TASK_NOT_FOUND",
             "The resume analysis task could not be found",
@@ -66,6 +67,13 @@ public class ResumeQueryService {
         resume.getCreatedAt(),
         readProfile(resume.getSkillsSnapshot()),
         resume.getFailureReason());
+  }
+
+  private static Long requireOwner(CurrentUser user) {
+    if (user == null || user.databaseId() == null) {
+      throw new IllegalArgumentException("Authenticated user is required");
+    }
+    return user.databaseId();
   }
 
   private ResumeProfile readProfile(String snapshot) {

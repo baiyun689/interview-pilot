@@ -16,6 +16,7 @@ import org.springframework.web.multipart.MultipartFile;
 import interview.pilot.resume.application.ResumeQueryService;
 import interview.pilot.resume.application.ResumeUploadService;
 import interview.pilot.resume.application.ResumeUploadService.UploadResumeResult;
+import interview.pilot.auth.application.CurrentUserProvider;
 import interview.pilot.common.ratelimit.RateLimit;
 import interview.pilot.common.ratelimit.RateLimitScope;
 
@@ -24,17 +25,22 @@ import interview.pilot.common.ratelimit.RateLimitScope;
 public class ResumeController {
   private final ResumeUploadService uploadService;
   private final ResumeQueryService queryService;
+  private final CurrentUserProvider currentUser;
 
-  public ResumeController(ResumeUploadService uploadService, ResumeQueryService queryService) {
+  public ResumeController(
+      ResumeUploadService uploadService,
+      ResumeQueryService queryService,
+      CurrentUserProvider currentUser) {
     this.uploadService = uploadService;
     this.queryService = queryService;
+    this.currentUser = currentUser;
   }
 
   @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
   @RateLimit(scope = RateLimitScope.IP, capacity = 10, expensive = true)
   @RateLimit(scope = RateLimitScope.USER, capacity = 10, expensive = true)
   public ResponseEntity<UploadResumeResult> upload(@RequestPart("file") MultipartFile file) {
-    UploadResumeResult result = uploadService.upload(file);
+    UploadResumeResult result = uploadService.upload(currentUser.require(), file);
     HttpStatus status = result.duplicate() ? HttpStatus.OK : HttpStatus.ACCEPTED;
     return ResponseEntity.status(status).body(result);
   }
@@ -42,12 +48,12 @@ public class ResumeController {
   @GetMapping
   @RateLimit(scope = RateLimitScope.IP, capacity = 120)
   public List<ResumeResponse> list() {
-    return queryService.list();
+    return queryService.list(currentUser.require());
   }
 
   @GetMapping("/{id}")
   @RateLimit(scope = RateLimitScope.IP, capacity = 120)
   public ResumeResponse get(@PathVariable("id") Long resumeId) {
-    return queryService.get(resumeId);
+    return queryService.get(currentUser.require(), resumeId);
   }
 }

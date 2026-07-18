@@ -25,7 +25,7 @@ import org.springframework.web.multipart.MultipartFile;
 import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
-import interview.pilot.auth.infrastructure.LegacyUserAccountIdProvider;
+import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.resume.infrastructure.ResumeEntity;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 import interview.pilot.resume.infrastructure.ResumeTextExtractor;
@@ -49,7 +49,7 @@ class ResumeUploadRaceRecoveryTest {
     var winningResume = ResumeEntity.pending(1L, "winner.txt", sha256(CLEANED_TEXT), CLEANED_TEXT);
     winningResume.setId(41L);
     var winningTask = AsyncTaskEntity.pending(
-        AsyncTaskType.RESUME_ANALYSIS, "resume:41", "{\"resumeId\":41}");
+        1L, AsyncTaskType.RESUME_ANALYSIS, "resume:41", "{\"resumeId\":41}");
     winningTask.setId(84L);
     UUID publicTaskId = UUID.randomUUID();
     winningTask.setTaskId(publicTaskId);
@@ -60,13 +60,14 @@ class ResumeUploadRaceRecoveryTest {
         .thenReturn(Optional.of(winningResume));
     when(resumeRepository.saveAndFlush(any(ResumeEntity.class)))
         .thenThrow(new DataIntegrityViolationException("duplicate content_hash"));
-    when(taskRepository.findByTaskTypeAndBizKey(AsyncTaskType.RESUME_ANALYSIS, "resume:41"))
+    when(taskRepository.findByTaskTypeAndBizKeyAndUserAccountId(
+        AsyncTaskType.RESUME_ANALYSIS, "resume:41", 1L))
         .thenReturn(Optional.of(winningTask));
 
     var service = new ResumeUploadService(
-        extractor, resumeRepository, taskRepository, transactionManager,
-        new LegacyUserAccountIdProvider());
-    var result = service.upload(txt("loser.txt"));
+        extractor, resumeRepository, taskRepository, transactionManager);
+    var result = service.upload(new CurrentUser(1L, UUID.randomUUID(), "user@example.com", "User"),
+        txt("loser.txt"));
 
     assertThat(result.resumeId()).isEqualTo(41L);
     assertThat(result.analysisTaskId()).isEqualTo(publicTaskId);
@@ -80,8 +81,8 @@ class ResumeUploadRaceRecoveryTest {
     ordered.verify(transactionManager).rollback(creationStatus);
     ordered.verify(transactionManager).getTransaction(any(TransactionDefinition.class));
     ordered.verify(resumeRepository).findByUserAccountIdAndContentHash(eq(1L), anyString());
-    ordered.verify(taskRepository).findByTaskTypeAndBizKey(
-        AsyncTaskType.RESUME_ANALYSIS, "resume:41");
+    ordered.verify(taskRepository).findByTaskTypeAndBizKeyAndUserAccountId(
+        AsyncTaskType.RESUME_ANALYSIS, "resume:41", 1L);
     ordered.verify(transactionManager).commit(recoveryStatus);
   }
 

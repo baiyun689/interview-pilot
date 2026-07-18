@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import interview.pilot.async.application.AsyncTaskService;
+import interview.pilot.auth.application.CurrentUserProvider;
 import jakarta.servlet.http.HttpServletRequest;
 import interview.pilot.common.ratelimit.RateLimit;
 import interview.pilot.common.ratelimit.RateLimitScope;
@@ -19,15 +20,17 @@ import interview.pilot.common.ratelimit.RateLimitScope;
 @RequestMapping("/api/tasks")
 public class AsyncTaskController {
   private final AsyncTaskService service;
+  private final CurrentUserProvider currentUser;
 
-  public AsyncTaskController(AsyncTaskService service) {
+  public AsyncTaskController(AsyncTaskService service, CurrentUserProvider currentUser) {
     this.service = service;
+    this.currentUser = currentUser;
   }
 
   @GetMapping("/{taskId}")
   @RateLimit(scope = RateLimitScope.IP, capacity = 120)
   public AsyncTaskResponse get(@PathVariable UUID taskId) {
-    return service.get(taskId);
+    return service.get(currentUser.require(), taskId);
   }
 
   @PostMapping("/{taskId}/retry")
@@ -35,7 +38,7 @@ public class AsyncTaskController {
   @RateLimit(scope = RateLimitScope.USER, capacity = 10, expensive = true)
   @ResponseStatus(HttpStatus.ACCEPTED)
   public AsyncTaskResponse retry(@PathVariable UUID taskId, HttpServletRequest request) {
-    return service.retry(taskId, safeTraceId(request));
+    return service.retry(currentUser.require(), taskId, safeTraceId(request));
   }
 
   private UUID safeTraceId(HttpServletRequest request) {

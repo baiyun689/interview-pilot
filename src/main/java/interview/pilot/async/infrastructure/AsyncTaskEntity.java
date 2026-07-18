@@ -35,6 +35,9 @@ public class AsyncTaskEntity {
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
 
+  @Column(name = "user_account_id")
+  private Long userAccountId;
+
   @UuidGenerator
   @JdbcTypeCode(SqlTypes.CHAR)
   @Column(name = "task_id", nullable = false, unique = true, length = 36)
@@ -83,10 +86,12 @@ public class AsyncTaskEntity {
   private long version;
 
   public static AsyncTaskEntity pending(
+      Long userAccountId,
       AsyncTaskType taskType,
       String bizKey,
       String payloadSnapshot) {
     var task = new AsyncTaskEntity();
+    task.userAccountId = userAccountId;
     task.taskType = taskType;
     task.bizKey = bizKey;
     task.status = AsyncTaskStatus.PENDING;
@@ -95,5 +100,16 @@ public class AsyncTaskEntity {
     task.executionEpoch = 0;
     task.publishAttempts = 0;
     return task;
+  }
+
+  /**
+   * Transitional writer for interview work, whose owner propagation is completed with interview
+   * ownership. Owner-scoped API reads intentionally never expose tasks written through this path.
+   */
+  public static AsyncTaskEntity pending(
+      AsyncTaskType taskType,
+      String bizKey,
+      String payloadSnapshot) {
+    return pending(null, taskType, bizKey, payloadSnapshot);
   }
 }
