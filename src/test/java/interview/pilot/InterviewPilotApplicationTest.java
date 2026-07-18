@@ -1,11 +1,8 @@
 package interview.pilot;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-
-import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.audio.transcription.TranscriptionModel;
@@ -25,7 +22,6 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.redisson.api.RedissonClient;
 
 import interview.pilot.ai.provider.AiSettingRepository;
-import interview.pilot.ai.provider.AiProviderService;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 import interview.pilot.interview.infrastructure.InterviewSessionRepository;
@@ -34,10 +30,12 @@ import interview.pilot.interview.infrastructure.JobProfileRepository;
 import interview.pilot.interview.infrastructure.AnswerAttemptRepository;
 import interview.pilot.interview.infrastructure.InterviewReportRepository;
 import interview.pilot.interview.api.InterviewController;
+import interview.pilot.auth.infrastructure.UserAccountRepository;
 import org.springframework.aop.support.AopUtils;
 
 @SpringBootTest(properties = {
     "spring.flyway.enabled=false",
+    "management.health.rabbit.enabled=false",
     "spring.autoconfigure.exclude="
         + "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,"
         + "org.springframework.boot.data.jpa.autoconfigure.DataJpaRepositoriesAutoConfiguration,"
@@ -77,7 +75,7 @@ class InterviewPilotApplicationTest {
   private PlatformTransactionManager transactionManager;
 
   @MockitoBean
-  private AiProviderService aiProviderService;
+  private UserAccountRepository userAccountRepository;
 
   @Autowired
   private ApplicationContext applicationContext;
@@ -108,10 +106,14 @@ class InterviewPilotApplicationTest {
   }
 
   @Test
-  void existingApiRemainsAccessibleWithoutCredentialsDuringAuthenticationTransition() throws Exception {
-    when(aiProviderService.list()).thenReturn(List.of());
-
+  void applicationApisRequireCredentialsAfterAuthenticationIsEnabled() throws Exception {
     mockMvc.perform(get("/api/ai/providers"))
+        .andExpect(status().isUnauthorized());
+  }
+
+  @Test
+  void healthEndpointRemainsPublic() throws Exception {
+    mockMvc.perform(get("/actuator/health"))
         .andExpect(status().isOk());
   }
 }

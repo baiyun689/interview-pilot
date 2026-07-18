@@ -15,6 +15,7 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.stereotype.Component;
 
+import interview.pilot.auth.application.CurrentUserProvider;
 import jakarta.servlet.http.HttpServletRequest;
 
 @Aspect
@@ -22,10 +23,13 @@ import jakarta.servlet.http.HttpServletRequest;
 public class RateLimitAspect {
   private final RateLimiter limiter;
   private final HttpServletRequest request;
+  private final CurrentUserProvider currentUser;
 
-  public RateLimitAspect(RateLimiter limiter, HttpServletRequest request) {
+  public RateLimitAspect(
+      RateLimiter limiter, HttpServletRequest request, CurrentUserProvider currentUser) {
     this.limiter = limiter;
     this.request = request;
+    this.currentUser = currentUser;
   }
 
   @Around("@annotation(interview.pilot.common.ratelimit.RateLimit) || "
@@ -48,6 +52,7 @@ public class RateLimitAspect {
           .map(UUID.class::cast)
           .findFirst()
           .orElseThrow(() -> new IllegalStateException("Session rate limit requires a UUID argument"));
+      case USER -> "user:" + ruleBucket + ":" + currentUser.require().userId();
     };
     try {
       if (!limiter.allowFixedWindow(

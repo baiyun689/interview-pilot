@@ -32,6 +32,7 @@ public class ResumeController {
 
   @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
   @RateLimit(scope = RateLimitScope.IP, capacity = 10, expensive = true)
+  @RateLimit(scope = RateLimitScope.USER, capacity = 10, expensive = true)
   public ResponseEntity<UploadResumeResult> upload(@RequestPart("file") MultipartFile file) {
     UploadResumeResult result = uploadService.upload(file);
     HttpStatus status = result.duplicate() ? HttpStatus.OK : HttpStatus.ACCEPTED;

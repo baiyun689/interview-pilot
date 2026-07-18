@@ -40,6 +40,7 @@ public class InterviewController {
 
   @PostMapping
   @RateLimit(scope = RateLimitScope.IP, capacity = 10, expensive = true)
+  @RateLimit(scope = RateLimitScope.USER, capacity = 10, expensive = true)
   @ResponseStatus(HttpStatus.CREATED)
   public InterviewSessionResponse create(@Valid @RequestBody CreateInterviewRequest request) {
     return createService.create(request);
