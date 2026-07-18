@@ -102,14 +102,4 @@ public class AsyncTaskEntity {
     return task;
   }
 
-  /**
-   * Transitional writer for interview work, whose owner propagation is completed with interview
-   * ownership. Owner-scoped API reads intentionally never expose tasks written through this path.
-   */
-  public static AsyncTaskEntity pending(
-      AsyncTaskType taskType,
-      String bizKey,
-      String payloadSnapshot) {
-    return pending(null, taskType, bizKey, payloadSnapshot);
-  }
 }

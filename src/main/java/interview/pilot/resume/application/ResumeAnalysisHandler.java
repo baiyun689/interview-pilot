@@ -174,12 +174,13 @@ public class ResumeAnalysisHandler {
     resumeRepository.save(resume);
     taskRepository.save(task);
     return new AnalysisWork(
-        task.getTaskId(), resume.getId(), resume.getParsedText(), attemptGeneration);
+        task.getTaskId(), resume.getId(), requireOwner(task), resume.getParsedText(), attemptGeneration);
   }
 
   private Outcome complete(AnalysisWork work, String profileJson) {
     AsyncTaskEntity task = requireTask(work.taskId());
-    ResumeEntity resume = resumeRepository.findById(work.resumeId()).orElseThrow();
+    ResumeEntity resume = resumeRepository.findByIdAndUserAccountId(
+        work.resumeId(), requireOwner(task)).orElseThrow();
     if (!isCurrentProcessingAttempt(task, resume, work)) {
       return Outcome.STALE;
     }
@@ -194,7 +195,8 @@ public class ResumeAnalysisHandler {
 
   private Outcome fail(AnalysisWork work) {
     AsyncTaskEntity task = requireTask(work.taskId());
-    ResumeEntity resume = resumeRepository.findById(work.resumeId()).orElseThrow();
+    ResumeEntity resume = resumeRepository.findByIdAndUserAccountId(
+        work.resumeId(), requireOwner(task)).orElseThrow();
     if (!isCurrentProcessingAttempt(task, resume, work)) {
       return Outcome.STALE;
     }
@@ -209,7 +211,8 @@ public class ResumeAnalysisHandler {
 
   private boolean recordRetryableFailure(AnalysisWork work) {
     AsyncTaskEntity task = requireTask(work.taskId());
-    ResumeEntity resume = resumeRepository.findById(work.resumeId()).orElseThrow();
+    ResumeEntity resume = resumeRepository.findByIdAndUserAccountId(
+        work.resumeId(), requireOwner(task)).orElseThrow();
     if (!isCurrentProcessingAttempt(task, resume, work)) {
       return false;
     }
@@ -230,6 +233,10 @@ public class ResumeAnalysisHandler {
   private AsyncTaskEntity requireTask(UUID taskId) {
     return taskRepository.findByTaskId(Objects.requireNonNull(taskId, "taskId"))
         .orElseThrow(() -> new IllegalArgumentException("Resume analysis task not found"));
+  }
+
+  private static Long requireOwner(AsyncTaskEntity task) {
+    return Objects.requireNonNull(task.getUserAccountId(), "Resume analysis task owner is required");
   }
 
   private AsyncTaskEntity requireMatchingTask(TaskMessage message) {
@@ -280,7 +287,8 @@ public class ResumeAnalysisHandler {
       throw new IllegalArgumentException("Resume analysis business key is invalid");
     }
     try {
-      return resumeRepository.findById(Long.valueOf(task.getBizKey().substring(prefix.length())))
+      return resumeRepository.findByIdAndUserAccountId(
+              Long.valueOf(task.getBizKey().substring(prefix.length())), requireOwner(task))
           .orElseThrow(() -> new IllegalArgumentException("Resume not found"));
     } catch (NumberFormatException exception) {
       throw new IllegalArgumentException("Resume analysis business key is invalid");
@@ -292,6 +300,7 @@ public class ResumeAnalysisHandler {
       ResumeEntity resume,
       AnalysisWork work) {
     return task.getStatus() == AsyncTaskStatus.PUBLISHED
+        && Objects.equals(task.getUserAccountId(), work.userAccountId())
         && resume.getStatus() == ResumeStatus.ANALYZING
         && task.getAttemptCount() == work.attemptGeneration();
   }
@@ -299,6 +308,7 @@ public class ResumeAnalysisHandler {
   private record AnalysisWork(
       UUID taskId,
       Long resumeId,
+      Long userAccountId,
       String resumeText,
       int attemptGeneration) {}
 

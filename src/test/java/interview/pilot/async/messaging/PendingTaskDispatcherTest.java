@@ -161,7 +161,7 @@ class PendingTaskDispatcherTest {
 
   private AsyncTaskEntity savePending(String bizKey) {
     AsyncTaskEntity task = AsyncTaskEntity.pending(
-        AsyncTaskType.RESUME_ANALYSIS,
+        1L, AsyncTaskType.RESUME_ANALYSIS,
         bizKey,
         "{\"large\":\"payload that must remain in MySQL\"}");
     task.setTaskId(UUID.randomUUID());

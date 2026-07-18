@@ -35,6 +35,8 @@ import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.auth.application.CurrentUser;
+import interview.pilot.auth.infrastructure.UserAccountEntity;
+import interview.pilot.auth.infrastructure.UserAccountRepository;
 import interview.pilot.async.messaging.TaskMessage;
 import interview.pilot.resume.domain.ResumeProfile;
 import interview.pilot.resume.domain.ResumeStatus;
@@ -79,6 +81,9 @@ class ResumeAnalysisHandlerTest {
 
   @Autowired
   private AsyncTaskRepository taskRepository;
+
+  @Autowired
+  private UserAccountRepository users;
 
   @BeforeEach
   void cleanDatabase() {
@@ -200,6 +205,30 @@ class ResumeAnalysisHandlerTest {
     assertThat(resume.getStatus()).isEqualTo(ResumeStatus.FAILED);
     assertThat(resume.getSkillsSnapshot()).isNull();
     assertThat(resume.getFailureReason()).isEqualTo("Resume profile response was invalid");
+  }
+
+  @Test
+  void ownerMismatchedTaskCannotModifyAnotherUsersResume() {
+    UserAccountEntity otherUser = users.save(UserAccountEntity.register(
+        "other-owner-" + UUID.randomUUID() + "@example.com", "!", "Other Owner"));
+    ResumeEntity otherUsersResume = resumeRepository.saveAndFlush(ResumeEntity.pending(
+        otherUser.getId(), "other-user.txt", "b".repeat(64), "Other user resume"));
+    otherUsersResume.setSkillsSnapshot("{\"summary\":\"unchanged\"}");
+    resumeRepository.saveAndFlush(otherUsersResume);
+    String originalSnapshot = resumeRepository.findById(otherUsersResume.getId())
+        .orElseThrow().getSkillsSnapshot();
+    AsyncTaskEntity task = taskRepository.saveAndFlush(AsyncTaskEntity.pending(
+        1L, AsyncTaskType.RESUME_ANALYSIS, "resume:" + otherUsersResume.getId(), "{}"));
+
+    assertThatThrownBy(() -> handler.handle(task.getTaskId()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Resume not found");
+
+    ResumeEntity untouched = resumeRepository.findById(otherUsersResume.getId()).orElseThrow();
+    AsyncTaskEntity unchangedTask = taskRepository.findById(task.getId()).orElseThrow();
+    assertThat(untouched.getStatus()).isEqualTo(ResumeStatus.PENDING);
+    assertThat(untouched.getSkillsSnapshot()).isEqualTo(originalSnapshot);
+    assertThat(unchangedTask.getStatus()).isEqualTo(AsyncTaskStatus.PENDING);
   }
 
   @Test
