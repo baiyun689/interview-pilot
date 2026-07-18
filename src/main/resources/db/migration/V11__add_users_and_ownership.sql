@@ -29,10 +29,6 @@ UPDATE interview_session SET user_account_id = 1 WHERE user_account_id IS NULL;
 UPDATE async_task SET user_account_id = 1 WHERE user_account_id IS NULL;
 
 ALTER TABLE resume DROP INDEX uq_resume_content_hash;
-ALTER TABLE resume MODIFY user_account_id BIGINT NOT NULL;
-ALTER TABLE job_profile MODIFY user_account_id BIGINT NOT NULL;
-ALTER TABLE interview_session MODIFY user_account_id BIGINT NOT NULL;
-ALTER TABLE async_task MODIFY user_account_id BIGINT NOT NULL;
 
 ALTER TABLE resume ADD CONSTRAINT fk_resume_user
   FOREIGN KEY (user_account_id) REFERENCES user_account(id);

@@ -1,6 +1,11 @@
 package interview.pilot;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.audio.transcription.TranscriptionModel;
@@ -12,12 +17,15 @@ import org.springframework.ai.image.ImageModel;
 import org.springframework.ai.moderation.ModerationModel;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.test.web.servlet.MockMvc;
 import org.redisson.api.RedissonClient;
 
 import interview.pilot.ai.provider.AiSettingRepository;
+import interview.pilot.ai.provider.AiProviderService;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 import interview.pilot.interview.infrastructure.InterviewSessionRepository;
@@ -36,6 +44,7 @@ import org.springframework.aop.support.AopUtils;
         + "org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration,"
         + "org.redisson.spring.starter.RedissonAutoConfigurationV4"
 })
+@AutoConfigureMockMvc
 class InterviewPilotApplicationTest {
   @MockitoBean
   private RedissonClient redissonClient;
@@ -67,11 +76,17 @@ class InterviewPilotApplicationTest {
   @MockitoBean
   private PlatformTransactionManager transactionManager;
 
+  @MockitoBean
+  private AiProviderService aiProviderService;
+
   @Autowired
   private ApplicationContext applicationContext;
 
   @Autowired
   private InterviewController interviewController;
+
+  @Autowired
+  private MockMvc mockMvc;
 
   @Test
   void contextLoads() {}
@@ -90,5 +105,13 @@ class InterviewPilotApplicationTest {
     assertThat(applicationContext.getBeansOfType(TextToSpeechModel.class)).isEmpty();
     assertThat(applicationContext.getBeansOfType(StreamingTextToSpeechModel.class)).isEmpty();
     assertThat(applicationContext.getBeansOfType(ModerationModel.class)).isEmpty();
+  }
+
+  @Test
+  void existingApiRemainsAccessibleWithoutCredentialsDuringAuthenticationTransition() throws Exception {
+    when(aiProviderService.list()).thenReturn(List.of());
+
+    mockMvc.perform(get("/api/ai/providers"))
+        .andExpect(status().isOk());
   }
 }
