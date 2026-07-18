@@ -369,7 +369,7 @@ class InterviewReportListenerIT {
   }
 
   private Work completedInterview() {
-    ResumeEntity resume = resumes.saveAndFlush(ResumeEntity.pending(
+    ResumeEntity resume = resumes.saveAndFlush(ResumeEntity.pending(1L,
         "candidate.txt", UUID.randomUUID().toString().replace("-", "")
             + UUID.randomUUID().toString().replace("-", ""), "Java"));
     JobProfileEntity job = jobs.saveAndFlush(JobProfileEntity.create(

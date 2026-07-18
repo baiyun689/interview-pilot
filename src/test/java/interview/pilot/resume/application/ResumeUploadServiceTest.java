@@ -32,6 +32,7 @@ import interview.pilot.async.domain.AsyncTaskStatus;
 import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.resume.domain.ResumeStatus;
+import interview.pilot.resume.infrastructure.ResumeEntity;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 import interview.pilot.resume.infrastructure.ResumeTextExtractor;
 
@@ -88,11 +89,14 @@ class ResumeUploadServiceTest {
     assertThat(resume.getParsedText()).isEqualTo(CLEANED_TEXT);
     assertThat(resume.getContentHash()).isEqualTo(sha256(CLEANED_TEXT));
     assertThat(resume.getStatus()).isEqualTo(ResumeStatus.PENDING);
+    assertThat(resume.getUserAccountId()).isEqualTo(1L);
 
     var task = taskRepository.findByTaskTypeAndBizKey(
         AsyncTaskType.RESUME_ANALYSIS, "resume:" + result.resumeId()).orElseThrow();
     assertThat(result.analysisTaskId()).isEqualTo(task.getTaskId());
-    assertThat(taskRepository.findByTaskId(result.analysisTaskId())).contains(task);
+    assertThat(taskRepository.findByTaskId(result.analysisTaskId()))
+        .map(taskEntity -> taskEntity.getId())
+        .contains(task.getId());
     assertThat(task.getStatus()).isEqualTo(AsyncTaskStatus.PENDING);
     assertThat(task.getAttemptCount()).isZero();
     assertThat(task.getPayloadSnapshot()).contains(result.resumeId().toString());
@@ -144,6 +148,10 @@ class ResumeUploadServiceTest {
           .containsOnly(results.getFirst().analysisTaskId());
       assertThat(resumeRepository.count()).isEqualTo(1);
       assertThat(taskRepository.count()).isEqualTo(1);
+      assertThat(resumeRepository.findAll())
+          .singleElement()
+          .extracting(ResumeEntity::getUserAccountId)
+          .isEqualTo(1L);
     } finally {
       executor.shutdownNow();
     }

@@ -370,7 +370,7 @@ class ResumeAnalysisListenerIT {
   }
 
   private Work pendingWork() {
-    ResumeEntity resume = resumeRepository.saveAndFlush(ResumeEntity.pending(
+    ResumeEntity resume = resumeRepository.saveAndFlush(ResumeEntity.pending(1L,
         "candidate.txt",
         UUID.randomUUID().toString().replace("-", "")
             + UUID.randomUUID().toString().replace("-", ""),

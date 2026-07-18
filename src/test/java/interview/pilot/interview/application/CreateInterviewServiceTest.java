@@ -92,7 +92,7 @@ class CreateInterviewServiceTest {
     InterviewCreationStore store = mock(InterviewCreationStore.class);
     ObjectMapper objectMapper = new ObjectMapper();
     Validator validator = mock(Validator.class);
-    ResumeEntity pending = ResumeEntity.pending("resume.txt", "a".repeat(64), "Java");
+    ResumeEntity pending = ResumeEntity.pending(1L, "resume.txt", "a".repeat(64), "Java");
     when(resumes.findById(7L)).thenReturn(java.util.Optional.of(pending));
 
     CreateInterviewService service = new CreateInterviewService(
@@ -170,7 +170,7 @@ class CreateInterviewServiceTest {
   }
 
   private static ResumeEntity readyResume() {
-    ResumeEntity resume = ResumeEntity.pending("resume.txt", "a".repeat(64), "Java Spring");
+    ResumeEntity resume = ResumeEntity.pending(1L, "resume.txt", "a".repeat(64), "Java Spring");
     resume.setStatus(ResumeStatus.READY);
     resume.setSkillsSnapshot("""
         {"summary":"Backend engineer","technicalSkills":["Java"],"projects":[],

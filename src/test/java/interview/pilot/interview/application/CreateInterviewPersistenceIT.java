@@ -86,7 +86,7 @@ class CreateInterviewPersistenceIT {
         "Java engineer", List.of("Java"), List.of(), List.of("Reliable APIs"), List.of());
     requirements = new JobRequirements(List.of("Java", "Spring"), List.of("MySQL"));
     plan = new InterviewPlan(List.of("Java", "Spring"), 8);
-    ResumeEntity resume = ResumeEntity.pending(
+    ResumeEntity resume = ResumeEntity.pending(1L,
         "candidate.txt", UUID.randomUUID().toString().replace("-", "")
             + UUID.randomUUID().toString().replace("-", ""),
         "Built Java services");
