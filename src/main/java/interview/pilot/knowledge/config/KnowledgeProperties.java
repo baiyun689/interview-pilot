@@ -31,8 +31,8 @@ public record KnowledgeProperties(
     if (batchSize < 1) {
       throw new IllegalArgumentException("Knowledge batch size must be positive");
     }
-    if (!hasText(collectionName)) {
-      throw new IllegalArgumentException("Knowledge collection name is required");
+    if (!"knowledge_chunks_v1".equals(collectionName)) {
+      throw new IllegalArgumentException("Knowledge collection name must be knowledge_chunks_v1");
     }
     if (topK < 1) {
       throw new IllegalArgumentException("Knowledge top-K must be positive");
@@ -64,8 +64,8 @@ public record KnowledgeProperties(
       if (baseUrl == null) {
         throw new IllegalArgumentException("Embedding base URL is required");
       }
-      if (!hasText(model)) {
-        throw new IllegalArgumentException("Embedding model is required");
+      if (!"text-embedding-v3".equals(model)) {
+        throw new IllegalArgumentException("Knowledge embedding model must be text-embedding-v3");
       }
       if (dimensions != 1024) {
         throw new IllegalArgumentException("Knowledge embedding dimensions must be 1024");

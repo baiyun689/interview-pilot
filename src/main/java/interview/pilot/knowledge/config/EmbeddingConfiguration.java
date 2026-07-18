@@ -13,6 +13,7 @@ import org.springframework.ai.retry.RetryUtils;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.qdrant.QdrantVectorStore;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -44,6 +45,7 @@ public class EmbeddingConfiguration {
 
   @Bean
   @ConditionalOnProperty(prefix = "app.knowledge", name = "enabled", havingValue = "true")
+  @ConditionalOnMissingBean(name = "knowledgeQdrantClient")
   QdrantClient knowledgeQdrantClient(KnowledgeProperties properties) {
     var qdrant = properties.qdrant();
     return new QdrantClient(QdrantGrpcClient.newBuilder(qdrant.host(), qdrant.port(), false).build());

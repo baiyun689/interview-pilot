@@ -51,6 +51,8 @@ class InfrastructureConfigurationTest {
     assertTrue(application.contains("collection-name: knowledge_chunks_v1"));
     assertTrue(application.contains("dimensions: 1024"));
     assertTrue(environmentExample.contains("DASHSCOPE_EMBEDDING_MODEL=text-embedding-v3"));
+    assertFalse(compose.contains("KNOWLEDGE_COLLECTION_NAME"));
+    assertFalse(environmentExample.contains("KNOWLEDGE_COLLECTION_NAME"));
   }
 
   private String read(String path) throws IOException {
