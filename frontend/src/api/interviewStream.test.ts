@@ -14,6 +14,18 @@ function streamResponse(chunks: string[], status = 200, headers: Record<string, 
 }
 
 describe('POST SSE client', () => {
+  it('sends session credentials and the CSRF token for the answer stream', async () => {
+    document.cookie = 'XSRF-TOKEN=stream-csrf; path=/'
+    const fetchMock = vi.fn().mockResolvedValue(streamResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await postInterviewAnswerStream('s1', { requestId: 'r1', answer: 'answer' }, { onEvent: vi.fn() })
+
+    const [, init] = fetchMock.mock.calls[0]
+    expect(init).toMatchObject({ credentials: 'include' })
+    expect(new Headers(init.headers).get('X-XSRF-TOKEN')).toBe('stream-csrf')
+  })
+
   it('parses split CRLF chunks, named events, multiline data, and final buffered events', async () => {
     const fetchMock = vi.fn().mockResolvedValue(streamResponse([
       'event: FEED',

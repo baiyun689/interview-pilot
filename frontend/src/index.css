@@ -130,12 +130,79 @@ a:focus-visible {
 }
 
 .sidebar-note {
-  margin: auto 8px 0;
+  margin: 18px 8px 0;
   padding-top: 24px;
   color: #64748b;
   font-size: 12px;
   line-height: 1.7;
 }
+
+.sidebar-footer {
+  margin-top: auto;
+}
+
+.account-summary {
+  display: grid;
+  gap: 3px;
+  padding: 13px 12px;
+  border: 1px solid rgb(148 163 184 / 18%);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 5%);
+}
+
+.account-summary strong {
+  color: var(--white);
+  font-size: 13px;
+}
+
+.account-summary span {
+  overflow: hidden;
+  color: #94a3b8;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logout-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 12px 8px 0;
+  padding: 0;
+  color: #cbd5e1;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.logout-button:hover { color: var(--white); }
+
+.auth-page {
+  display: grid;
+  min-height: 100vh;
+  padding: 32px 18px;
+  place-items: center;
+}
+
+.auth-card {
+  width: min(100%, 440px);
+  padding: 32px;
+  background: rgb(255 255 255 / 94%);
+  border: 1px solid var(--slate-200);
+  border-radius: 20px;
+  box-shadow: 0 20px 50px rgb(15 23 42 / 10%);
+}
+
+.auth-card h1 { margin: 0; color: var(--slate-950); font-size: 34px; letter-spacing: -0.035em; }
+.auth-card > p:not(.eyebrow):not(.auth-switch) { margin: 12px 0 24px; color: var(--slate-500); line-height: 1.7; }
+.auth-form { display: grid; gap: 17px; }
+.auth-form label { display: grid; gap: 7px; color: var(--slate-700); font-size: 13px; font-weight: 700; }
+.auth-form input { width: 100%; padding: 11px 12px; color: var(--slate-950); background: var(--white); border: 1px solid var(--slate-300); border-radius: 10px; font: inherit; }
+.auth-form .button { margin-top: 3px; }
+.auth-switch { margin: 23px 0 0; color: var(--slate-500); font-size: 13px; }
+.auth-switch a { margin-left: 5px; color: var(--indigo-600); font-weight: 700; text-decoration: none; }
 
 .main-content {
   width: min(1120px, 100%);

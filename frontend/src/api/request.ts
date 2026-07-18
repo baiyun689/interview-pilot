@@ -48,10 +48,38 @@ export interface ApiResponse<T> {
   traceId: string | null
 }
 
+const unsafeMethods = new Set(['GET', 'HEAD', 'OPTIONS'])
+const unauthorizedHandlers = new Set<() => void>()
+
+function csrfToken(): string | null {
+  const prefix = 'XSRF-TOKEN='
+  const token = document.cookie
+    .split('; ')
+    .find((part) => part.startsWith(prefix))
+  return token ? decodeURIComponent(token.slice(prefix.length)) : null
+}
+
+export function authenticatedInit(init: RequestInit = {}): RequestInit {
+  const headers = new Headers(init.headers)
+  const method = (init.method ?? 'GET').toUpperCase()
+  const token = csrfToken()
+  if (!unsafeMethods.has(method) && token) headers.set('X-XSRF-TOKEN', token)
+  return { ...init, headers, credentials: 'include' }
+}
+
+export function onUnauthorized(handler: () => void): () => void {
+  unauthorizedHandlers.add(handler)
+  return () => unauthorizedHandlers.delete(handler)
+}
+
+export function notifyUnauthorized() {
+  unauthorizedHandlers.forEach((handler) => handler())
+}
+
 export async function requestWithMeta<T>(path: string, init?: RequestInit): Promise<ApiResponse<T>> {
   let response: Response
   try {
-    response = await fetch(path, init)
+    response = await fetch(path, authenticatedInit(init))
   } catch {
     throw new ApiClientError(0, 'NETWORK_ERROR', '网络连接失败，请检查网络后重试', null)
   }
@@ -68,6 +96,7 @@ export async function requestWithMeta<T>(path: string, init?: RequestInit): Prom
     )
   }
   if (!response.ok) {
+    if (response.status === 401) notifyUnauthorized()
     const parsed = isJson(response) && text ? await safeJson(text) : undefined
     const body = parsed && typeof parsed === 'object' ? parsed as ApiErrorBody : undefined
     const code = nonBlankString(body?.code) ?? 'HTTP_ERROR'

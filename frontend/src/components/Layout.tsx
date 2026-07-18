@@ -1,6 +1,7 @@
-import { BrainCircuit, FileText, History, PlayCircle, Settings2 } from 'lucide-react'
+import { BrainCircuit, FileText, History, LogOut, PlayCircle, Settings2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router-dom'
+import { useAuth } from '../auth/AuthProvider'
 
 interface NavigationItem {
   label: string
@@ -16,6 +17,8 @@ const navigation: NavigationItem[] = [
 ]
 
 export function Layout() {
+  const { user, logout } = useAuth()
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -39,7 +42,16 @@ export function Layout() {
             </NavLink>
           ))}
         </nav>
-        <p className="sidebar-note">专注回答，剩下的交给你的 AI 面试官。</p>
+        <div className="sidebar-footer">
+          <div className="account-summary">
+            <strong>{user?.displayName}</strong>
+            <span>{user?.email}</span>
+          </div>
+          <button className="logout-button" onClick={() => void logout().catch(() => undefined)} type="button">
+            <LogOut size={16} aria-hidden />退出登录
+          </button>
+          <p className="sidebar-note">专注回答，剩下的交给你的 AI 面试官。</p>
+        </div>
       </aside>
 
       <main className="main-content">
