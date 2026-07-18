@@ -9,6 +9,7 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.context.SecurityContextRepository;
+import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -31,16 +32,19 @@ public class AuthController {
   private final AuthService authService;
   private final AuthenticationManager authenticationManager;
   private final SecurityContextRepository securityContexts;
+  private final SessionAuthenticationStrategy sessionAuthenticationStrategy;
   private final CurrentUserProvider currentUser;
 
   public AuthController(
       AuthService authService,
       AuthenticationManager authenticationManager,
       SecurityContextRepository securityContexts,
+      SessionAuthenticationStrategy sessionAuthenticationStrategy,
       CurrentUserProvider currentUser) {
     this.authService = authService;
     this.authenticationManager = authenticationManager;
     this.securityContexts = securityContexts;
+    this.sessionAuthenticationStrategy = sessionAuthenticationStrategy;
     this.currentUser = currentUser;
   }
 
@@ -84,6 +88,7 @@ public class AuthController {
     try {
       Authentication authentication = authenticationManager.authenticate(
           UsernamePasswordAuthenticationToken.unauthenticated(email, password));
+      sessionAuthenticationStrategy.onAuthentication(authentication, request, response);
       SecurityContext context = SecurityContextHolder.createEmptyContext();
       context.setAuthentication(authentication);
       SecurityContextHolder.setContext(context);

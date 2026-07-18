@@ -32,6 +32,7 @@ public class AsyncTaskController {
 
   @PostMapping("/{taskId}/retry")
   @RateLimit(scope = RateLimitScope.IP, capacity = 10, expensive = true)
+  @RateLimit(scope = RateLimitScope.USER, capacity = 10, expensive = true)
   @ResponseStatus(HttpStatus.ACCEPTED)
   public AsyncTaskResponse retry(@PathVariable UUID taskId, HttpServletRequest request) {
     return service.retry(taskId, safeTraceId(request));

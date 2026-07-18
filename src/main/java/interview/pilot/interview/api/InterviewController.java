@@ -71,6 +71,7 @@ public class InterviewController {
       produces = MediaType.TEXT_EVENT_STREAM_VALUE)
   @RateLimit(scope = RateLimitScope.IP, capacity = 30, expensive = true)
   @RateLimit(scope = RateLimitScope.SESSION, capacity = 12, expensive = true)
+  @RateLimit(scope = RateLimitScope.USER, capacity = 30, expensive = true)
   public SseEmitter submitAnswer(
       @PathVariable UUID sessionId,
       @Valid @RequestBody SubmitAnswerRequest request) {

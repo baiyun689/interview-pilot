@@ -16,6 +16,8 @@ import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.authentication.session.ChangeSessionIdAuthenticationStrategy;
+import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
 
 import interview.pilot.auth.application.AuthService;
 import jakarta.servlet.http.HttpServletResponse;
@@ -59,5 +61,10 @@ public class SecurityConfig {
   SecurityContextRepository securityContextRepository() {
     return new DelegatingSecurityContextRepository(
         new RequestAttributeSecurityContextRepository(), new HttpSessionSecurityContextRepository());
+  }
+
+  @Bean
+  SessionAuthenticationStrategy sessionAuthenticationStrategy() {
+    return new ChangeSessionIdAuthenticationStrategy();
   }
 }

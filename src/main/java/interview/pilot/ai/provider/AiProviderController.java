@@ -32,6 +32,7 @@ public class AiProviderController {
 
   @PostMapping("/{id}/test")
   @RateLimit(scope = RateLimitScope.IP, capacity = 10, expensive = true)
+  @RateLimit(scope = RateLimitScope.USER, capacity = 10, expensive = true)
   public AiProviderService.ProviderTestResult test(@PathVariable String id) {
     return service.test(id);
   }

@@ -12,6 +12,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.ArgumentMatchers.eq;
 
 import java.time.Duration;
+import java.lang.reflect.Method;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +22,10 @@ import org.springframework.mock.web.MockHttpServletRequest;
 
 import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.auth.application.CurrentUserProvider;
+import interview.pilot.ai.provider.AiProviderController;
+import interview.pilot.async.api.AsyncTaskController;
+import interview.pilot.interview.api.InterviewController;
+import interview.pilot.interview.api.SubmitAnswerRequest;
 
 class RateLimitAspectTest {
   private RateLimiter limiter;
@@ -106,6 +111,24 @@ class RateLimitAspectTest {
 
     verify(limiter).allowFixedWindow(
         eq("user:sampleapi.userscoped:" + userId), eq(4), eq(Duration.ofSeconds(60)));
+  }
+
+  @Test
+  void everyExpensiveAuthenticatedEndpointHasAUserQuotaMatchingItsIpQuota() throws Exception {
+    assertUserQuota(AiProviderController.class.getMethod("test", String.class), 10);
+    assertUserQuota(AsyncTaskController.class.getMethod(
+        "retry", UUID.class, jakarta.servlet.http.HttpServletRequest.class), 10);
+    assertUserQuota(InterviewController.class.getMethod(
+        "submitAnswer", UUID.class, SubmitAnswerRequest.class), 30);
+  }
+
+  private static void assertUserQuota(Method method, int capacity) {
+    assertThat(method.getAnnotationsByType(RateLimit.class))
+        .anySatisfy(rule -> {
+          assertThat(rule.scope()).isEqualTo(RateLimitScope.USER);
+          assertThat(rule.capacity()).isEqualTo(capacity);
+          assertThat(rule.expensive()).isTrue();
+        });
   }
 
   static class SampleApi {

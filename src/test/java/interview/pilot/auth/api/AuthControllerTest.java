@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
@@ -146,13 +147,61 @@ class AuthControllerTest {
         .andExpect(status().isUnauthorized());
   }
 
+  @Test
+  void registerRotatesAnExistingAnonymousSessionBeforeSavingAuthentication() throws Exception {
+    UserAccountEntity account = account(45L, "register@example.com", "Register", UserStatus.ACTIVE,
+        "correct horse battery staple");
+    when(accounts.save(any(UserAccountEntity.class))).thenReturn(account);
+    when(accounts.findByEmail("register@example.com"))
+        .thenReturn(Optional.empty())
+        .thenReturn(Optional.of(account));
+    MockHttpSession anonymousSession = new MockHttpSession();
+    String previousSessionId = anonymousSession.getId();
+
+    mvc.perform(csrfPost("/api/auth/register", anonymousSession)
+            .contentType("application/json")
+            .content("""
+                {"email":"Register@Example.com","password":"correct horse battery staple",
+                 "displayName":"Register"}
+                """))
+        .andExpect(status().isCreated());
+
+    assertThat(anonymousSession.getId()).isNotEqualTo(previousSessionId);
+    mvc.perform(get("/api/auth/me").session(anonymousSession))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.email").value("register@example.com"));
+  }
+
+  @Test
+  void loginRotatesAnExistingAnonymousSessionBeforeSavingAuthentication() throws Exception {
+    UserAccountEntity account = account(46L, "login@example.com", "Login", UserStatus.ACTIVE,
+        "correct-password");
+    when(accounts.findByEmail("login@example.com")).thenReturn(Optional.of(account));
+    MockHttpSession anonymousSession = new MockHttpSession();
+    String previousSessionId = anonymousSession.getId();
+
+    mvc.perform(csrfPost("/api/auth/login", anonymousSession)
+            .contentType("application/json")
+            .content("{\"email\":\"Login@Example.com\",\"password\":\"correct-password\"}"))
+        .andExpect(status().isOk());
+
+    assertThat(anonymousSession.getId()).isNotEqualTo(previousSessionId);
+    mvc.perform(get("/api/auth/me").session(anonymousSession))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.email").value("login@example.com"));
+  }
+
   private MockHttpServletRequestBuilder csrfPost(String path) throws Exception {
-    MvcResult result = mvc.perform(get("/api/auth/me"))
+    return csrfPost(path, new MockHttpSession());
+  }
+
+  private MockHttpServletRequestBuilder csrfPost(String path, MockHttpSession session) throws Exception {
+    MvcResult csrfResult = mvc.perform(get("/api/auth/me").session(session))
         .andExpect(status().isUnauthorized())
         .andExpect(cookie().exists("XSRF-TOKEN"))
         .andReturn();
-    var token = result.getResponse().getCookie("XSRF-TOKEN");
-    return post(path).cookie(token).header("X-XSRF-TOKEN", token.getValue());
+    var token = csrfResult.getResponse().getCookie("XSRF-TOKEN");
+    return post(path).session(session).cookie(token).header("X-XSRF-TOKEN", token.getValue());
   }
 
   private UserAccountEntity account(
