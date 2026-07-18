@@ -4,9 +4,13 @@ import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
+import jakarta.persistence.EntityManagerFactory;
+
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Repository;
 
 @Repository
+@ConditionalOnBean(EntityManagerFactory.class)
 class KnowledgeDocumentRepositoryAdapter implements KnowledgeDocumentRepository {
   private final KnowledgeDocumentJpaRepository delegate;
 
