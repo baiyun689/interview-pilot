@@ -90,6 +90,18 @@ class InterviewOwnershipIT {
     Long foreignResume = readyResume(userA.getId());
     UUID sessionId = interview(userA.getId(), foreignResume);
 
+    mvc.perform(get("/api/interviews/{id}", sessionId).with(user(principal(userA))))
+        .andExpect(status().isOk());
+    mvc.perform(get("/api/interviews").with(user(principal(userA))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$[0].sessionId").value(sessionId.toString()));
+    mvc.perform(get("/api/interviews/{id}/report", sessionId).with(user(principal(userA))))
+        .andExpect(status().isConflict());
+    mvc.perform(post("/api/interviews/{id}/answers/stream", sessionId)
+            .with(user(principal(userA))).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"requestId\":\"" + UUID.randomUUID() + "\",\"answer\":\"answer\"}"))
+        .andExpect(status().isOk());
+
     mvc.perform(post("/api/interviews").with(user(principal(userB))).with(csrf())
             .contentType(MediaType.APPLICATION_JSON).content(createRequest(foreignResume)))
         .andExpect(status().isNotFound())
@@ -124,9 +136,10 @@ class InterviewOwnershipIT {
 
   private UUID interview(Long ownerId, Long resumeId) {
     JobProfileEntity job = jobs.saveAndFlush(JobProfileEntity.create(
-        "Backend Engineer", "Java services", "{\"competencies\":[\"Java\"],\"tools\":[]}"));
+        ownerId, "Backend Engineer", "Java services",
+        "{\"competencies\":[\"Java\"],\"tools\":[]}"));
     InterviewSessionEntity session = InterviewSessionEntity.create(
-        resumeId, job.getId(), Difficulty.MEDIUM, 1, "provider", "model",
+        ownerId, resumeId, job.getId(), Difficulty.MEDIUM, 1, "provider", "model",
         "{\"competencies\":[\"Java\"],\"totalTurnBudget\":1}");
     session.start();
     return sessions.saveAndFlush(session).getSessionId();

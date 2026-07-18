@@ -42,6 +42,8 @@ import interview.pilot.async.domain.AsyncTaskStatus;
 import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.application.AsyncTaskService;
 import interview.pilot.auth.application.CurrentUser;
+import interview.pilot.auth.infrastructure.UserAccountEntity;
+import interview.pilot.auth.infrastructure.UserAccountRepository;
 import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.common.exception.BusinessException;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
@@ -112,6 +114,7 @@ class InterviewReportListenerIT {
   @Autowired MeterRegistry meters;
   @Autowired ProcessingClaim claims;
   @Autowired AsyncTaskService taskService;
+  @Autowired UserAccountRepository users;
   @MockitoSpyBean InterviewReportHandler handler;
 
   @BeforeEach
@@ -446,6 +449,23 @@ class InterviewReportListenerIT {
 
   private static String anyString() {
     return org.mockito.ArgumentMatchers.anyString();
+  }
+
+  @Test
+  void taskOwnerMismatchCannotGenerateOrWriteAnotherUsersReport() {
+    Work work = completedInterview();
+    UserAccountEntity other = users.save(UserAccountEntity.register(
+        "report-mismatch-" + UUID.randomUUID() + "@example.com", "!", "Other"));
+    AsyncTaskEntity task = tasks.saveAndFlush(AsyncTaskEntity.pending(
+        other.getId(), AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + work.sessionId(),
+        "{\"sessionId\":\"" + work.sessionId() + "\"}"));
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> handler.handle(task.getTaskId()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Interview report business key is invalid");
+    verify(generator, never()).generate(anyString(), anyString(), anyList(),
+        org.mockito.ArgumentMatchers.any());
+    assertThat(reports.count()).isZero();
   }
 
   private static CurrentUser owner() {

@@ -178,13 +178,15 @@ public class SubmitAnswerService {
           sessionId, request.requestId(), claim.turnNo(), evaluation, decision, nextQuestion,
           nextDifficulty, finish ? SessionStatus.EVALUATING : SessionStatus.INTERVIEWING, false);
       String snapshot = resultCodec.write(result);
-      Boolean finalized = requiresNew.execute(status -> finalizeOwner(claim, result, snapshot));
+      Long ownerId = requireOwner(user);
+      Boolean finalized = requiresNew.execute(
+          status -> finalizeOwner(ownerId, claim, result, snapshot));
       if (!Boolean.TRUE.equals(finalized)) {
         throw conflict("ANSWER_OWNERSHIP_LOST", "The answer claim is no longer current");
       }
       return result;
     } catch (RuntimeException exception) {
-      requiresNew.executeWithoutResult(status -> markFailedIfOwner(claim));
+      requiresNew.executeWithoutResult(status -> markFailedIfOwner(requireOwner(user), claim));
       if (exception instanceof BusinessException business) {
         throw business;
       }
@@ -224,8 +226,8 @@ public class SubmitAnswerService {
     throw conflict("ANSWER_STILL_PROCESSING", "The answer is still processing; retry shortly");
   }
 
-  public void failOwner(InterviewTurnClaim claim) {
-    requiresNew.executeWithoutResult(status -> markFailedIfOwner(claim));
+  public void failOwner(CurrentUser user, InterviewTurnClaim claim) {
+    requiresNew.executeWithoutResult(status -> markFailedIfOwner(requireOwner(user), claim));
   }
 
   private WorkContext loadContext(CurrentUser user, UUID publicSessionId, InterviewTurnClaim claim) {
@@ -292,10 +294,11 @@ public class SubmitAnswerService {
   }
 
   private boolean finalizeOwner(
-      InterviewTurnClaim claim, AnswerProcessingResult result, String snapshot) {
+      Long ownerId, InterviewTurnClaim claim, AnswerProcessingResult result, String snapshot) {
     InterviewTurnEntity turn = turns.findById(claim.turnId()).orElse(null);
     AnswerAttemptEntity attempt = attempts.findById(claim.attemptId()).orElse(null);
-    InterviewSessionEntity session = sessions.findById(claim.sessionDatabaseId()).orElse(null);
+    InterviewSessionEntity session = sessions.findByIdAndUserAccountId(
+        claim.sessionDatabaseId(), ownerId).orElse(null);
     if (turn == null || attempt == null || session == null
         || turn.getStatus() != TurnStatus.PROCESSING
         || !claim.requestId().equals(turn.getRequestId())
@@ -303,6 +306,7 @@ public class SubmitAnswerService {
         || attempt.getStatus() != AnswerAttemptStatus.PROCESSING
         || !claim.requestId().equals(attempt.getRequestId())
         || !claim.sessionDatabaseId().equals(attempt.getSessionId())
+        || !claim.sessionDatabaseId().equals(turn.getSessionId())
         || !claim.turnId().equals(attempt.getTurnId())
         || !claim.answerHash().equals(attempt.getAnswerHash())
         || !claim.answerHash().equals(AnswerFingerprint.sha256(turn.getAnswerText()))
@@ -338,10 +342,12 @@ public class SubmitAnswerService {
     return true;
   }
 
-  private void markFailedIfOwner(InterviewTurnClaim claim) {
+  private void markFailedIfOwner(Long ownerId, InterviewTurnClaim claim) {
     InterviewTurnEntity turn = turns.findById(claim.turnId()).orElse(null);
     AnswerAttemptEntity attempt = attempts.findById(claim.attemptId()).orElse(null);
-    if (turn != null && attempt != null
+    InterviewSessionEntity session = sessions.findByIdAndUserAccountId(
+        claim.sessionDatabaseId(), ownerId).orElse(null);
+    if (turn != null && attempt != null && session != null
         && turn.getStatus() == TurnStatus.PROCESSING
         && claim.requestId().equals(turn.getRequestId())
         && turn.getVersion() == claim.ownerVersion()
@@ -349,6 +355,7 @@ public class SubmitAnswerService {
         && claim.requestId().equals(attempt.getRequestId())
         && claim.sessionDatabaseId().equals(attempt.getSessionId())
         && claim.turnId().equals(attempt.getTurnId())
+        && claim.sessionDatabaseId().equals(turn.getSessionId())
         && claim.answerHash().equals(attempt.getAnswerHash())
         && claim.answerHash().equals(AnswerFingerprint.sha256(turn.getAnswerText()))
         && claim.sessionDatabaseId().equals(turn.getSessionId())

@@ -12,6 +12,8 @@ public interface InterviewSessionRepository extends JpaRepository<InterviewSessi
   Optional<InterviewSessionEntity> findBySessionIdAndUserAccountId(
       UUID sessionId, Long userAccountId);
 
+  Optional<InterviewSessionEntity> findByIdAndUserAccountId(Long id, Long userAccountId);
+
   List<InterviewSessionEntity> findAllByOrderByCreatedAtDesc();
 
   List<InterviewSessionEntity> findAllByUserAccountIdOrderByCreatedAtDesc(Long userAccountId);

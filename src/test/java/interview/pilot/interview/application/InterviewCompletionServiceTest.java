@@ -3,6 +3,7 @@ package interview.pilot.interview.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Optional;
@@ -19,12 +20,15 @@ class InterviewCompletionServiceTest {
   void createsReportTaskOwnedByTheInterviewSession() {
     AsyncTaskRepository tasks = mock(AsyncTaskRepository.class);
     InterviewSessionEntity session = evaluatingSession();
-    when(tasks.findByTaskTypeAndBizKey(any(), any())).thenReturn(Optional.empty());
+    when(tasks.findByTaskTypeAndBizKeyAndUserAccountId(any(), any(), any())).thenReturn(Optional.empty());
     when(tasks.save(any(AsyncTaskEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
     AsyncTaskEntity task = new InterviewCompletionService(tasks).ensureReportTask(session);
 
     assertThat(task.getUserAccountId()).isEqualTo(1L);
+    verify(tasks).findByTaskTypeAndBizKeyAndUserAccountId(
+        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.eq(session.getUserAccountId()));
   }
 
   private static InterviewSessionEntity evaluatingSession() {
