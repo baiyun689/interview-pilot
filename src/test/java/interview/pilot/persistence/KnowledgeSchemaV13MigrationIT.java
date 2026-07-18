@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -55,6 +56,20 @@ class KnowledgeSchemaV13MigrationIT {
         + "'duplicate.txt', repeat('a', 64), 'owner-one/duplicate.txt', 'PENDING')"))
         .isInstanceOf(DuplicateKeyException.class)
         .hasMessageContaining("uq_knowledge_document_base_hash");
+    assertThatThrownBy(() -> jdbc.update("insert into knowledge_base(user_account_id, "
+        + "knowledge_base_id, name, status) values(2, uuid(), 'Bad status', 'UNKNOWN')"))
+        .isInstanceOf(DataAccessException.class)
+        .hasMessageContaining("chk_knowledge_base_status");
+    assertThatThrownBy(() -> jdbc.update("insert into knowledge_document(knowledge_base_id, "
+        + "document_id, original_filename, content_hash, storage_key, status) values(1, uuid(), "
+        + "'bad-status.txt', repeat('c', 64), 'bad-status.txt', 'UNKNOWN')"))
+        .isInstanceOf(DataAccessException.class)
+        .hasMessageContaining("chk_knowledge_document_status");
+    assertThatThrownBy(() -> jdbc.update("insert into knowledge_document(knowledge_base_id, "
+        + "document_id, original_filename, content_hash, storage_key, status) values(999999, "
+        + "uuid(), 'orphan.txt', repeat('b', 64), 'orphan.txt', 'PENDING')"))
+        .isInstanceOf(DataAccessException.class)
+        .hasMessageContaining("fk_knowledge_document_base");
   }
 
   private boolean tableExists(JdbcTemplate jdbc, String table) {

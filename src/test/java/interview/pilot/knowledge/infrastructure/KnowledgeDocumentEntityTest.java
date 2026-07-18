@@ -55,4 +55,47 @@ class KnowledgeDocumentEntityTest {
     assertThat(document.getStatus()).isEqualTo(KnowledgeDocumentStatus.FAILED);
     assertThat(document.getFailureReason()).isEqualTo("extractor timed out");
   }
+
+  @Test
+  void reindexingClearsThePreviousFailure() {
+    var document = pendingDocument();
+    document.markFailed(document.beginReindex(), "extractor timed out");
+
+    int revision = document.beginReindex();
+
+    assertThat(revision).isEqualTo(2);
+    assertThat(document.getStatus()).isEqualTo(KnowledgeDocumentStatus.PROCESSING);
+    assertThat(document.getFailureReason()).isNull();
+  }
+
+  @Test
+  void staleFailedCompletionIsRejected() {
+    var document = pendingDocument();
+    int staleRevision = document.beginReindex();
+    document.beginReindex();
+
+    assertThatIllegalStateException().isThrownBy(
+        () -> document.markFailed(staleRevision, "stale worker failure"))
+        .withMessage("Stale document index revision");
+  }
+
+  @Test
+  void deletionRejectsOldReadyAndFailedCompletions() {
+    var document = pendingDocument();
+    int processingRevision = document.beginReindex();
+    document.beginDeletion();
+
+    assertThatIllegalStateException().isThrownBy(
+        () -> document.markReady(processingRevision, "stale", 1))
+        .withMessage("Stale document index revision");
+    assertThatIllegalStateException().isThrownBy(
+        () -> document.markFailed(processingRevision, "stale"))
+        .withMessage("Stale document index revision");
+  }
+
+  private KnowledgeDocumentEntity pendingDocument() {
+    return KnowledgeDocumentEntity.pending(
+        KnowledgeBaseEntity.active(42L, "Java platform"),
+        "guide.txt", "a".repeat(64), "42/guide.txt");
+  }
 }
