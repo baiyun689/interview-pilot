@@ -36,6 +36,8 @@ dependencies {
   runtimeOnly 'com.mysql:mysql-connector-j'
 
   implementation 'org.springframework.ai:spring-ai-openai:2.0.0-M4'
+  implementation 'org.springframework.ai:spring-ai-starter-vector-store-qdrant:2.0.0-M4'
+  implementation 'io.grpc:grpc-netty-shaded:1.65.1'
   implementation 'org.yaml:snakeyaml'
 
   implementation 'org.apache.tika:tika-core:2.9.2'

@@ -79,3 +79,20 @@ app:
         model: ${KIMI_MODEL:moonshot-v1-8k}
         enabled: ${KIMI_ENABLED:false}
         timeout: ${KIMI_TIMEOUT:30s}
+  knowledge:
+    enabled: ${KNOWLEDGE_ENABLED:false}
+    files-root: ${KNOWLEDGE_FILES_ROOT:./data/knowledge}
+    chunk-size: ${KNOWLEDGE_CHUNK_SIZE:800}
+    chunk-overlap: ${KNOWLEDGE_CHUNK_OVERLAP:100}
+    batch-size: ${KNOWLEDGE_BATCH_SIZE:32}
+    collection-name: knowledge_chunks_v1
+    top-k: ${KNOWLEDGE_TOP_K:5}
+    similarity-threshold: ${KNOWLEDGE_SIMILARITY_THRESHOLD:0.72}
+    qdrant:
+      host: ${QDRANT_HOST:localhost}
+      port: ${QDRANT_PORT:6334}
+    embedding:
+      base-url: ${DASHSCOPE_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+      api-key: ${DASHSCOPE_EMBEDDING_API_KEY:}
+      model: ${DASHSCOPE_EMBEDDING_MODEL:text-embedding-v3}
+      dimensions: 1024

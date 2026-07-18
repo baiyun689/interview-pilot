@@ -47,6 +47,17 @@ services:
       retries: 10
       start_period: 20s
 
+  qdrant:
+    image: qdrant/qdrant:v1.15.4
+    volumes:
+      - qdrant_data:/qdrant/storage
+    expose: ["6333", "6334"]
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
   app:
     build:
       context: .
@@ -82,6 +93,19 @@ services:
       KIMI_MODEL: ${KIMI_MODEL:-moonshot-v1-8k}
       KIMI_ENABLED: ${KIMI_ENABLED:-false}
       KIMI_TIMEOUT: ${KIMI_TIMEOUT:-30s}
+      KNOWLEDGE_ENABLED: ${KNOWLEDGE_ENABLED:-false}
+      KNOWLEDGE_FILES_ROOT: /app/data/knowledge
+      KNOWLEDGE_CHUNK_SIZE: ${KNOWLEDGE_CHUNK_SIZE:-800}
+      KNOWLEDGE_CHUNK_OVERLAP: ${KNOWLEDGE_CHUNK_OVERLAP:-100}
+      KNOWLEDGE_BATCH_SIZE: ${KNOWLEDGE_BATCH_SIZE:-32}
+      KNOWLEDGE_COLLECTION_NAME: ${KNOWLEDGE_COLLECTION_NAME:-knowledge_chunks_v1}
+      KNOWLEDGE_TOP_K: ${KNOWLEDGE_TOP_K:-5}
+      KNOWLEDGE_SIMILARITY_THRESHOLD: ${KNOWLEDGE_SIMILARITY_THRESHOLD:-0.72}
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6334
+      DASHSCOPE_EMBEDDING_BASE_URL: ${DASHSCOPE_EMBEDDING_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode}
+      DASHSCOPE_EMBEDDING_API_KEY: ${DASHSCOPE_EMBEDDING_API_KEY:-}
+      DASHSCOPE_EMBEDDING_MODEL: ${DASHSCOPE_EMBEDDING_MODEL:-text-embedding-v3}
     expose:
       - "8080"
     depends_on:
@@ -91,6 +115,10 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    volumes:
+      - knowledge_files:/app/data/knowledge
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/actuator/health"]
       interval: 10s
@@ -118,3 +146,5 @@ volumes:
   mysql_data:
   redis_data:
   rabbitmq_data:
+  qdrant_data:
+  knowledge_files:
