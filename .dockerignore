@@ -1,0 +1,15 @@
+.git
+.gitignore
+.gradle
+.idea
+.vscode
+.env
+.env.*
+!.env.example
+build
+out
+*.log
+*.pem
+*.key
+frontend/node_modules
+frontend/dist

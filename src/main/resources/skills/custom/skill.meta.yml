@@ -1,0 +1,6 @@
+displayName: 自定义岗位
+description: 使用用户填写的岗位名称和 JD 动态生成面试重点。
+group: CUSTOM
+display: { icon: briefcase }
+defaultCompetencies: [岗位需求理解, 技术正确性, 工程实践, 边界与失败处理, 方案权衡, 沟通表达]
+references: []

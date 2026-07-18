@@ -1,0 +1,62 @@
+
+displayName: Python 后端
+description: 面向 Python、Web 框架、异步任务与服务可靠性的工程面试。
+group: JOB
+display:
+  icon: file-code
+  gradient: from-green-500 to-blue-500
+  iconBg: bg-green-100 dark:bg-green-900/30
+  iconColor: text-green-600 dark:text-green-400
+retrievalScopes:
+  - python
+  - django-flask
+  - database
+  - distributed
+defaultStages:
+  - project_deep_dive
+  - technical_depth
+  - coding_readiness
+allowedTools:
+  - rag.search
+ragKeywords:
+  - 原理
+  - 机制
+  - 设计
+  - 架构
+  - 并发
+  - 异步
+  - 协程
+  - 装饰器
+  - 元类
+  - 描述符
+  - 生成器
+  - 迭代器
+  - 缓存
+  - 事务
+  - 索引
+  - gil
+  - async
+  - coroutine
+  - decorator
+  - metaclass
+  - generator
+  - iterator
+  - cache
+  - transaction
+  - index
+  - orm
+defaultCompetencies:
+  - 项目深挖
+  - Python 核心与运行机制
+  - Web 框架
+  - 并发与异步
+  - 数据库
+  - 服务可靠性
+references:
+  - python-basic.md
+  - django-flask.md
+  - database.md
+  - distributed.md
+runtime:
+  ragEnabled: false
+  toolsEnabled: false

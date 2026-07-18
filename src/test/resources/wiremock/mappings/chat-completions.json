@@ -1,0 +1,16 @@
+{
+  "priority": 100,
+  "request": {
+    "method": "POST",
+    "urlPath": "/v1/chat/completions"
+  },
+  "response": {
+    "status": 500,
+    "jsonBody": {
+      "error": "An LLM request escaped the deterministic scenario"
+    },
+    "headers": {
+      "Content-Type": "application/json"
+    }
+  }
+}

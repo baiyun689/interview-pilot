@@ -1,0 +1,67 @@
+
+displayName: Java 后端
+description: 面向 Spring Boot、数据库、缓存、并发与分布式系统的工程面试。
+group: JOB
+display:
+  icon: code
+  gradient: from-blue-500 to-indigo-500
+  iconBg: bg-blue-100 dark:bg-blue-900/30
+  iconColor: text-blue-600 dark:text-blue-400
+retrievalScopes:
+  - java
+  - spring
+  - mysql
+  - redis
+  - system-design
+defaultStages:
+  - project_deep_dive
+  - technical_depth
+  - coding_readiness
+allowedTools:
+  - rag.search
+ragKeywords:
+  - 原理
+  - 源码
+  - 机制
+  - 设计
+  - 架构
+  - 一致性
+  - 并发
+  - 事务
+  - 索引
+  - 缓存
+  - 限流
+  - 降级
+  - 重试
+  - jvm
+  - gc
+  - 垃圾回收
+  - 类加载
+  - 字节码
+  - 锁
+  - 线程池
+  - rollback
+  - transaction
+  - concurrent
+  - index
+  - cache
+  - deadlock
+  - classloader
+defaultCompetencies:
+  - 项目深挖
+  - Java 基础与并发
+  - Spring 与事务
+  - MySQL
+  - Redis
+  - 分布式与高可用
+references:
+  - java.md
+  - spring.md
+  - mysql.md
+  - redis.md
+  - distributed.md
+  - high-availability.md
+  - mq.md
+runtime:
+  ragEnabled: false
+  toolsEnabled: false

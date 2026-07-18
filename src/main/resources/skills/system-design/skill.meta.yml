@@ -1,0 +1,63 @@
+
+displayName: 系统设计
+description: 可叠加到岗位面试中的架构、容量、可靠性与演进能力考查。
+group: SPECIALTY
+display:
+  icon: network
+  gradient: from-slate-500 to-zinc-500
+  iconBg: bg-slate-100 dark:bg-slate-800
+  iconColor: text-slate-600 dark:text-slate-300
+retrievalScopes:
+  - system-design-scenarios
+  - distributed
+  - high-availability
+  - database
+  - mq
+defaultStages:
+  - requirement_clarification
+  - architecture_design
+  - failure_analysis
+allowedTools:
+  - rag.search
+ragKeywords:
+  - 架构
+  - 设计
+  - 原理
+  - 一致性
+  - 可用性
+  - 扩展性
+  - 分布式
+  - 负载均衡
+  - 消息队列
+  - 数据库
+  - 缓存
+  - 分区
+  - 容错
+  - 限流
+  - 降级
+  - cap
+  - consistency
+  - availability
+  - scalability
+  - distributed
+  - load balancing
+  - message queue
+  - fault tolerance
+  - sharding
+  - replication
+defaultCompetencies:
+  - 需求澄清
+  - 规模估算
+  - 架构分解
+  - 数据与一致性
+  - 可用性与恢复
+  - 方案演进
+references:
+  - system-design-scenarios.md
+  - distributed.md
+  - high-availability.md
+  - database.md
+  - mq.md
+runtime:
+  ragEnabled: false
+  toolsEnabled: false

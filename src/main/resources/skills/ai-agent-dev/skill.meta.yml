@@ -1,0 +1,61 @@
+
+displayName: AI Agent 开发
+description: 面向大模型应用、Agent、Prompt、RAG 与生产可靠性的工程面试。
+group: JOB
+display:
+  icon: bot
+  gradient: from-violet-500 to-fuchsia-500
+  iconBg: bg-violet-100 dark:bg-violet-900/30
+  iconColor: text-violet-600 dark:text-violet-400
+retrievalScopes:
+  - ai-agent
+  - tool-use
+  - rag
+  - mcp
+  - system-design
+defaultStages:
+  - project_deep_dive
+  - agent_architecture
+  - tool_orchestration
+allowedTools:
+  - rag.search
+ragKeywords:
+  - 原理
+  - 架构
+  - 机制
+  - 推理
+  - 幻觉
+  - 上下文
+  - 向量
+  - 检索
+  - 微调
+  - 提示词
+  - 工具调用
+  - 编排
+  - rag
+  - embedding
+  - llm
+  - prompt
+  - fine-tuning
+  - agent
+  - inference
+  - hallucination
+  - context
+  - retrieval
+  - tool use
+  - orchestration
+  - mcp
+defaultCompetencies:
+  - Agent 架构
+  - Prompt 工程
+  - RAG 设计
+  - 工具调用
+  - 评估与可观测性
+  - 生产可靠性
+references:
+  - system-design-scenarios.md
+  - distributed.md
+  - high-availability.md
+runtime:
+  ragEnabled: false
+  toolsEnabled: false

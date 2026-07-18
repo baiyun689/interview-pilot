@@ -1,0 +1,73 @@
+spring:
+  config:
+    import: optional:file:.env[.properties]
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 11MB
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:interview_pilot}
+    username: ${MYSQL_USER:interview_pilot}
+    password: ${MYSQL_PASSWORD:interview_pilot}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
+
+server:
+  # The Compose app is reachable only through the trusted Nginx service. Nginx overwrites the
+  # forwarding chain, so Spring may safely adapt remoteAddr for per-client rate limits.
+  forward-headers-strategy: framework
+
+app:
+  rate-limit:
+    llm-max-concurrency: ${LLM_MAX_CONCURRENCY:4}
+    llm-lease: ${LLM_LEASE:90s}
+  async:
+    rabbit:
+      dispatch-interval: 10s
+      dispatch-initial-delay: 10s
+      republish-after: 30s
+      confirm-timeout: 5s
+  ai:
+    default-provider: ${AI_DEFAULT_PROVIDER:dashscope}
+    structured-max-attempts: ${AI_STRUCTURED_MAX_ATTEMPTS:2}
+    providers:
+      dashscope:
+        display-name: DashScope
+        base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode}
+        api-key: ${DASHSCOPE_API_KEY:}
+        model: ${DASHSCOPE_MODEL:qwen-plus}
+        enabled: ${DASHSCOPE_ENABLED:false}
+        timeout: ${DASHSCOPE_TIMEOUT:30s}
+      deepseek:
+        display-name: DeepSeek
+        base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+        api-key: ${DEEPSEEK_API_KEY:}
+        model: ${DEEPSEEK_MODEL:deepseek-chat}
+        enabled: ${DEEPSEEK_ENABLED:false}
+        timeout: ${DEEPSEEK_TIMEOUT:30s}
+      kimi:
+        display-name: Kimi
+        base-url: ${KIMI_BASE_URL:https://api.moonshot.cn}
+        api-key: ${KIMI_API_KEY:}
+        model: ${KIMI_MODEL:moonshot-v1-8k}
+        enabled: ${KIMI_ENABLED:false}
+        timeout: ${KIMI_TIMEOUT:30s}

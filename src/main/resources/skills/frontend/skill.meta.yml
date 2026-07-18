@@ -1,0 +1,66 @@
+
+displayName: 前端开发
+description: 面向 JavaScript、React/Vue、浏览器与前端工程质量的面试。
+group: JOB
+display:
+  icon: layout
+  gradient: from-cyan-500 to-blue-500
+  iconBg: bg-cyan-100 dark:bg-cyan-900/30
+  iconColor: text-cyan-600 dark:text-cyan-400
+retrievalScopes:
+  - javascript
+  - react-vue
+  - browser
+  - css
+  - frontend-performance
+defaultStages:
+  - project_deep_dive
+  - technical_depth
+  - coding_readiness
+allowedTools:
+  - rag.search
+ragKeywords:
+  - 原理
+  - 渲染
+  - 性能
+  - 优化
+  - 机制
+  - 闭包
+  - 原型链
+  - 作用域
+  - 事件循环
+  - 异步
+  - 虚拟dom
+  - 重绘
+  - 重排
+  - 浏览器
+  - 编译
+  - 打包
+  - closure
+  - prototype
+  - event loop
+  - virtual dom
+  - render
+  - async
+  - promise
+  - webpack
+  - vite
+  - diff
+  - reflow
+  - repaint
+  - hoisting
+  - scope
+defaultCompetencies:
+  - 项目深挖
+  - JavaScript
+  - React 与 Vue
+  - 浏览器机制
+  - 性能优化
+  - 工程质量
+references:
+  - javascript.md
+  - react-vue.md
+  - browser.md
+runtime:
+  ragEnabled: false
+  toolsEnabled: false

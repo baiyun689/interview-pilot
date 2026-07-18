@@ -1,0 +1,53 @@
+
+displayName: 测试开发
+description: 面向测试策略、自动化、CI 与质量工程的面试。
+group: JOB
+display:
+  icon: flask
+  gradient: from-amber-500 to-lime-500
+  iconBg: bg-amber-100 dark:bg-amber-900/30
+  iconColor: text-amber-600 dark:text-amber-400
+retrievalScopes:
+  - test-development
+  - automation
+  - quality
+  - ci
+defaultStages:
+  - project_deep_dive
+  - technical_depth
+  - coding_readiness
+allowedTools:
+  - rag.search
+ragKeywords:
+  - 原理
+  - 机制
+  - 覆盖率
+  - 策略
+  - 框架
+  - 自动化
+  - 性能测试
+  - 稳定性
+  - mock
+  - stub
+  - tdd
+  - bdd
+  - coverage
+  - unit test
+  - integration test
+  - performance test
+  - regression
+  - flaky
+  - assertion
+  - fixture
+defaultCompetencies:
+  - 测试策略
+  - 自动化框架
+  - 接口与性能测试
+  - CI 集成
+  - 质量度量
+  - 测试可靠性
+references:
+  - test-development.md
+runtime:
+  ragEnabled: false
+  toolsEnabled: false
