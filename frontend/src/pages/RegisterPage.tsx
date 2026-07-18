@@ -1,11 +1,13 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { ApiClientError } from '../api/request'
+import { safeReturnTo } from '../auth/returnTo'
 
 export function RegisterPage() {
   const { register } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -19,7 +21,7 @@ export function RegisterPage() {
     setMessage(null)
     try {
       await register({ displayName, email, password })
-      navigate('/resumes', { replace: true })
+      navigate(safeReturnTo(location.state), { replace: true })
     } catch (error) {
       setMessage(error instanceof ApiClientError ? error.message : '注册失败，请稍后重试')
     } finally {
@@ -40,7 +42,7 @@ export function RegisterPage() {
           {message && <div className="error-notice" role="alert"><p>{message}</p></div>}
           <button className="button button-primary" disabled={submitting} type="submit">{submitting ? '正在创建' : '创建账户'}</button>
         </form>
-        <p className="auth-switch">已有账户？<Link to="/login">去登录</Link></p>
+        <p className="auth-switch">已有账户？<Link state={location.state} to="/login">去登录</Link></p>
       </section>
     </main>
   )

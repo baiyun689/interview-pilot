@@ -1,11 +1,13 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { ApiClientError } from '../api/request'
+import { safeReturnTo } from '../auth/returnTo'
 
 export function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -18,7 +20,7 @@ export function LoginPage() {
     setMessage(null)
     try {
       await login({ email, password })
-      navigate('/resumes', { replace: true })
+      navigate(safeReturnTo(location.state), { replace: true })
     } catch (error) {
       setMessage(error instanceof ApiClientError ? error.message : '登录失败，请稍后重试')
     } finally {
@@ -38,7 +40,7 @@ export function LoginPage() {
           {message && <div className="error-notice" role="alert"><p>{message}</p></div>}
           <button className="button button-primary" disabled={submitting} type="submit">{submitting ? '正在登录' : '登录'}</button>
         </form>
-        <p className="auth-switch">还没有账户？<Link to="/register">创建账户</Link></p>
+        <p className="auth-switch">还没有账户？<Link state={location.state} to="/register">创建账户</Link></p>
       </section>
     </main>
   )

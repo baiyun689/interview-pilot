@@ -63,7 +63,9 @@ export function authenticatedInit(init: RequestInit = {}): RequestInit {
   const headers = new Headers(init.headers)
   const method = (init.method ?? 'GET').toUpperCase()
   const token = csrfToken()
-  if (!unsafeMethods.has(method) && token) headers.set('X-XSRF-TOKEN', token)
+  if (!unsafeMethods.has(method) && token && !headers.has('X-XSRF-TOKEN')) {
+    headers.set('X-XSRF-TOKEN', token)
+  }
   return { ...init, headers, credentials: 'include' }
 }
 
