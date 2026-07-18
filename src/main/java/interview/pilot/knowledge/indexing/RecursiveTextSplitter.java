@@ -6,6 +6,7 @@ import java.util.List;
 public final class RecursiveTextSplitter {
   private static final int MAX_SIZE = 1_600;
   private static final int OVERLAP_SIZE = 200;
+  private static final int MAX_CONTENT_SIZE = MAX_SIZE - OVERLAP_SIZE;
   private static final List<String> SEPARATORS = List.of(
       "\n# ", "\n## ", "\n### ", "\n#### ", "\n\n", "\n",
       "。", "！", "？", "；", ". ", "! ", "? ", "; ", ", ", " ", "");
@@ -24,7 +25,7 @@ public final class RecursiveTextSplitter {
     if (trimmed.isBlank()) {
       return;
     }
-    if (trimmed.length() <= MAX_SIZE) {
+    if (trimmed.length() <= MAX_CONTENT_SIZE) {
       chunks.add(trimmed);
       return;
     }
@@ -48,13 +49,13 @@ public final class RecursiveTextSplitter {
       if (cleanPart.isBlank()) {
         continue;
       }
-      if (cleanPart.length() > MAX_SIZE) {
+      if (cleanPart.length() > MAX_CONTENT_SIZE) {
         flush(current, chunks);
         splitRecursively(cleanPart, nextSeparatorIndex, chunks);
         continue;
       }
       String merged = merge(current.toString(), cleanPart);
-      if (merged.length() <= MAX_SIZE) {
+      if (merged.length() <= MAX_CONTENT_SIZE) {
         current.setLength(0);
         current.append(merged);
       } else {
@@ -138,11 +139,17 @@ public final class RecursiveTextSplitter {
   }
 
   private static void splitByFixedSize(String text, List<String> chunks) {
-    for (int start = 0; start < text.length(); start += MAX_SIZE) {
-      String chunk = text.substring(start, Math.min(start + MAX_SIZE, text.length())).strip();
+    for (int start = 0; start < text.length();) {
+      int end = Math.min(start + MAX_CONTENT_SIZE, text.length());
+      if (end < text.length() && Character.isHighSurrogate(text.charAt(end - 1))
+          && Character.isLowSurrogate(text.charAt(end))) {
+        end--;
+      }
+      String chunk = text.substring(start, end).strip();
       if (!chunk.isBlank()) {
         chunks.add(chunk);
       }
+      start = end;
     }
   }
 
@@ -155,26 +162,18 @@ public final class RecursiveTextSplitter {
     for (int index = 1; index < chunks.size(); index++) {
       String overlap = buildOverlap(chunks.get(index - 1));
       String current = chunks.get(index);
-      result.add(overlap.isBlank() || current.startsWith(overlap)
-          ? current : overlap + "\n" + current);
+      result.add(overlap.isBlank() ? current : overlap + current);
     }
     return result;
   }
 
   private static String buildOverlap(String text) {
-    if (text.length() <= OVERLAP_SIZE) {
-      return text.strip();
+    int start = Math.max(0, text.length() - OVERLAP_SIZE);
+    if (start > 0 && Character.isLowSurrogate(text.charAt(start))
+        && Character.isHighSurrogate(text.charAt(start - 1))) {
+      start++;
     }
-    int start = text.length() - OVERLAP_SIZE;
-    int paragraph = text.lastIndexOf("\n\n");
-    if (paragraph >= start) {
-      return text.substring(paragraph).strip();
-    }
-    int line = text.lastIndexOf('\n');
-    if (line >= start) {
-      return text.substring(line).strip();
-    }
-    return text.substring(start).strip();
+    return text.substring(start);
   }
 
   private static String normalizeLineEndings(String text) {

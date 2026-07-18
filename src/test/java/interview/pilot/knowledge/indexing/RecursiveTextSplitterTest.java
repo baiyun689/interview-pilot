@@ -18,7 +18,7 @@ class RecursiveTextSplitterTest {
 
     assertThat(chunks).hasSizeGreaterThan(1);
     assertThat(chunks).anyMatch(chunk -> chunk.contains("## PostgreSQL"));
-    assertThat(chunks).allMatch(chunk -> chunk.length() <= 1_801);
+    assertThat(chunks).allMatch(chunk -> chunk.length() <= 1_600);
   }
 
   @Test
@@ -28,8 +28,10 @@ class RecursiveTextSplitterTest {
     List<String> chunks = splitter.split(text);
 
     assertThat(chunks).hasSize(2);
-    assertThat(chunks.get(0)).hasSize(1_600);
+    assertThat(chunks.get(0)).hasSize(1_400);
     assertThat(chunks.get(1)).startsWith("a".repeat(200));
+    assertThat(chunks.get(1)).hasSizeLessThanOrEqualTo(1_600);
+    assertThat(chunks.get(0) + chunks.get(1).substring(200)).isEqualTo(text);
   }
 
   @Test
@@ -40,5 +42,18 @@ class RecursiveTextSplitterTest {
 
     assertThat(chunks).hasSizeGreaterThan(1);
     assertThat(chunks).allMatch(chunk -> chunk.contains("。"));
+  }
+
+  @Test
+  void neverSplitsASurrogatePairAtTheChunkBoundary() {
+    String text = "a".repeat(1_399) + "😀" + "b".repeat(1_400);
+
+    List<String> chunks = splitter.split(text);
+
+    assertThat(chunks).allMatch(chunk -> chunk.length() <= 1_600);
+    assertThat(chunks).allSatisfy(chunk -> {
+      assertThat(Character.isHighSurrogate(chunk.charAt(chunk.length() - 1))).isFalse();
+      assertThat(Character.isLowSurrogate(chunk.charAt(0))).isFalse();
+    });
   }
 }

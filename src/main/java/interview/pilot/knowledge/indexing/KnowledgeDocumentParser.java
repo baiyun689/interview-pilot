@@ -6,6 +6,7 @@ import java.io.InputStream;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
 import org.apache.tika.exception.TikaException;
@@ -19,14 +20,17 @@ import org.apache.tika.parser.ParseContext;
 import org.apache.tika.parser.Parser;
 import org.apache.tika.parser.pdf.PDFParserConfig;
 import org.apache.tika.sax.BodyContentHandler;
+import org.apache.poi.openxml4j.util.ZipSecureFile;
 import org.xml.sax.ContentHandler;
 import org.xml.sax.SAXException;
 
 public final class KnowledgeDocumentParser {
   static final long MAX_DOCUMENT_SIZE = 10L * 1024 * 1024;
-  private static final int MAX_EXTRACTED_CHARACTERS = 10 * 1024 * 1024;
+  private static final int MAX_EXTRACTED_CHARACTERS = 1 * 1024 * 1024;
+  private static final long MAX_DOCX_ENTRY_SIZE = 256L * 1024;
+  private static final long MAX_DOCX_ENTRY_COUNT = 100;
   private static final Map<String, Set<String>> SUPPORTED_TYPES = Map.of(
-      "md", Set.of("text/markdown", "text/plain"),
+      "md", Set.of("text/markdown", "text/x-web-markdown", "text/plain"),
       "txt", Set.of("text/plain"),
       "pdf", Set.of("application/pdf"),
       "docx", Set.of("application/vnd.openxmlformats-officedocument.wordprocessingml.document"));
@@ -39,6 +43,7 @@ public final class KnowledgeDocumentParser {
     if (input == null) {
       throw new IllegalArgumentException("Knowledge document input is required");
     }
+    configurePoiZipSecurity();
     String extension = extension(filename);
     if (size < 0 || size > MAX_DOCUMENT_SIZE) {
       throw new IllegalArgumentException("Knowledge document exceeds 10 MB");
@@ -47,15 +52,10 @@ public final class KnowledgeDocumentParser {
     if (content.length == 0) {
       return "";
     }
-    if (requiresSignature(extension)
-        && !SUPPORTED_TYPES.get(extension).contains(detectType(content, filename))) {
+    if (!SUPPORTED_TYPES.get(extension).contains(detectType(content, filename))) {
       throw new IllegalArgumentException("Knowledge document type is unsupported");
     }
     return normalize(parseContent(content, filename));
-  }
-
-  private static boolean requiresSignature(String extension) {
-    return "pdf".equals(extension) || "docx".equals(extension);
   }
 
   private static String extension(String filename) {
@@ -125,6 +125,10 @@ public final class KnowledgeDocumentParser {
     return metadata;
   }
 
+  private static void configurePoiZipSecurity() {
+    PoiZipSecurity.configure();
+  }
+
   private static String normalize(String text) {
     String normalized = CONTROL_CHARACTERS.matcher(text).replaceAll("");
     normalized = normalized.replace("\uFFFD", "");
@@ -143,6 +147,21 @@ public final class KnowledgeDocumentParser {
     public void parseEmbedded(
         InputStream stream, ContentHandler handler, Metadata metadata, boolean outputHtml) {
       // Knowledge indexing intentionally ignores embedded files and images.
+    }
+  }
+
+  private static final class PoiZipSecurity {
+    private static final AtomicBoolean CONFIGURED = new AtomicBoolean();
+
+    private static synchronized void configure() {
+      if (CONFIGURED.get()) {
+        return;
+      }
+      ZipSecureFile.setMinInflateRatio(0.01d);
+      ZipSecureFile.setMaxEntrySize(MAX_DOCX_ENTRY_SIZE);
+      ZipSecureFile.setMaxFileCount(MAX_DOCX_ENTRY_COUNT);
+      ZipSecureFile.setMaxTextSize(MAX_EXTRACTED_CHARACTERS);
+      CONFIGURED.set(true);
     }
   }
 }
