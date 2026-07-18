@@ -236,6 +236,9 @@ public class SubmitAnswerService {
         .orElseThrow(() -> new IllegalStateException("Interview session is missing"));
     InterviewTurnEntity current = turns.findById(claim.turnId())
         .orElseThrow(() -> new IllegalStateException("Interview turn is missing"));
+    if (!matchesClaimedSession(session, current, claim)) {
+      throw conflict("ANSWER_OWNERSHIP_LOST", "The answer claim is no longer current");
+    }
     if (current.getStatus() != TurnStatus.PROCESSING
         || !claim.requestId().equals(current.getRequestId())
         || current.getVersion() != claim.ownerVersion()
@@ -306,7 +309,7 @@ public class SubmitAnswerService {
         || attempt.getStatus() != AnswerAttemptStatus.PROCESSING
         || !claim.requestId().equals(attempt.getRequestId())
         || !claim.sessionDatabaseId().equals(attempt.getSessionId())
-        || !claim.sessionDatabaseId().equals(turn.getSessionId())
+        || !matchesClaimedSession(session, turn, claim)
         || !claim.turnId().equals(attempt.getTurnId())
         || !claim.answerHash().equals(attempt.getAnswerHash())
         || !claim.answerHash().equals(AnswerFingerprint.sha256(turn.getAnswerText()))
@@ -355,7 +358,7 @@ public class SubmitAnswerService {
         && claim.requestId().equals(attempt.getRequestId())
         && claim.sessionDatabaseId().equals(attempt.getSessionId())
         && claim.turnId().equals(attempt.getTurnId())
-        && claim.sessionDatabaseId().equals(turn.getSessionId())
+        && matchesClaimedSession(session, turn, claim)
         && claim.answerHash().equals(attempt.getAnswerHash())
         && claim.answerHash().equals(AnswerFingerprint.sha256(turn.getAnswerText()))
         && claim.sessionDatabaseId().equals(turn.getSessionId())
@@ -437,6 +440,14 @@ public class SubmitAnswerService {
       throw new IllegalArgumentException("Authenticated user is required");
     }
     return user.databaseId();
+  }
+
+  private boolean matchesClaimedSession(
+      InterviewSessionEntity session, InterviewTurnEntity turn, InterviewTurnClaim claim) {
+    return session != null
+        && turn != null
+        && claim.sessionDatabaseId().equals(session.getId())
+        && claim.sessionDatabaseId().equals(turn.getSessionId());
   }
 
   private static CurrentUser legacyUser() {

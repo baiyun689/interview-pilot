@@ -29,6 +29,13 @@
 - Focused controller, SSE, and completion tests plus `compileTestJava` pass. Container-backed
   report and ownership tests remain unexecutable here because Docker is unavailable.
 
+## Final review follow-up
+
+- `SubmitAnswerService` now validates the owner-scoped session ID and turn session foreign key
+  before reading the evaluator context. The same helper is used by completion and failure writes.
+- `SubmitAnswerOwnershipTest` proves a corrupted claim targeting another session's turn fails with
+  `ANSWER_OWNERSHIP_LOST`, never invokes the evaluator, and performs no turn/attempt writes.
+
 ## Compatibility note
 
 Deprecated legacy overloads remain only to keep pre-existing direct service/unit-test callers
