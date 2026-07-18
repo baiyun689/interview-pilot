@@ -13,10 +13,12 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import interview.pilot.common.exception.BusinessException;
+import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.interview.domain.SessionStatus;
 import interview.pilot.interview.domain.AnswerAttemptStatus;
 import interview.pilot.interview.domain.TurnStatus;
 import interview.pilot.interview.infrastructure.InterviewSessionRepository;
+import interview.pilot.interview.infrastructure.InterviewSessionEntity;
 import interview.pilot.interview.infrastructure.AnswerAttemptEntity;
 import interview.pilot.interview.infrastructure.AnswerAttemptRepository;
 import interview.pilot.interview.infrastructure.InterviewTurnEntity;
@@ -45,12 +47,14 @@ public class InterviewTurnClaimer {
     this.metrics = metrics;
   }
 
-  public InterviewTurnClaim claim(UUID sessionId, UUID requestId, String answer) {
+  public InterviewTurnClaim claim(CurrentUser user, UUID sessionId, UUID requestId, String answer) {
     Objects.requireNonNull(sessionId, "sessionId must not be null");
     Objects.requireNonNull(requestId, "requestId must not be null");
+    Long ownerId = requireOwner(user);
     String normalizedAnswer = normalizeAnswer(answer);
     try {
-      return requiresNew.execute(status -> createOrReplay(sessionId, requestId, normalizedAnswer));
+      return requiresNew.execute(
+          status -> createOrReplay(ownerId, sessionId, requestId, normalizedAnswer));
     } catch (ObjectOptimisticLockingFailureException
         | DataIntegrityViolationException
         | CannotAcquireLockException race) {
@@ -59,7 +63,7 @@ public class InterviewTurnClaimer {
       }
       // The failed transaction is fully rolled back before the winning row is queried.
       InterviewTurnClaim recovered = requiresNew.execute(
-          status -> recoverRace(sessionId, requestId, normalizedAnswer));
+          status -> recoverRace(ownerId, sessionId, requestId, normalizedAnswer));
       if (recovered != null) {
         return recovered;
       }
@@ -70,10 +74,14 @@ public class InterviewTurnClaimer {
     }
   }
 
-  private InterviewTurnClaim createOrReplay(UUID publicSessionId, UUID requestId, String answer) {
-    var session = sessions.findBySessionId(publicSessionId)
-        .orElseThrow(() -> new BusinessException(
-            "INTERVIEW_NOT_FOUND", "Interview session not found", HttpStatus.NOT_FOUND));
+  @Deprecated(forRemoval = true)
+  public InterviewTurnClaim claim(UUID sessionId, UUID requestId, String answer) {
+    return claim(legacyUser(), sessionId, requestId, answer);
+  }
+
+  private InterviewTurnClaim createOrReplay(
+      Long ownerId, UUID publicSessionId, UUID requestId, String answer) {
+    var session = session(ownerId, publicSessionId);
     var existing = attempts.findByRequestId(requestId);
     if (existing.isPresent()) {
       return replay(session.getId(), existing.get(), answer);
@@ -101,8 +109,9 @@ public class InterviewTurnClaimer {
     return claimOf(InterviewTurnClaim.State.OWNER, turn, attempt);
   }
 
-  private InterviewTurnClaim recoverRace(UUID publicSessionId, UUID requestId, String answer) {
-    var session = sessions.findBySessionId(publicSessionId).orElse(null);
+  private InterviewTurnClaim recoverRace(
+      Long ownerId, UUID publicSessionId, UUID requestId, String answer) {
+    var session = sessions.findBySessionIdAndUserAccountId(publicSessionId, ownerId).orElse(null);
     if (session == null) {
       return null;
     }
@@ -156,5 +165,22 @@ public class InterviewTurnClaimer {
 
   private BusinessException conflict(String code, String message) {
     return new BusinessException(code, message, HttpStatus.CONFLICT);
+  }
+
+  private InterviewSessionEntity session(Long ownerId, UUID sessionId) {
+    return sessions.findBySessionIdAndUserAccountId(sessionId, ownerId)
+        .orElseThrow(() -> new BusinessException(
+            "INTERVIEW_NOT_FOUND", "Interview session not found", HttpStatus.NOT_FOUND));
+  }
+
+  private static Long requireOwner(CurrentUser user) {
+    if (user == null || user.databaseId() == null) {
+      throw new IllegalArgumentException("Authenticated user is required");
+    }
+    return user.databaseId();
+  }
+
+  private static CurrentUser legacyUser() {
+    return new CurrentUser(1L, new UUID(0L, 1L), "legacy-demo@invalid.local", "Legacy Demo");
   }
 }

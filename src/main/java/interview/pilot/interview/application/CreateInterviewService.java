@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import interview.pilot.ai.provider.AiProviderDescriptor;
 import interview.pilot.ai.provider.AiProviderService;
 import interview.pilot.common.exception.BusinessException;
+import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.interview.api.CreateInterviewRequest;
 import interview.pilot.interview.api.InterviewSessionResponse;
 import interview.pilot.interview.domain.GeneratedQuestion;
@@ -54,8 +55,9 @@ public class CreateInterviewService {
   }
 
   /** Orchestrates remote calls without opening a database transaction. */
-  public InterviewSessionResponse create(CreateInterviewRequest request) {
-    ResumeEntity resume = resumes.findById(request.resumeId())
+  public InterviewSessionResponse create(CurrentUser user, CreateInterviewRequest request) {
+    Long ownerId = requireOwner(user);
+    ResumeEntity resume = resumes.findByIdAndUserAccountId(request.resumeId(), ownerId)
         .orElseThrow(() -> new BusinessException(
             "RESUME_NOT_FOUND", "Resume not found", HttpStatus.NOT_FOUND));
     if (resume.getStatus() != ResumeStatus.READY) {
@@ -103,8 +105,13 @@ public class CreateInterviewService {
     }
 
     return store.create(new InterviewCreation(
-        resume.getId(), title, jdText, request.difficulty(), request.totalTurnBudget(),
+        ownerId, resume.getId(), title, jdText, request.difficulty(), request.totalTurnBudget(),
         providerId, provider.model(), skill.snapshot(), requirements, plan, first));
+  }
+
+  @Deprecated(forRemoval = true)
+  public InterviewSessionResponse create(CreateInterviewRequest request) {
+    return create(legacyUser(), request);
   }
 
   private BusinessException invalidAiOutput() {
@@ -140,5 +147,17 @@ public class CreateInterviewService {
       java.util.List<String> allowed, java.util.List<String> required) {
     return required.stream().allMatch(item -> allowed.stream()
         .anyMatch(candidate -> candidate.equalsIgnoreCase(item)));
+  }
+
+  private static Long requireOwner(CurrentUser user) {
+    if (user == null || user.databaseId() == null) {
+      throw new IllegalArgumentException("Authenticated user is required");
+    }
+    return user.databaseId();
+  }
+
+  private static CurrentUser legacyUser() {
+    return new CurrentUser(1L, new java.util.UUID(0L, 1L),
+        "legacy-demo@invalid.local", "Legacy Demo");
   }
 }

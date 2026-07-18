@@ -52,6 +52,8 @@ import interview.pilot.interview.domain.NextStep;
 import interview.pilot.interview.domain.SessionStatus;
 import interview.pilot.interview.domain.TurnStatus;
 import interview.pilot.ai.provider.AiProviderProperties;
+import interview.pilot.auth.application.CurrentUser;
+import interview.pilot.auth.application.CurrentUserProvider;
 
 class InterviewSseControllerTest {
   private SubmitAnswerService answers;
@@ -71,8 +73,10 @@ class InterviewSseControllerTest {
     var sla = new InterviewProcessingSla(
         new AiProviderProperties("", Map.of(), 1), Duration.ofSeconds(1), Duration.ofSeconds(1));
     var sse = new InterviewSseService(answers, executor, sla);
+    CurrentUserProvider currentUser = mock(CurrentUserProvider.class);
+    when(currentUser.require()).thenReturn(new CurrentUser(1L, new UUID(0L, 1L), "test@example.com", "Test"));
     var controller = new InterviewController(
-        mock(CreateInterviewService.class), mock(InterviewQueryService.class), sse);
+        mock(CreateInterviewService.class), mock(InterviewQueryService.class), sse, currentUser);
     return MockMvcBuilders.standaloneSetup(controller)
         .setControllerAdvice(new GlobalExceptionHandler())
         .build();
@@ -86,8 +90,8 @@ class InterviewSseControllerTest {
     var evaluation = new AnswerEvaluation(
         84, "Good answer", List.of("version check"), List.of("retry detail"), decision);
     InterviewTurnClaim claim = ownerClaim();
-    when(answers.claim(eq(sessionId), any())).thenReturn(claim);
-    when(answers.processClaim(eq(sessionId), any(), eq(claim))).thenReturn(new AnswerProcessingResult(
+    when(answers.claim(any(), eq(sessionId), any())).thenReturn(claim);
+    when(answers.processClaim(any(), eq(sessionId), any(), eq(claim))).thenReturn(new AnswerProcessingResult(
         sessionId, requestId, 1, evaluation, decision,
         new GeneratedQuestion("Explain transaction propagation.", "Spring"),
         Difficulty.HARD, SessionStatus.INTERVIEWING, false));
@@ -118,8 +122,8 @@ class InterviewSseControllerTest {
   @Test
   void emitsOneSanitizedTypedErrorForAConflict() throws Exception {
     InterviewTurnClaim claim = ownerClaim();
-    when(answers.claim(eq(sessionId), any())).thenReturn(claim);
-    when(answers.processClaim(eq(sessionId), any(), eq(claim))).thenThrow(new BusinessException(
+    when(answers.claim(any(), eq(sessionId), any())).thenReturn(claim);
+    when(answers.processClaim(any(), eq(sessionId), any(), eq(claim))).thenThrow(new BusinessException(
         "TURN_ALREADY_CLAIMED", "The current turn was claimed by another request",
         org.springframework.http.HttpStatus.CONFLICT));
 
@@ -154,7 +158,7 @@ class InterviewSseControllerTest {
 
   @Test
   void preclaimConflictUsesHttpErrorInsteadOfSyntheticTurnZeroEvent() throws Exception {
-    when(answers.claim(eq(sessionId), any())).thenThrow(new BusinessException(
+    when(answers.claim(any(), eq(sessionId), any())).thenThrow(new BusinessException(
         "TURN_ALREADY_CLAIMED", "The current turn was claimed by another request",
         org.springframework.http.HttpStatus.CONFLICT));
 
@@ -162,7 +166,7 @@ class InterviewSseControllerTest {
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"requestId\":\"" + requestId + "\",\"answer\":\"answer\"}"))
         .andExpect(status().isConflict());
-    verify(answers, never()).processClaim(any(), any(), any());
+    verify(answers, never()).processClaim(any(), any(), any(), any());
   }
 
   @Test
@@ -173,8 +177,8 @@ class InterviewSseControllerTest {
       InterviewTurnClaim claim = ownerClaim();
       CountDownLatch processing = new CountDownLatch(1);
       CountDownLatch release = new CountDownLatch(1);
-      when(answers.claim(eq(sessionId), any())).thenReturn(claim);
-      when(answers.processClaim(eq(sessionId), any(), eq(claim))).thenAnswer(invocation -> {
+      when(answers.claim(any(), eq(sessionId), any())).thenReturn(claim);
+      when(answers.processClaim(any(), eq(sessionId), any(), eq(claim))).thenAnswer(invocation -> {
         processing.countDown();
         release.await(10, TimeUnit.SECONDS);
         return finishResult();
@@ -205,7 +209,7 @@ class InterviewSseControllerTest {
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"requestId\":\"" + requestId + "\",\"answer\":\"answer\"}"))
         .andExpect(status().isServiceUnavailable());
-    verify(answers, never()).claim(any(), any());
+    verify(answers, never()).claim(any(), any(), any());
   }
 
   @Test
@@ -219,14 +223,14 @@ class InterviewSseControllerTest {
         new AiProviderProperties("", Map.of(), 1), Duration.ofSeconds(1), Duration.ofSeconds(1));
     var sse = new InterviewSseService(answers, executor, sla);
     InterviewTurnClaim claim = ownerClaim();
-    when(answers.claim(eq(sessionId), any())).thenReturn(claim);
-    when(answers.processClaim(eq(sessionId), any(), eq(claim))).thenReturn(finishResult());
+    when(answers.claim(any(), eq(sessionId), any())).thenReturn(claim);
+    when(answers.processClaim(any(), eq(sessionId), any(), eq(claim))).thenReturn(finishResult());
 
     var emitter = sse.stream(sessionId, new SubmitAnswerRequest(requestId, "answer"));
     emitter.complete();
     executor.task.run();
 
-    verify(answers).processClaim(eq(sessionId), any(), eq(claim));
+    verify(answers).processClaim(any(), eq(sessionId), any(), eq(claim));
   }
 
   @Test
@@ -250,8 +254,8 @@ class InterviewSseControllerTest {
       }
     };
     InterviewTurnClaim claim = ownerClaim();
-    when(answers.claim(eq(sessionId), any())).thenReturn(claim);
-    when(answers.processClaim(eq(sessionId), any(), eq(claim))).thenReturn(finishResult());
+    when(answers.claim(any(), eq(sessionId), any())).thenReturn(claim);
+    when(answers.processClaim(any(), eq(sessionId), any(), eq(claim))).thenReturn(finishResult());
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
         () -> service.stream(sessionId, new SubmitAnswerRequest(requestId, "answer")))
@@ -259,7 +263,7 @@ class InterviewSseControllerTest {
         .hasMessage("SSE connection closed");
     executor.task.run();
 
-    verify(answers).processClaim(eq(sessionId), any(), eq(claim));
+    verify(answers).processClaim(any(), eq(sessionId), any(), eq(claim));
   }
 
   private InterviewTurnClaim ownerClaim() {

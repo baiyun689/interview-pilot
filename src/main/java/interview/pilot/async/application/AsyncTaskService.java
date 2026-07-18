@@ -102,7 +102,7 @@ public class AsyncTaskService {
       resume.setSkillsSnapshot(null);
     } else {
       UUID sessionId = parseInterviewId(task.getBizKey());
-      var session = sessions.findBySessionId(sessionId)
+      var session = sessions.findBySessionIdAndUserAccountId(sessionId, target.userAccountId())
           .orElseThrow(() -> conflict("TASK_STATE_INVALID", "Task state is inconsistent"));
       if (session.getStatus() != SessionStatus.EVALUATING) {
         throw conflict("TASK_STATE_INVALID", "Task state is inconsistent");

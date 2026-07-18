@@ -9,5 +9,10 @@ import java.util.List;
 public interface InterviewSessionRepository extends JpaRepository<InterviewSessionEntity, Long> {
   Optional<InterviewSessionEntity> findBySessionId(UUID sessionId);
 
+  Optional<InterviewSessionEntity> findBySessionIdAndUserAccountId(
+      UUID sessionId, Long userAccountId);
+
   List<InterviewSessionEntity> findAllByOrderByCreatedAtDesc();
+
+  List<InterviewSessionEntity> findAllByUserAccountIdOrderByCreatedAtDesc(Long userAccountId);
 }

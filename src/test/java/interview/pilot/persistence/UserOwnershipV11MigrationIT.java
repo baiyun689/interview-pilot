@@ -50,10 +50,10 @@ class UserOwnershipV11MigrationIT {
     assertThat(ownerCount(jdbc, "job_profile")).isZero();
     assertThat(ownerCount(jdbc, "interview_session")).isZero();
     assertThat(ownerCount(jdbc, "async_task")).isZero();
-    assertThat(columnNullable(jdbc, "resume")).isEqualTo("YES");
-    assertThat(columnNullable(jdbc, "job_profile")).isEqualTo("YES");
-    assertThat(columnNullable(jdbc, "interview_session")).isEqualTo("YES");
-    assertThat(columnNullable(jdbc, "async_task")).isEqualTo("YES");
+    assertThat(columnNullable(jdbc, "resume")).isEqualTo("NO");
+    assertThat(columnNullable(jdbc, "job_profile")).isEqualTo("NO");
+    assertThat(columnNullable(jdbc, "interview_session")).isEqualTo("NO");
+    assertThat(columnNullable(jdbc, "async_task")).isEqualTo("NO");
     assertThat(columnDefault(jdbc, "resume")).isNull();
     assertThat(indexColumns(jdbc, "resume", "uq_resume_user_hash"))
         .containsExactly("user_account_id", "content_hash");

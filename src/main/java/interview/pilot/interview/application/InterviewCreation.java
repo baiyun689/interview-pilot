@@ -7,6 +7,7 @@ import interview.pilot.interview.domain.JobRequirements;
 import interview.pilot.interview.skill.SkillSnapshot;
 
 public record InterviewCreation(
+    Long userAccountId,
     Long resumeId,
     String jobTitle,
     String jdText,

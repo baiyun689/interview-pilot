@@ -43,7 +43,7 @@ public class JpaInterviewCreationStore implements InterviewCreationStore {
   @Override
   @Transactional
   public InterviewSessionResponse create(InterviewCreation creation) {
-    var resume = resumes.findById(creation.resumeId())
+    var resume = resumes.findByIdAndUserAccountId(creation.resumeId(), creation.userAccountId())
         .orElseThrow(() -> new BusinessException(
             "RESUME_NOT_FOUND", "Resume not found", HttpStatus.NOT_FOUND));
     if (resume.getStatus() != ResumeStatus.READY) {
@@ -52,11 +52,11 @@ public class JpaInterviewCreationStore implements InterviewCreationStore {
     }
     try {
       var job = jobs.save(JobProfileEntity.create(
-          creation.jobTitle(), creation.jdText(),
+          creation.userAccountId(), creation.jobTitle(), creation.jdText(),
           objectMapper.writeValueAsString(creation.requirements()),
           objectMapper.writeValueAsString(creation.skillSnapshot())));
       var session = InterviewSessionEntity.create(
-          creation.resumeId(), job.getId(), creation.difficulty(), creation.totalTurnBudget(),
+          creation.userAccountId(), creation.resumeId(), job.getId(), creation.difficulty(), creation.totalTurnBudget(),
           creation.providerId(), creation.modelName(),
           objectMapper.writeValueAsString(creation.plan()));
       session.start();

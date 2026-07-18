@@ -1,6 +1,7 @@
 package interview.pilot.interview.infrastructure;
 
 import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
 
 import org.hibernate.annotations.CreationTimestamp;
@@ -34,6 +35,9 @@ public class InterviewSessionEntity {
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
+
+  @Column(name = "user_account_id", nullable = false, updatable = false)
+  private Long userAccountId;
 
   @UuidGenerator
   @JdbcTypeCode(SqlTypes.CHAR)
@@ -93,6 +97,7 @@ public class InterviewSessionEntity {
   private long version;
 
   public static InterviewSessionEntity create(
+      Long userAccountId,
       Long resumeId,
       Long jobProfileId,
       Difficulty difficulty,
@@ -101,6 +106,7 @@ public class InterviewSessionEntity {
       String modelName,
       String planSnapshot) {
     var session = new InterviewSessionEntity();
+    session.userAccountId = Objects.requireNonNull(userAccountId, "userAccountId");
     session.sessionId = UUID.randomUUID();
     session.resumeId = resumeId;
     session.jobProfileId = jobProfileId;
@@ -112,6 +118,14 @@ public class InterviewSessionEntity {
     session.modelName = modelName;
     session.planSnapshot = planSnapshot;
     return session;
+  }
+
+  @Deprecated(forRemoval = true)
+  public static InterviewSessionEntity create(
+      Long resumeId, Long jobProfileId, Difficulty difficulty, int totalTurnBudget,
+      String providerId, String modelName, String planSnapshot) {
+    return create(1L, resumeId, jobProfileId, difficulty, totalTurnBudget,
+        providerId, modelName, planSnapshot);
   }
 
   public void start() {

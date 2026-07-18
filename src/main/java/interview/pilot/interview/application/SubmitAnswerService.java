@@ -14,6 +14,7 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import interview.pilot.common.exception.BusinessException;
+import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.interview.api.SubmitAnswerRequest;
 import interview.pilot.interview.domain.AnswerEvaluation;
 import interview.pilot.interview.domain.AnswerAttemptStatus;
@@ -105,14 +106,19 @@ public class SubmitAnswerService {
   }
 
   /** All model calls and duplicate waits happen outside database transactions. */
-  public AnswerProcessingResult submit(UUID sessionId, SubmitAnswerRequest request) {
-    InterviewTurnClaim claim = claim(sessionId, request);
-    return processClaim(sessionId, request, claim);
+  public AnswerProcessingResult submit(CurrentUser user, UUID sessionId, SubmitAnswerRequest request) {
+    InterviewTurnClaim claim = claim(user, sessionId, request);
+    return processClaim(user, sessionId, request, claim);
   }
 
-  public InterviewTurnClaim claim(UUID sessionId, SubmitAnswerRequest request) {
+  @Deprecated(forRemoval = true)
+  public AnswerProcessingResult submit(UUID sessionId, SubmitAnswerRequest request) {
+    return submit(legacyUser(), sessionId, request);
+  }
+
+  public InterviewTurnClaim claim(CurrentUser user, UUID sessionId, SubmitAnswerRequest request) {
     try {
-      InterviewTurnClaim claim = claimer.claim(sessionId, request.requestId(), request.answer());
+      InterviewTurnClaim claim = claimer.claim(user, sessionId, request.requestId(), request.answer());
       if (!claim.owner()) metrics.answerDuplicate("replay");
       return claim;
     } catch (BusinessException exception) {
@@ -124,21 +130,26 @@ public class SubmitAnswerService {
     }
   }
 
+  @Deprecated(forRemoval = true)
+  public InterviewTurnClaim claim(UUID sessionId, SubmitAnswerRequest request) {
+    return claim(legacyUser(), sessionId, request);
+  }
+
   public AnswerProcessingResult processClaim(
-      UUID sessionId, SubmitAnswerRequest request, InterviewTurnClaim claim) {
+      CurrentUser user, UUID sessionId, SubmitAnswerRequest request, InterviewTurnClaim claim) {
     if (claim.state() == InterviewTurnClaim.State.COMPLETED) {
       return resultCodec.readCompleted(
           claim.persistedSnapshot(), sessionId, claim.requestId(), claim.turnNo()).asReplay();
     }
     if (claim.state() == InterviewTurnClaim.State.PROCESSING) {
-      return awaitPersistedResult(sessionId, request.requestId(), request.answer());
+      return awaitPersistedResult(user, sessionId, request.requestId(), request.answer());
     }
     if (claim.state() == InterviewTurnClaim.State.FAILED) {
       throw retryableFailure();
     }
 
     try {
-      WorkContext context = requiresNew.execute(status -> loadContext(sessionId, claim));
+      WorkContext context = requiresNew.execute(status -> loadContext(user, sessionId, claim));
       AnswerEvaluation evaluation = evaluator.evaluate(new AnswerEvaluationRequest(
           context.providerId(), context.modelName(), claim.turnNo(), context.currentDifficulty(),
           context.currentCompetency(), context.question(), context.answer(),
@@ -181,12 +192,18 @@ public class SubmitAnswerService {
     }
   }
 
+  @Deprecated(forRemoval = true)
+  public AnswerProcessingResult processClaim(
+      UUID sessionId, SubmitAnswerRequest request, InterviewTurnClaim claim) {
+    return processClaim(legacyUser(), sessionId, request, claim);
+  }
+
   private AnswerProcessingResult awaitPersistedResult(
-      UUID sessionId, UUID requestId, String answer) {
+      CurrentUser user, UUID sessionId, UUID requestId, String answer) {
     long deadline = System.nanoTime() + processingSla.processingTimeoutNanos();
     long pollInterval = POLL_INTERVAL_MILLIS;
     while (System.nanoTime() < deadline) {
-      InterviewTurnClaim observed = claimer.claim(sessionId, requestId, answer);
+      InterviewTurnClaim observed = claimer.claim(user, sessionId, requestId, answer);
       if (observed.state() == InterviewTurnClaim.State.COMPLETED) {
         return resultCodec.readCompleted(
             observed.persistedSnapshot(), sessionId, requestId, observed.turnNo()).asReplay();
@@ -211,8 +228,9 @@ public class SubmitAnswerService {
     requiresNew.executeWithoutResult(status -> markFailedIfOwner(claim));
   }
 
-  private WorkContext loadContext(UUID publicSessionId, InterviewTurnClaim claim) {
-    InterviewSessionEntity session = sessions.findBySessionId(publicSessionId)
+  private WorkContext loadContext(CurrentUser user, UUID publicSessionId, InterviewTurnClaim claim) {
+    InterviewSessionEntity session = sessions.findBySessionIdAndUserAccountId(
+        publicSessionId, requireOwner(user))
         .orElseThrow(() -> new IllegalStateException("Interview session is missing"));
     InterviewTurnEntity current = turns.findById(claim.turnId())
         .orElseThrow(() -> new IllegalStateException("Interview turn is missing"));
@@ -405,6 +423,17 @@ public class SubmitAnswerService {
 
   private BusinessException conflict(String code, String message) {
     return new BusinessException(code, message, HttpStatus.CONFLICT);
+  }
+
+  private static Long requireOwner(CurrentUser user) {
+    if (user == null || user.databaseId() == null) {
+      throw new IllegalArgumentException("Authenticated user is required");
+    }
+    return user.databaseId();
+  }
+
+  private static CurrentUser legacyUser() {
+    return new CurrentUser(1L, new UUID(0L, 1L), "legacy-demo@invalid.local", "Legacy Demo");
   }
 
   private record WorkContext(

@@ -5,7 +5,6 @@ import org.springframework.stereotype.Service;
 import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
-import interview.pilot.auth.infrastructure.LegacyUserAccountIdProvider;
 import interview.pilot.interview.domain.SessionStatus;
 import interview.pilot.interview.infrastructure.InterviewSessionEntity;
 
@@ -13,13 +12,8 @@ import interview.pilot.interview.infrastructure.InterviewSessionEntity;
 @Service
 public class InterviewCompletionService {
   private final AsyncTaskRepository tasks;
-  private final LegacyUserAccountIdProvider legacyOwner;
-
-  public InterviewCompletionService(
-      AsyncTaskRepository tasks,
-      LegacyUserAccountIdProvider legacyOwner) {
+  public InterviewCompletionService(AsyncTaskRepository tasks) {
     this.tasks = tasks;
-    this.legacyOwner = legacyOwner;
   }
 
   public AsyncTaskEntity ensureReportTask(InterviewSessionEntity session) {
@@ -28,9 +22,12 @@ public class InterviewCompletionService {
       throw new IllegalStateException("Interview must be evaluating before report work is created");
     }
     String bizKey = "interview:" + session.getSessionId();
-    return tasks.findByTaskTypeAndBizKey(AsyncTaskType.INTERVIEW_EVALUATION, bizKey)
+    Long ownerId = session.getUserAccountId();
+    if (ownerId == null) throw new IllegalStateException("Interview session owner is required");
+    return tasks.findByTaskTypeAndBizKeyAndUserAccountId(
+        AsyncTaskType.INTERVIEW_EVALUATION, bizKey, ownerId)
         .orElseGet(() -> tasks.save(AsyncTaskEntity.pending(
-            legacyOwner.currentUserAccountId(),
+            ownerId,
             AsyncTaskType.INTERVIEW_EVALUATION,
             bizKey,
             "{\"sessionId\":\"" + session.getSessionId() + "\"}")));

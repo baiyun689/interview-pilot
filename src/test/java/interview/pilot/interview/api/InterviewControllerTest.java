@@ -26,6 +26,8 @@ import interview.pilot.ai.provider.AiProviderException;
 import interview.pilot.interview.application.CreateInterviewService;
 import interview.pilot.interview.application.InterviewQueryService;
 import interview.pilot.interview.application.InterviewSseService;
+import interview.pilot.auth.application.CurrentUser;
+import interview.pilot.auth.application.CurrentUserProvider;
 import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.domain.InterviewPlan;
 import interview.pilot.interview.domain.SessionStatus;
@@ -39,6 +41,7 @@ class InterviewControllerTest {
   private CreateInterviewService createService;
   private InterviewQueryService queryService;
   private InterviewSseService sseService;
+  private CurrentUserProvider currentUser;
   private MockMvc mockMvc;
 
   @BeforeEach
@@ -46,8 +49,10 @@ class InterviewControllerTest {
     createService = mock(CreateInterviewService.class);
     queryService = mock(InterviewQueryService.class);
     sseService = mock(InterviewSseService.class);
+    currentUser = mock(CurrentUserProvider.class);
+    when(currentUser.require()).thenReturn(new CurrentUser(1L, new UUID(0L, 1L), "test@example.com", "Test"));
     mockMvc = MockMvcBuilders
-        .standaloneSetup(new InterviewController(createService, queryService, sseService))
+        .standaloneSetup(new InterviewController(createService, queryService, sseService, currentUser))
         .setControllerAdvice(new GlobalExceptionHandler())
         .build();
   }
@@ -55,7 +60,7 @@ class InterviewControllerTest {
   @Test
   void createsSessionAndReturnsFirstAskedTurn() throws Exception {
     InterviewSessionResponse response = response();
-    when(createService.create(org.mockito.ArgumentMatchers.any())).thenReturn(response);
+    when(createService.create(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any())).thenReturn(response);
 
     mockMvc.perform(post("/api/interviews")
             .contentType(MediaType.APPLICATION_JSON)
@@ -75,7 +80,7 @@ class InterviewControllerTest {
   @Test
   void getsStableSessionSnapshotWithoutResumeText() throws Exception {
     InterviewSessionResponse response = response();
-    when(queryService.get(response.sessionId())).thenReturn(response);
+    when(queryService.get(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(response.sessionId()))).thenReturn(response);
 
     mockMvc.perform(get("/api/interviews/{id}", response.sessionId()))
         .andExpect(status().isOk())
@@ -108,7 +113,7 @@ class InterviewControllerTest {
 
   @Test
   void providerErrorsAreSanitizedBadRequests() throws Exception {
-    when(createService.create(org.mockito.ArgumentMatchers.any()))
+    when(createService.create(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
         .thenThrow(new AiProviderException("secret-provider-detail"));
 
     mockMvc.perform(post("/api/interviews")
@@ -124,7 +129,7 @@ class InterviewControllerTest {
 
   @Test
   void providerCallFailuresAreSanitizedBadGatewayResponses() throws Exception {
-    when(createService.create(org.mockito.ArgumentMatchers.any()))
+    when(createService.create(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
         .thenThrow(new AiGatewayException("secret-provider-response"));
 
     performValidCreate()
@@ -138,7 +143,7 @@ class InterviewControllerTest {
 
   @Test
   void invalidStructuredAiResponsesAreSanitizedBadGatewayResponses() throws Exception {
-    when(createService.create(org.mockito.ArgumentMatchers.any()))
+    when(createService.create(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
         .thenThrow(new AiStructuredOutputException("secret-provider-response"));
 
     performValidCreate()
@@ -152,10 +157,10 @@ class InterviewControllerTest {
   void listsHistoryAndReturnsAcceptedWhileReportIsEvaluating() throws Exception {
     UUID sessionId = UUID.randomUUID();
     UUID taskId = UUID.randomUUID();
-    when(queryService.list()).thenReturn(List.of(new InterviewHistoryResponse(
+    when(queryService.list(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(new InterviewHistoryResponse(
         sessionId, "Backend", SessionStatus.EVALUATING, Difficulty.MEDIUM,
         5, 5, "deepseek", "deepseek-chat", Instant.parse("2026-07-13T00:00:00Z"), null)));
-    when(queryService.report(sessionId)).thenReturn(new ReportQueryResult(
+    when(queryService.report(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(sessionId))).thenReturn(new ReportQueryResult(
         org.springframework.http.HttpStatus.ACCEPTED,
         new InterviewReportStatusResponse(
             sessionId, SessionStatus.EVALUATING, taskId, AsyncTaskStatus.DEAD,
@@ -177,7 +182,7 @@ class InterviewControllerTest {
     UUID sessionId = UUID.randomUUID();
     var report = new InterviewReport(
         90, Map.of("Java", 91), List.of("Evidence"), List.of("Depth"), "Summary");
-    when(queryService.report(sessionId)).thenReturn(new ReportQueryResult(
+    when(queryService.report(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(sessionId))).thenReturn(new ReportQueryResult(
         org.springframework.http.HttpStatus.OK,
         new InterviewReportResponse(
             sessionId, UUID.randomUUID(), report, Instant.parse("2026-07-13T00:00:00Z"))));

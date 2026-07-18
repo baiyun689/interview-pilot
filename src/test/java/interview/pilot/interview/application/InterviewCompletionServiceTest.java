@@ -11,23 +11,20 @@ import org.junit.jupiter.api.Test;
 
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
-import interview.pilot.auth.infrastructure.LegacyUserAccountIdProvider;
 import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.infrastructure.InterviewSessionEntity;
 
 class InterviewCompletionServiceTest {
   @Test
-  void createsLegacyOwnedReportTaskUntilInterviewOwnershipIsPropagated() {
+  void createsReportTaskOwnedByTheInterviewSession() {
     AsyncTaskRepository tasks = mock(AsyncTaskRepository.class);
-    LegacyUserAccountIdProvider owners = mock(LegacyUserAccountIdProvider.class);
-    when(owners.currentUserAccountId()).thenReturn(73L);
     InterviewSessionEntity session = evaluatingSession();
     when(tasks.findByTaskTypeAndBizKey(any(), any())).thenReturn(Optional.empty());
     when(tasks.save(any(AsyncTaskEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-    AsyncTaskEntity task = new InterviewCompletionService(tasks, owners).ensureReportTask(session);
+    AsyncTaskEntity task = new InterviewCompletionService(tasks).ensureReportTask(session);
 
-    assertThat(task.getUserAccountId()).isEqualTo(73L);
+    assertThat(task.getUserAccountId()).isEqualTo(1L);
   }
 
   private static InterviewSessionEntity evaluatingSession() {
