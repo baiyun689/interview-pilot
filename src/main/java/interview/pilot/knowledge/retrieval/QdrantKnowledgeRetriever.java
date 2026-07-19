@@ -17,6 +17,7 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.stereotype.Component;
 
+import interview.pilot.common.observability.AiMetrics;
 import interview.pilot.knowledge.config.KnowledgeProperties;
 
 @Component
@@ -26,11 +27,14 @@ public class QdrantKnowledgeRetriever implements KnowledgeRetriever {
 
   private final VectorStore vectorStore;
   private final KnowledgeProperties properties;
+  private final AiMetrics metrics;
   private final String embeddingModel;
 
-  public QdrantKnowledgeRetriever(VectorStore vectorStore, KnowledgeProperties properties) {
+  public QdrantKnowledgeRetriever(
+      VectorStore vectorStore, KnowledgeProperties properties, AiMetrics metrics) {
     this.vectorStore = vectorStore;
     this.properties = properties;
+    this.metrics = metrics;
     this.embeddingModel = properties.embedding().model();
   }
 
@@ -51,16 +55,19 @@ public class QdrantKnowledgeRetriever implements KnowledgeRetriever {
       Duration latency = Duration.ofNanos(System.nanoTime() - started);
 
       if (results.isEmpty()) {
+        metrics.knowledgeRetrievalDuration("NO_MATCH", latency, 0);
         return RetrievedKnowledge.noMatch(intent.query(), embeddingModel, latency);
       }
 
       List<KnowledgeChunk> chunks = deduplicate(toChunks(results), intent.topK());
+      metrics.knowledgeRetrievalDuration("RETRIEVED", latency, chunks.size());
       return new RetrievedKnowledge(
           RetrievalStatus.RETRIEVED, intent.query(), embeddingModel,
           chunks, latency, null);
     } catch (RuntimeException exception) {
       Duration latency = Duration.ofNanos(System.nanoTime() - started);
       log.warn("Knowledge retrieval failed for user {}", scope.userId(), exception);
+      metrics.knowledgeRetrievalDuration("UNAVAILABLE", latency, 0);
       return RetrievedKnowledge.unavailable(
           intent.query(), embeddingModel, describe(exception), latency);
     }

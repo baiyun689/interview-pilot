@@ -61,11 +61,14 @@ class QdrantKnowledgeRetrieverIT {
   @Autowired
   private KnowledgeProperties properties;
 
+  @Autowired
+  private interview.pilot.common.observability.AiMetrics metrics;
+
   private KnowledgeRetriever retriever;
 
   @BeforeEach
   void setUp() {
-    retriever = new QdrantKnowledgeRetriever(vectorStore, properties);
+    retriever = new QdrantKnowledgeRetriever(vectorStore, properties, metrics);
     // Prepare sample data with pre-computed embeddings
     embedAndStore(USER_A, KB_A, DOC_A1, 1, 0, "Java Spring事务传播机制详解 PROPAGATION_REQUIRED REQUIRES_NEW");
     embedAndStore(USER_A, KB_A, DOC_A1, 1, 1, "MyBatis缓存策略一级缓存二级缓存工作原理");
@@ -126,7 +129,7 @@ class QdrantKnowledgeRetrieverIT {
   void returnsUnavailableWhenVectorStoreFails() {
     // Given a retriever backed by a failing store
     var failingRetriever = new QdrantKnowledgeRetriever(
-        new FailingVectorStore(), properties);
+        new FailingVectorStore(), properties, metrics);
     var scope = new ValidatedKnowledgeScope(
         USER_A, List.of(KB_A),
         List.of(new ValidatedKnowledgeScope.DocumentRevision(DOC_A1, 1)),
