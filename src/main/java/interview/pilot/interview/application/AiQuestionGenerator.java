@@ -12,6 +12,7 @@ import interview.pilot.interview.domain.InterviewPlan;
 import interview.pilot.interview.domain.JobRequirements;
 import interview.pilot.interview.domain.QuestionContext;
 import interview.pilot.interview.rag.RagContextSnapshot;
+import interview.pilot.interview.rag.RagStatus;
 import interview.pilot.resume.domain.ResumeProfile;
 import interview.pilot.interview.skill.SkillSnapshot;
 
@@ -77,8 +78,12 @@ public class AiQuestionGenerator implements QuestionGenerator {
       String expectedModel,
       QuestionContext context,
       InterviewDecision decision) {
-    String data = "\n<untrusted_context_json>\n" + json.encode(java.util.Map.of(
-        "context", context, "validatedDecision", decision))
+    var rag = context.ragSnapshot() != null ? context.ragSnapshot()
+        : RagContextSnapshot.notConfigured();
+    var data = "\n<untrusted_context_json>\n" + json.encode(java.util.Map.of(
+        "context", context, "validatedDecision", decision,
+        "retrievedKnowledge", rag.status() == RagStatus.RETRIEVED ? rag
+            : java.util.Map.of("status", rag.status().name())))
         + "\n</untrusted_context_json>";
     return output.invoke(new AiRequest(
         providerId, expectedModel, systemPrompt, nextPrompt + data, GeneratedQuestion.class),

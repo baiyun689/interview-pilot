@@ -5,6 +5,8 @@ import java.util.Objects;
 import interview.pilot.resume.domain.ResumeProfile;
 import interview.pilot.interview.skill.SkillSnapshot;
 
+import interview.pilot.interview.rag.RagContextSnapshot;
+
 public record QuestionContext(
     InterviewPlan plan,
     ResumeProfile resume,
@@ -12,12 +14,26 @@ public record QuestionContext(
     Difficulty difficulty,
     String previousQuestion,
     String previousAnswer,
-    SkillSnapshot skill) {
+    SkillSnapshot skill,
+    RagContextSnapshot ragSnapshot) {
 
   public QuestionContext(
       InterviewPlan plan, ResumeProfile resume, JobRequirements job, Difficulty difficulty,
       String previousQuestion, String previousAnswer) {
-    this(plan, resume, job, difficulty, previousQuestion, previousAnswer, null);
+    this(plan, resume, job, difficulty, previousQuestion, previousAnswer, null,
+        RagContextSnapshot.notConfigured());
+  }
+
+  public QuestionContext(
+      InterviewPlan plan, ResumeProfile resume, JobRequirements job, Difficulty difficulty,
+      String previousQuestion, String previousAnswer, SkillSnapshot skill) {
+    this(plan, resume, job, difficulty, previousQuestion, previousAnswer, skill,
+        RagContextSnapshot.notConfigured());
+  }
+
+  public QuestionContext withRag(RagContextSnapshot rag) {
+    return new QuestionContext(plan, resume, job, difficulty, previousQuestion, previousAnswer,
+        skill, rag != null ? rag : RagContextSnapshot.notConfigured());
   }
 
   public QuestionContext {
@@ -27,6 +43,7 @@ public record QuestionContext(
     Objects.requireNonNull(difficulty, "difficulty must not be null");
     previousQuestion = normalize(previousQuestion, "previousQuestion");
     previousAnswer = normalize(previousAnswer, "previousAnswer");
+    ragSnapshot = ragSnapshot == null ? RagContextSnapshot.notConfigured() : ragSnapshot;
   }
 
   private static String normalize(String value, String name) {

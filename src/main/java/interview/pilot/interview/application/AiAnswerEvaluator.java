@@ -28,10 +28,15 @@ public class AiAnswerEvaluator implements AnswerEvaluator {
 
   @Override
   public AnswerEvaluation evaluate(AnswerEvaluationRequest request) {
+    var rag = request.ragContext() != null ? request.ragContext()
+        : interview.pilot.interview.rag.RagContextSnapshot.notConfigured();
+    var data = json.encode(java.util.Map.of(
+        "request", request,
+        "ragContext", rag.status() == interview.pilot.interview.rag.RagStatus.RETRIEVED
+            ? rag : java.util.Map.of("status", rag.status().name())));
     return output.invoke(new AiRequest(
         request.providerId(), request.modelName(), systemPrompt,
-        userPrompt + "\n<untrusted_context_json>\n" + json.encode(request)
-            + "\n</untrusted_context_json>",
+        userPrompt + "\n<untrusted_context_json>\n" + data + "\n</untrusted_context_json>",
         AnswerEvaluation.class), AnswerEvaluation.class);
   }
 }

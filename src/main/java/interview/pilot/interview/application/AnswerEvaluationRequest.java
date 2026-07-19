@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Objects;
 
 import interview.pilot.interview.domain.Difficulty;
+import interview.pilot.interview.rag.RagContextSnapshot;
 import interview.pilot.interview.skill.SkillSnapshot;
 
 public record AnswerEvaluationRequest(
@@ -17,14 +18,16 @@ public record AnswerEvaluationRequest(
     List<String> requiredCompetencies,
     List<String> allowedCompetencies,
     List<String> priorEvidence,
-    SkillSnapshot skill) {
+    SkillSnapshot skill,
+    RagContextSnapshot ragContext) {
 
   public AnswerEvaluationRequest(
       String providerId, String modelName, int turnNo, Difficulty difficulty,
       String competency, String question, String answer, List<String> requiredCompetencies,
       List<String> allowedCompetencies, List<String> priorEvidence) {
     this(providerId, modelName, turnNo, difficulty, competency, question, answer,
-        requiredCompetencies, allowedCompetencies, priorEvidence, null);
+        requiredCompetencies, allowedCompetencies, priorEvidence, null,
+        RagContextSnapshot.notConfigured());
   }
 
   public AnswerEvaluationRequest {

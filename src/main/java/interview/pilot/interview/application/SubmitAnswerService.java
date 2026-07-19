@@ -37,7 +37,13 @@ import interview.pilot.interview.infrastructure.InterviewSessionRepository;
 import interview.pilot.interview.infrastructure.InterviewTurnEntity;
 import interview.pilot.interview.infrastructure.InterviewTurnRepository;
 import interview.pilot.interview.infrastructure.JobProfileRepository;
+import interview.pilot.interview.rag.RagContextSnapshot;
+import interview.pilot.interview.rag.RagStatus;
 import interview.pilot.interview.skill.SkillSnapshot;
+import interview.pilot.knowledge.retrieval.KnowledgeRetriever;
+import interview.pilot.knowledge.retrieval.KnowledgeScopeResolver;
+import interview.pilot.knowledge.retrieval.RetrievalIntent;
+import interview.pilot.knowledge.retrieval.ValidatedKnowledgeScope;
 import interview.pilot.resume.domain.ResumeProfile;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 import interview.pilot.common.observability.AiMetrics;
@@ -68,6 +74,8 @@ public class SubmitAnswerService {
   private final Validator validator;
   private final InterviewProcessingSla processingSla;
   private final InterviewCompletionService completionService;
+  private final KnowledgeScopeResolver scopeResolver;
+  private final KnowledgeRetriever retriever;
   private final TransactionTemplate requiresNew;
   private final AiMetrics metrics;
 
@@ -85,6 +93,8 @@ public class SubmitAnswerService {
       Validator validator,
       InterviewProcessingSla processingSla,
       InterviewCompletionService completionService,
+      KnowledgeScopeResolver scopeResolver,
+      KnowledgeRetriever retriever,
       PlatformTransactionManager transactionManager,
       AiMetrics metrics) {
     this.claimer = claimer;
@@ -100,6 +110,8 @@ public class SubmitAnswerService {
     this.validator = validator;
     this.processingSla = processingSla;
     this.completionService = completionService;
+    this.scopeResolver = scopeResolver;
+    this.retriever = retriever;
     this.requiresNew = new TransactionTemplate(transactionManager);
     this.requiresNew.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     this.metrics = metrics;
@@ -150,11 +162,13 @@ public class SubmitAnswerService {
 
     try {
       WorkContext context = requiresNew.execute(status -> loadContext(user, sessionId, claim));
+      // Use the current turn's RAG snapshot for evaluation
+      RagContextSnapshot currentRag = readRagSnapshot(claim);
       AnswerEvaluation evaluation = evaluator.evaluate(new AnswerEvaluationRequest(
           context.providerId(), context.modelName(), claim.turnNo(), context.currentDifficulty(),
           context.currentCompetency(), context.question(), context.answer(),
           context.requirements().competencies(), context.plan().competencies(),
-          context.priorEvidence(), context.skill()));
+          context.priorEvidence(), context.skill(), currentRag));
       if (evaluation == null) {
         throw new IllegalStateException("Answer evaluator returned no result");
       }
@@ -167,16 +181,21 @@ public class SubmitAnswerService {
       Difficulty nextDifficulty = adjust(context.currentDifficulty(), decision.difficultyAdjustment());
       boolean finish = decision.nextStep() == NextStep.FINISH
           || claim.turnNo() >= context.plan().totalTurnBudget();
+      // Retrieve next RAG snapshot after Java decision
+      RagContextSnapshot nextRag = finish
+          ? RagContextSnapshot.notConfigured()
+          : retrieveNextRag(user, sessionId, context, decision, nextDifficulty);
       GeneratedQuestion nextQuestion = finish ? null : questionGenerator.nextQuestion(
           context.providerId(), context.modelName(),
           new QuestionContext(
               context.plan(), context.resume(), context.requirements(), nextDifficulty,
-              context.question(), context.answer(), context.skill()),
+              context.question(), context.answer(), context.skill()).withRag(nextRag),
           decision);
       validateNextQuestion(nextQuestion, decision, context.plan(), finish);
       AnswerProcessingResult result = new AnswerProcessingResult(
           sessionId, request.requestId(), claim.turnNo(), evaluation, decision, nextQuestion,
-          nextDifficulty, finish ? SessionStatus.EVALUATING : SessionStatus.INTERVIEWING, false);
+          nextDifficulty, finish ? SessionStatus.EVALUATING : SessionStatus.INTERVIEWING, false,
+          nextRag);
       String snapshot = resultCodec.write(result);
       Long ownerId = requireOwner(user);
       Boolean finalized = requiresNew.execute(
@@ -334,9 +353,15 @@ public class SubmitAnswerService {
       completionService.ensureReportTask(session);
     } else {
       int nextTurnNo = claim.turnNo() + 1;
-      turns.save(InterviewTurnEntity.nextAsked(
+      var nextTurn = InterviewTurnEntity.nextAsked(
           session.getId(), nextTurnNo, result.nextDifficulty(),
-          result.nextQuestion().question(), result.nextQuestion().targetCompetency()));
+          result.nextQuestion().question(), result.nextQuestion().targetCompetency());
+      if (!result.nextRagSnapshot().equals(RagContextSnapshot.notConfigured())) {
+        nextTurn.setRagStatus(result.nextRagSnapshot().status());
+        nextTurn.setRagContextSnapshot(
+            objectMapper.writeValueAsString(result.nextRagSnapshot()));
+      }
+      turns.save(nextTurn);
       session.advanceTo(nextTurnNo, result.nextDifficulty());
     }
     sessions.saveAndFlush(session);
@@ -452,6 +477,60 @@ public class SubmitAnswerService {
 
   private static CurrentUser legacyUser() {
     return new CurrentUser(1L, new UUID(0L, 1L), "legacy-demo@invalid.local", "Legacy Demo");
+  }
+
+  private RagContextSnapshot readRagSnapshot(InterviewTurnClaim claim) {
+    try {
+      var turn = turns.findById(claim.turnId()).orElse(null);
+      if (turn == null || turn.getRagContextSnapshot() == null) {
+        return RagContextSnapshot.notConfigured();
+      }
+      return objectMapper.readValue(turn.getRagContextSnapshot(), RagContextSnapshot.class);
+    } catch (JacksonException | IllegalArgumentException exception) {
+      return RagContextSnapshot.notConfigured();
+    }
+  }
+
+  private RagContextSnapshot retrieveNextRag(
+      CurrentUser user, UUID sessionId, WorkContext context,
+      InterviewDecision decision, Difficulty nextDifficulty) {
+    try {
+      var session = sessions.findBySessionIdAndUserAccountId(sessionId, requireOwner(user))
+          .orElse(null);
+      if (session == null || session.getKnowledgeScopeSnapshot() == null) {
+        return RagContextSnapshot.notConfigured();
+      }
+      var scope = objectMapper.readValue(
+          session.getKnowledgeScopeSnapshot(), ValidatedKnowledgeScope.class);
+      var query = decision.targetCompetency() + " "
+          + (decision.probeFocus() != null ? decision.probeFocus() + " " : "")
+          + nextDifficulty.name().toLowerCase(Locale.ROOT);
+      var intent = new RetrievalIntent(
+          query, decision.targetCompetency(), nextDifficulty.name(),
+          context.plan().competencies(), List.of(), 5, 0.5);
+      var result = retriever.retrieve(scope, intent);
+      return new RagContextSnapshot(
+          convertStatus(result.status()), result.query(), result.embeddingModel(),
+          result.chunks().stream().map(c -> new RagContextSnapshot.Chunk(
+              c.pointId(), c.documentId(), c.filename(),
+              c.chunkIndex(), c.score(), c.content())).toList(),
+          result.failureReason());
+    } catch (JacksonException exception) {
+      return new RagContextSnapshot(
+          RagStatus.UNAVAILABLE, "", "", List.of(), "Invalid scope snapshot");
+    } catch (RuntimeException exception) {
+      return new RagContextSnapshot(
+          RagStatus.UNAVAILABLE, "", "", List.of(), exception.getMessage());
+    }
+  }
+
+  private static RagStatus convertStatus(
+      interview.pilot.knowledge.retrieval.RetrievalStatus status) {
+    return switch (status) {
+      case RETRIEVED -> RagStatus.RETRIEVED;
+      case NO_MATCH -> RagStatus.NO_MATCH;
+      case UNAVAILABLE -> RagStatus.UNAVAILABLE;
+    };
   }
 
   private record WorkContext(
