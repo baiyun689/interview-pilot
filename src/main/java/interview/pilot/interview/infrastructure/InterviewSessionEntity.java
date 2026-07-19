@@ -81,6 +81,10 @@ public class InterviewSessionEntity {
   @Column(name = "context_snapshot", columnDefinition = "json")
   private String contextSnapshot;
 
+  @JdbcTypeCode(SqlTypes.JSON)
+  @Column(name = "knowledge_scope_snapshot", columnDefinition = "json")
+  private String knowledgeScopeSnapshot;
+
   @CreationTimestamp
   @Column(name = "created_at", nullable = false, updatable = false)
   private Instant createdAt;
