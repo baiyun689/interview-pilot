@@ -29,16 +29,6 @@ public class KnowledgeScopeResolver {
     this.embeddingVersion = embeddingVersion;
   }
 
-  /** Visible for testing. */
-  KnowledgeScopeResolver(
-      KnowledgeBaseRepository baseRepository,
-      KnowledgeDocumentRepository documentRepository,
-      String embeddingVersion) {
-    this.baseRepository = baseRepository;
-    this.documentRepository = documentRepository;
-    this.embeddingVersion = embeddingVersion;
-  }
-
   public ValidatedKnowledgeScope resolveForCreation(
       CurrentUser user, List<UUID> knowledgeBaseIds) {
     if (knowledgeBaseIds == null || knowledgeBaseIds.isEmpty()) {

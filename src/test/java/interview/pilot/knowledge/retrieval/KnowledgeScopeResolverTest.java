@@ -35,7 +35,8 @@ class KnowledgeScopeResolverTest {
   void setUp() {
     baseRepository = mock(KnowledgeBaseRepository.class);
     documentRepository = mock(KnowledgeDocumentRepository.class);
-    resolver = new KnowledgeScopeResolver(baseRepository, documentRepository, "text-embedding-v3");
+    resolver = new KnowledgeScopeResolver(baseRepository, documentRepository,
+        "text-embedding-v3");
 
     var owned = KnowledgeBaseEntity.active(userA.databaseId(), "Owned KB");
     when(baseRepository.findByKnowledgeBaseIdAndUserAccountId(ownedBase, userA.databaseId()))
