@@ -31,6 +31,7 @@ public final class FileSystemKnowledgeDocumentStore implements KnowledgeDocument
   private final Path configuredRoot;
   private final Path root;
   private final boolean posix;
+  private final boolean unix;
   private final AtomicMover mover;
   private final ReentrantLock lock = new ReentrantLock();
 
@@ -49,6 +50,7 @@ public final class FileSystemKnowledgeDocumentStore implements KnowledgeDocument
       }
       this.root = configuredRoot.toRealPath();
       this.posix = Files.getFileStore(this.root).supportsFileAttributeView("posix");
+      this.unix = Files.getFileStore(this.root).supportsFileAttributeView("unix");
       if (posix && !rootExisted) {
         Files.setPosixFilePermissions(this.root, PRIVATE_DIRECTORY);
       }
@@ -215,7 +217,7 @@ public final class FileSystemKnowledgeDocumentStore implements KnowledgeDocument
         || !Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
       throw new IllegalArgumentException("Knowledge document does not exist");
     }
-    if (posix && linkCount(target) != 1) {
+    if (unix && linkCount(target) != 1) {
       throw new IllegalArgumentException("Knowledge document must not have multiple links");
     }
   }

@@ -45,6 +45,7 @@ class AsyncTaskServiceMetricsTest {
     var metrics = mock(AiMetrics.class);
     var service = new AsyncTaskService(
         tasks, mock(ResumeRepository.class), mock(InterviewSessionRepository.class),
+        mock(interview.pilot.knowledge.infrastructure.KnowledgeDocumentRepository.class),
         claims, transactionManager, metrics);
 
     assertThatThrownBy(() -> service.retry(OWNER, taskId, UUID.randomUUID()))

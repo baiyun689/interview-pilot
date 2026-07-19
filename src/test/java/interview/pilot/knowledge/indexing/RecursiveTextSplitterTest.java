@@ -28,10 +28,22 @@ class RecursiveTextSplitterTest {
     List<String> chunks = splitter.split(text);
 
     assertThat(chunks).hasSize(2);
-    assertThat(chunks.get(0)).hasSize(1_400);
+    assertThat(chunks.get(0)).hasSize(1_394);
     assertThat(chunks.get(1)).startsWith("a".repeat(200));
     assertThat(chunks.get(1)).hasSizeLessThanOrEqualTo(1_600);
-    assertThat(chunks.get(0) + chunks.get(1).substring(200)).isEqualTo(text);
+    assertThat(chunks.get(1).charAt(200)).isEqualTo(' ');
+    assertThat(chunks.get(0) + chunks.get(1).substring(201)).isEqualTo(text);
+  }
+
+  @Test
+  void keepsSemanticSeparatorsBetweenOverlapAndNewContent() {
+    String text = "word ".repeat(300) + "\n\nParagraph two. ".repeat(200);
+
+    List<String> chunks = splitter.split(text);
+
+    assertThat(chunks).allMatch(chunk -> chunk.length() <= 1_600);
+    assertThat(chunks).allSatisfy(chunk -> assertThat(chunk).doesNotContain("wordParagraph"));
+    assertThat(chunks).anyMatch(chunk -> chunk.contains("\n\nParagraph two."));
   }
 
   @Test

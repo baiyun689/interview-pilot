@@ -34,8 +34,24 @@ public class RabbitTopologyConfig {
   public static final String INTERVIEW_REPORT_DLQ =
       "interview-pilot.interview.report.dlq";
 
+  public static final String KNOWLEDGE_INDEX_MAIN_EXCHANGE =
+      "interview-pilot.knowledge.index";
+  public static final String KNOWLEDGE_INDEX_MAIN_QUEUE =
+      "interview-pilot.knowledge.index.main";
+  public static final String KNOWLEDGE_INDEX_DLQ =
+      "interview-pilot.knowledge.index.dlq";
+
+  public static final String KNOWLEDGE_DELETE_MAIN_EXCHANGE =
+      "interview-pilot.knowledge.delete";
+  public static final String KNOWLEDGE_DELETE_MAIN_QUEUE =
+      "interview-pilot.knowledge.delete.main";
+  public static final String KNOWLEDGE_DELETE_DLQ =
+      "interview-pilot.knowledge.delete.dlq";
+
   static final String RESUME_ANALYSIS_ROUTING_KEY = "resume.analysis";
   static final String INTERVIEW_REPORT_ROUTING_KEY = "interview.report";
+  static final String KNOWLEDGE_INDEX_ROUTING_KEY = "knowledge.index";
+  static final String KNOWLEDGE_DELETE_ROUTING_KEY = "knowledge.delete";
   static final String RETRY_COUNT_HEADER = "x-retry-count";
   static final int[] RETRY_DELAYS_MILLIS = {5_000, 30_000, 120_000};
 
@@ -49,10 +65,12 @@ public class RabbitTopologyConfig {
     List<Declarable> declarations = new ArrayList<>();
     declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.RESUME_ANALYSIS)));
     declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.INTERVIEW_EVALUATION)));
+    declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.KNOWLEDGE_DOCUMENT_INDEX)));
+    declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.KNOWLEDGE_DOCUMENT_DELETE)));
     return new Declarables(declarations);
   }
 
-  static PipelineRoute routeFor(AsyncTaskType taskType) {
+  public static PipelineRoute routeFor(AsyncTaskType taskType) {
     return switch (taskType) {
       case RESUME_ANALYSIS -> new PipelineRoute(
           RESUME_ANALYSIS_MAIN_EXCHANGE,
@@ -68,6 +86,20 @@ public class RabbitTopologyConfig {
           "interview-pilot.interview.report.dead-letter",
           INTERVIEW_REPORT_DLQ,
           "interview.report.dead");
+      case KNOWLEDGE_DOCUMENT_INDEX -> new PipelineRoute(
+          KNOWLEDGE_INDEX_MAIN_EXCHANGE,
+          KNOWLEDGE_INDEX_MAIN_QUEUE,
+          KNOWLEDGE_INDEX_ROUTING_KEY,
+          "interview-pilot.knowledge.index.dead-letter",
+          KNOWLEDGE_INDEX_DLQ,
+          "knowledge.index.dead");
+      case KNOWLEDGE_DOCUMENT_DELETE -> new PipelineRoute(
+          KNOWLEDGE_DELETE_MAIN_EXCHANGE,
+          KNOWLEDGE_DELETE_MAIN_QUEUE,
+          KNOWLEDGE_DELETE_ROUTING_KEY,
+          "interview-pilot.knowledge.delete.dead-letter",
+          KNOWLEDGE_DELETE_DLQ,
+          "knowledge.delete.dead");
     };
   }
 
@@ -103,7 +135,7 @@ public class RabbitTopologyConfig {
     return declarations;
   }
 
-  record PipelineRoute(
+  public record PipelineRoute(
       String mainExchange,
       String mainQueue,
       String mainRoutingKey,

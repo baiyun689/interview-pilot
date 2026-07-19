@@ -3,12 +3,15 @@ package interview.pilot.knowledge.indexing;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.tika.detect.DefaultDetector;
 import org.apache.tika.exception.TikaException;
 import org.apache.tika.extractor.EmbeddedDocumentExtractor;
 import org.apache.tika.io.TikaInputStream;
@@ -20,15 +23,16 @@ import org.apache.tika.parser.ParseContext;
 import org.apache.tika.parser.Parser;
 import org.apache.tika.parser.pdf.PDFParserConfig;
 import org.apache.tika.sax.BodyContentHandler;
-import org.apache.poi.openxml4j.util.ZipSecureFile;
 import org.xml.sax.ContentHandler;
 import org.xml.sax.SAXException;
 
 public final class KnowledgeDocumentParser {
   static final long MAX_DOCUMENT_SIZE = 10L * 1024 * 1024;
-  private static final int MAX_EXTRACTED_CHARACTERS = 1 * 1024 * 1024;
-  private static final long MAX_DOCX_ENTRY_SIZE = 256L * 1024;
+  private static final int MAX_EXTRACTED_CHARACTERS = 10 * 1024 * 1024;
+  private static final long MAX_DOCX_ENTRY_SIZE = MAX_DOCUMENT_SIZE;
   private static final long MAX_DOCX_ENTRY_COUNT = 100;
+  private static final long MAX_DOCX_TOTAL_SIZE = MAX_DOCUMENT_SIZE;
+  private static final long MAX_DOCX_EXPANSION_RATIO = 100;
   private static final Map<String, Set<String>> SUPPORTED_TYPES = Map.of(
       "md", Set.of("text/markdown", "text/x-web-markdown", "text/plain"),
       "txt", Set.of("text/plain"),
@@ -43,7 +47,6 @@ public final class KnowledgeDocumentParser {
     if (input == null) {
       throw new IllegalArgumentException("Knowledge document input is required");
     }
-    configurePoiZipSecurity();
     String extension = extension(filename);
     if (size < 0 || size > MAX_DOCUMENT_SIZE) {
       throw new IllegalArgumentException("Knowledge document exceeds 10 MB");
@@ -55,7 +58,10 @@ public final class KnowledgeDocumentParser {
     if (!SUPPORTED_TYPES.get(extension).contains(detectType(content, filename))) {
       throw new IllegalArgumentException("Knowledge document type is unsupported");
     }
-    return normalize(parseContent(content, filename));
+    if ("docx".equals(extension)) {
+      preflightDocx(content);
+    }
+    return normalize("docx".equals(extension) ? parseDocx(content) : parseContent(content, filename));
   }
 
   private static String extension(String filename) {
@@ -86,9 +92,9 @@ public final class KnowledgeDocumentParser {
   }
 
   private static String detectType(byte[] content, String filename) {
-    AutoDetectParser parser = new AutoDetectParser();
+    DefaultDetector detector = new DefaultDetector();
     try (InputStream input = TikaInputStream.get(content)) {
-      MediaType type = parser.getDetector().detect(input, metadata(filename));
+      MediaType type = detector.detect(input, metadata(filename));
       return type.toString();
     } catch (IOException exception) {
       throw new IllegalArgumentException("Knowledge document type could not be detected", exception);
@@ -111,6 +117,39 @@ public final class KnowledgeDocumentParser {
     }
   }
 
+  private static String parseDocx(byte[] content) {
+    try (var document = new XWPFDocument(new ByteArrayInputStream(content))) {
+      StringBuilder text = new StringBuilder();
+      for (var paragraph : document.getParagraphs()) {
+        appendDocxText(text, paragraph.getText());
+      }
+      for (var table : document.getTables()) {
+        for (var row : table.getRows()) {
+          for (var cell : row.getTableCells()) {
+            appendDocxText(text, cell.getText());
+          }
+        }
+      }
+      return text.toString();
+    } catch (IOException exception) {
+      throw new IllegalArgumentException("Knowledge document could not be parsed", exception);
+    }
+  }
+
+  private static void appendDocxText(StringBuilder target, String next) {
+    if (next == null || next.isEmpty()) {
+      return;
+    }
+    int separator = target.isEmpty() ? 0 : 1;
+    if ((long) target.length() + separator + next.length() > MAX_EXTRACTED_CHARACTERS) {
+      throw new IllegalArgumentException("Knowledge document contains too much text");
+    }
+    if (separator == 1) {
+      target.append('\n');
+    }
+    target.append(next);
+  }
+
   private static PDFParserConfig pdfParserConfig() {
     PDFParserConfig config = new PDFParserConfig();
     config.setExtractInlineImages(false);
@@ -125,8 +164,42 @@ public final class KnowledgeDocumentParser {
     return metadata;
   }
 
-  private static void configurePoiZipSecurity() {
-    PoiZipSecurity.configure();
+  private static void preflightDocx(byte[] content) {
+    long total = 0;
+    int entries = 0;
+    try (var zip = new ZipInputStream(new ByteArrayInputStream(content))) {
+      for (ZipEntry entry; (entry = zip.getNextEntry()) != null;) {
+        if (++entries > MAX_DOCX_ENTRY_COUNT || !isSafeDocxEntry(entry)) {
+          throw new IllegalArgumentException("DOCX package is unsafe");
+        }
+        long entrySize = 0;
+        byte[] buffer = new byte[8192];
+        for (int read; (read = zip.read(buffer)) >= 0;) {
+          entrySize += read;
+          total += read;
+          if (entrySize > MAX_DOCX_ENTRY_SIZE || total > MAX_DOCX_TOTAL_SIZE) {
+            throw new IllegalArgumentException("DOCX package is too large");
+          }
+        }
+        zip.closeEntry();
+      }
+    } catch (IOException exception) {
+      throw new IllegalArgumentException("DOCX package could not be inspected", exception);
+    }
+    if (entries == 0 || total > Math.max(1L, content.length) * MAX_DOCX_EXPANSION_RATIO) {
+      throw new IllegalArgumentException("DOCX package has an unsafe expansion ratio");
+    }
+  }
+
+  private static boolean isSafeDocxEntry(ZipEntry entry) {
+    String name = entry.getName();
+    return name != null
+        && !name.isBlank()
+        && !name.startsWith("/")
+        && !name.startsWith("\\")
+        && !name.contains("../")
+        && !name.contains("..\\")
+        && (entry.getMethod() == ZipEntry.DEFLATED || entry.getMethod() == ZipEntry.STORED);
   }
 
   private static String normalize(String text) {
@@ -147,21 +220,6 @@ public final class KnowledgeDocumentParser {
     public void parseEmbedded(
         InputStream stream, ContentHandler handler, Metadata metadata, boolean outputHtml) {
       // Knowledge indexing intentionally ignores embedded files and images.
-    }
-  }
-
-  private static final class PoiZipSecurity {
-    private static final AtomicBoolean CONFIGURED = new AtomicBoolean();
-
-    private static synchronized void configure() {
-      if (CONFIGURED.get()) {
-        return;
-      }
-      ZipSecureFile.setMinInflateRatio(0.01d);
-      ZipSecureFile.setMaxEntrySize(MAX_DOCX_ENTRY_SIZE);
-      ZipSecureFile.setMaxFileCount(MAX_DOCX_ENTRY_COUNT);
-      ZipSecureFile.setMaxTextSize(MAX_EXTRACTED_CHARACTERS);
-      CONFIGURED.set(true);
     }
   }
 }

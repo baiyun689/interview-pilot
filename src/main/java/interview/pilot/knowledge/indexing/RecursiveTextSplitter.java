@@ -6,7 +6,8 @@ import java.util.List;
 public final class RecursiveTextSplitter {
   private static final int MAX_SIZE = 1_600;
   private static final int OVERLAP_SIZE = 200;
-  private static final int MAX_CONTENT_SIZE = MAX_SIZE - OVERLAP_SIZE;
+  private static final int MAX_SEMANTIC_SEPARATOR_SIZE = 6;
+  private static final int MAX_CONTENT_SIZE = MAX_SIZE - OVERLAP_SIZE - MAX_SEMANTIC_SEPARATOR_SIZE;
   private static final List<String> SEPARATORS = List.of(
       "\n# ", "\n## ", "\n### ", "\n#### ", "\n\n", "\n",
       "。", "！", "？", "；", ". ", "! ", "? ", "; ", ", ", " ", "");
@@ -21,7 +22,7 @@ public final class RecursiveTextSplitter {
   }
 
   private void splitRecursively(String text, int separatorIndex, List<String> chunks) {
-    String trimmed = text.strip();
+    String trimmed = text.stripLeading();
     if (trimmed.isBlank()) {
       return;
     }
@@ -45,8 +46,11 @@ public final class RecursiveTextSplitter {
   private void mergeOrRecurse(List<String> parts, int nextSeparatorIndex, List<String> chunks) {
     StringBuilder current = new StringBuilder();
     for (String part : parts) {
-      String cleanPart = part.strip();
+      String cleanPart = part.stripLeading();
       if (cleanPart.isBlank()) {
+        if (!current.isEmpty() && current.length() + cleanPart.length() <= MAX_CONTENT_SIZE) {
+          current.append(cleanPart);
+        }
         continue;
       }
       if (cleanPart.length() > MAX_CONTENT_SIZE) {
@@ -131,7 +135,7 @@ public final class RecursiveTextSplitter {
   }
 
   private static void flush(StringBuilder current, List<String> chunks) {
-    String chunk = current.toString().strip();
+    String chunk = current.toString().stripLeading();
     if (!chunk.isBlank()) {
       chunks.add(chunk);
     }
@@ -145,7 +149,7 @@ public final class RecursiveTextSplitter {
           && Character.isLowSurrogate(text.charAt(end))) {
         end--;
       }
-      String chunk = text.substring(start, end).strip();
+      String chunk = text.substring(start, end).stripLeading();
       if (!chunk.isBlank()) {
         chunks.add(chunk);
       }
@@ -162,7 +166,7 @@ public final class RecursiveTextSplitter {
     for (int index = 1; index < chunks.size(); index++) {
       String overlap = buildOverlap(chunks.get(index - 1));
       String current = chunks.get(index);
-      result.add(overlap.isBlank() ? current : overlap + current);
+      result.add(overlap.isBlank() ? current : overlap + bridge(overlap, current) + current);
     }
     return result;
   }
@@ -174,6 +178,16 @@ public final class RecursiveTextSplitter {
       start++;
     }
     return text.substring(start);
+  }
+
+  private static String bridge(String overlap, String current) {
+    if (overlap.isBlank() || current.isBlank()
+        || Character.isWhitespace(overlap.charAt(overlap.length() - 1))
+        || Character.isWhitespace(current.charAt(0))) {
+      return "";
+    }
+    char last = overlap.charAt(overlap.length() - 1);
+    return last == '。' || last == '！' || last == '？' || last == '；' ? "" : " ";
   }
 
   private static String normalizeLineEndings(String text) {

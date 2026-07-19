@@ -21,6 +21,8 @@ import interview.pilot.common.exception.BusinessException;
 import interview.pilot.common.observability.AiMetrics;
 import interview.pilot.interview.domain.SessionStatus;
 import interview.pilot.interview.infrastructure.InterviewSessionRepository;
+import interview.pilot.knowledge.domain.KnowledgeDocumentStatus;
+import interview.pilot.knowledge.infrastructure.KnowledgeDocumentRepository;
 import interview.pilot.resume.domain.ResumeStatus;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 
@@ -31,6 +33,7 @@ public class AsyncTaskService {
   private final AsyncTaskRepository tasks;
   private final ResumeRepository resumes;
   private final InterviewSessionRepository sessions;
+  private final KnowledgeDocumentRepository knowledgeDocuments;
   private final ProcessingClaim claims;
   private final TransactionTemplate transactions;
   private final AiMetrics metrics;
@@ -39,12 +42,14 @@ public class AsyncTaskService {
       AsyncTaskRepository tasks,
       ResumeRepository resumes,
       InterviewSessionRepository sessions,
+      KnowledgeDocumentRepository knowledgeDocuments,
       ProcessingClaim claims,
       PlatformTransactionManager transactionManager,
       AiMetrics metrics) {
     this.tasks = tasks;
     this.resumes = resumes;
     this.sessions = sessions;
+    this.knowledgeDocuments = knowledgeDocuments;
     this.claims = claims;
     this.transactions = new TransactionTemplate(transactionManager);
     this.metrics = metrics;
@@ -100,6 +105,15 @@ public class AsyncTaskService {
       resume.setStatus(ResumeStatus.PENDING);
       resume.setFailureReason(null);
       resume.setSkillsSnapshot(null);
+    } else if (task.getTaskType() == AsyncTaskType.KNOWLEDGE_DOCUMENT_INDEX
+        || task.getTaskType() == AsyncTaskType.KNOWLEDGE_DOCUMENT_DELETE) {
+      UUID documentId = parseKnowledgeDocumentId(task.getBizKey());
+      var document = knowledgeDocuments.findByDocumentId(documentId)
+          .orElseThrow(() -> conflict("TASK_STATE_INVALID", "Task state is inconsistent"));
+      if (document.getStatus() != KnowledgeDocumentStatus.FAILED) {
+        throw conflict("TASK_STATE_INVALID", "Task state is inconsistent");
+      }
+      document.beginReindex();
     } else {
       UUID sessionId = parseInterviewId(task.getBizKey());
       var session = sessions.findBySessionIdAndUserAccountId(sessionId, target.userAccountId())
@@ -126,6 +140,8 @@ public class AsyncTaskService {
     return switch (task.getTaskType()) {
       case RESUME_ANALYSIS -> "resume-analysis:" + parseResumeId(task.getBizKey());
       case INTERVIEW_EVALUATION -> "interview-report:" + parseInterviewId(task.getBizKey());
+      case KNOWLEDGE_DOCUMENT_INDEX, KNOWLEDGE_DOCUMENT_DELETE ->
+          "knowledge-index:" + parseKnowledgeDocumentId(task.getBizKey());
     };
   }
 
@@ -142,6 +158,16 @@ public class AsyncTaskService {
     try {
       if (bizKey == null || !bizKey.startsWith("interview:")) throw new IllegalArgumentException();
       return UUID.fromString(bizKey.substring("interview:".length()));
+    } catch (IllegalArgumentException exception) {
+      throw conflict("TASK_STATE_INVALID", "Task state is inconsistent");
+    }
+  }
+
+  private UUID parseKnowledgeDocumentId(String bizKey) {
+    try {
+      if (bizKey == null || !bizKey.startsWith("knowledge-document:"))
+        throw new IllegalArgumentException();
+      return UUID.fromString(bizKey.substring("knowledge-document:".length()));
     } catch (IllegalArgumentException exception) {
       throw conflict("TASK_STATE_INVALID", "Task state is inconsistent");
     }

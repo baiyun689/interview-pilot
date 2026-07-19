@@ -2,13 +2,21 @@ package interview.pilot.knowledge.infrastructure;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-interface KnowledgeDocumentJpaRepository extends JpaRepository<KnowledgeDocumentEntity, Long> {
+public interface KnowledgeDocumentJpaRepository extends JpaRepository<KnowledgeDocumentEntity, Long> {
+  Optional<KnowledgeDocumentEntity> findByDocumentId(UUID documentId);
+
+  long countByKnowledgeBaseIdAndStatus(Long knowledgeBaseId,
+      interview.pilot.knowledge.domain.KnowledgeDocumentStatus status);
+
+  void deleteAll();
+
   @Query("""
       select document from KnowledgeDocumentEntity document
       join document.knowledgeBase knowledgeBase

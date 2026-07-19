@@ -15,10 +15,33 @@ import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.poi.openxml4j.util.ZipSecureFile;
+import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
 
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class KnowledgeDocumentParserTest {
   private final KnowledgeDocumentParser parser = new KnowledgeDocumentParser();
+
+  @Test
+  @Order(1)
+  void leavesGlobalPoiZipThresholdsUnchanged() throws Exception {
+    double ratio = ZipSecureFile.getMinInflateRatio();
+    long entrySize = ZipSecureFile.getMaxEntrySize();
+    long fileCount = ZipSecureFile.getMaxFileCount();
+    long textSize = ZipSecureFile.getMaxTextSize();
+    byte[] content = docx("Java DOCX document");
+
+    assertThat(parser.parse(new ByteArrayInputStream(content), "guide.docx", content.length))
+        .isEqualTo("Java DOCX document");
+
+    assertThat(ZipSecureFile.getMinInflateRatio()).isEqualTo(ratio);
+    assertThat(ZipSecureFile.getMaxEntrySize()).isEqualTo(entrySize);
+    assertThat(ZipSecureFile.getMaxFileCount()).isEqualTo(fileCount);
+    assertThat(ZipSecureFile.getMaxTextSize()).isEqualTo(textSize);
+  }
 
   @Test
   void parsesMarkdownAndNormalizesItsText() {
@@ -85,6 +108,15 @@ class KnowledgeDocumentParserTest {
         () -> parser.parse(new ByteArrayInputStream(bomb), "bomb.docx", bomb.length));
   }
 
+  @Test
+  void parsesALegitimateDocxWhoseDocumentXmlExceedsTwoHundredAndFiftySixKiB() throws Exception {
+    byte[] content = docxWithIncompressibleDocumentXml();
+
+    String parsed = parser.parse(new ByteArrayInputStream(content), "large.docx", content.length);
+
+    assertThat(parsed).hasSizeGreaterThan(256 * 1024);
+  }
+
   private static byte[] pdf(String text) throws Exception {
     try (var document = new PDDocument(); var output = new ByteArrayOutputStream()) {
       document.addPage(new PDPage());
@@ -122,6 +154,37 @@ class KnowledgeDocumentParserTest {
         <?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>
         <w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">
         <w:body><w:p><w:r><w:t>""" + "A".repeat(512 * 1024) + """
+        </w:t></w:r></w:p></w:body></w:document>
+        """;
+    try (var output = new ByteArrayOutputStream(); var zip = new ZipOutputStream(output)) {
+      writeEntry(zip, "[Content_Types].xml", """
+          <Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">
+          <Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>
+          <Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>
+          </Types>
+          """);
+      writeEntry(zip, "_rels/.rels", """
+          <Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">
+          <Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/>
+          </Relationships>
+          """);
+      writeEntry(zip, "word/document.xml", document);
+      return output.toByteArray();
+    }
+  }
+
+  private static byte[] docxWithIncompressibleDocumentXml() throws IOException {
+    StringBuilder text = new StringBuilder(300 * 1024);
+    long state = 0x5DEECE66DL;
+    for (int index = 0; index < 300 * 1024; index++) {
+      state = state * 0xBL + 0xDL;
+      text.append("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+          .charAt((int) ((state >>> 16) % 62)));
+    }
+    String document = """
+        <?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>
+        <w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">
+        <w:body><w:p><w:r><w:t>""" + text + """
         </w:t></w:r></w:p></w:body></w:document>
         """;
     try (var output = new ByteArrayOutputStream(); var zip = new ZipOutputStream(output)) {
