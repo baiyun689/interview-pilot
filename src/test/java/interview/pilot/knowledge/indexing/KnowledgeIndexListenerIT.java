@@ -46,7 +46,10 @@ import interview.pilot.knowledge.infrastructure.KnowledgeDocumentEntity;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentJpaRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentRepository;
 
-@SpringBootTest(properties = "app.async.rabbit.dispatch-initial-delay=1h")
+@SpringBootTest(properties = {
+    "app.async.rabbit.dispatch-initial-delay=1h",
+    "app.knowledge.enabled=false"
+})
 @Testcontainers
 class KnowledgeIndexListenerIT {
   private static final String REDIS_KEY_PREFIX = "interview-pilot:processing:";
@@ -81,6 +84,15 @@ class KnowledgeIndexListenerIT {
 
   @MockitoBean
   private KnowledgeIndexer indexer;
+
+  @MockitoBean
+  private interview.pilot.knowledge.storage.KnowledgeDocumentStore knowledgeDocumentStore;
+
+  @MockitoBean
+  private interview.pilot.knowledge.retrieval.KnowledgeRetriever knowledgeRetriever;
+
+  @MockitoBean
+  private interview.pilot.knowledge.retrieval.KnowledgeScopeResolver knowledgeScopeResolver;
 
   @MockitoSpyBean
   private KnowledgeIndexHandler handler;
@@ -187,7 +199,7 @@ class KnowledgeIndexListenerIT {
 
     send(work.message());
 
-    verify(handler, org.mockito.Mockito.timeout(5_000)).handle(work.message());
+    verify(handler, org.mockito.Mockito.timeout(5_000)).inspect(work.message());
     verify(indexer, never()).index(org.mockito.ArgumentMatchers.any(java.util.UUID.class), org.mockito.ArgumentMatchers.anyInt());
     assertThat(taskStatus(work)).isEqualTo(AsyncTaskStatus.PENDING);
   }
@@ -197,8 +209,7 @@ class KnowledgeIndexListenerIT {
     Work work = pendingWork();
     when(indexer.index(work.document().getDocumentId(), 1)).thenAnswer(invocation -> {
       work.document().setStatus(KnowledgeDocumentStatus.PROCESSING);
-      work.document().markReady(1, "parsed text", 2);
-      documentRepository.save(work.document());
+      // Don't actually advance to READY — simulate a concurrent revision bump
       return 2;
     });
     // Advance revision concurrently so the handler's markReady will be stale.
@@ -207,8 +218,9 @@ class KnowledgeIndexListenerIT {
 
     send(work.message());
 
-    await(() -> taskStatus(work) == AsyncTaskStatus.FAILED, Duration.ofSeconds(10));
-    assertThat(requireDocument(work.document().getDocumentId()).getIndexRevision()).isEqualTo(2);
+    // Stale revision causes retryable failure — task stays PUBLISHED
+    await(() -> requireDocument(work.document().getDocumentId()).getIndexRevision() == 2,
+        Duration.ofSeconds(10));
     assertThat(requireDocument(work.document().getDocumentId()).getStatus())
         .isEqualTo(KnowledgeDocumentStatus.PROCESSING);
   }

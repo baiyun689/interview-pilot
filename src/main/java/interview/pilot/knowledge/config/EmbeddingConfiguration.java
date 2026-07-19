@@ -21,7 +21,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.util.Assert;
 
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(KnowledgeProperties.class)
 public class EmbeddingConfiguration {
   @Bean
   @ConditionalOnProperty(prefix = "app.knowledge", name = "enabled", havingValue = "true")

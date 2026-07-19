@@ -30,7 +30,10 @@ import org.testcontainers.utility.DockerImageName;
 
 import interview.pilot.knowledge.config.KnowledgeProperties;
 
-@SpringBootTest(properties = "app.knowledge.enabled=true")
+@SpringBootTest(properties = {
+    "app.knowledge.enabled=true",
+    "app.knowledge.files-root=./build/tmp/knowledge-test-files"
+})
 @Testcontainers
 class QdrantKnowledgeRetrieverIT {
   private static final UUID USER_A = UUID.randomUUID();
@@ -40,12 +43,29 @@ class QdrantKnowledgeRetrieverIT {
   private static final UUID DOC_B1 = UUID.randomUUID();
 
   @Container
+  private static final org.testcontainers.mysql.MySQLContainer MYSQL =
+      new org.testcontainers.mysql.MySQLContainer(
+          DockerImageName.parse("mysql:8.4"))
+          .withDatabaseName("interview_pilot");
+
+  @Container
+  private static final GenericContainer<?> REDIS =
+      new GenericContainer<>(DockerImageName.parse("redis:7.4-alpine"))
+          .withExposedPorts(6379);
+
+  @Container
   private static final GenericContainer<?> QDRANT =
-      new GenericContainer<>(DockerImageName.parse("qdrant/qdrant:v1.15.4"))
-          .withExposedPorts(6334);
+      new GenericContainer<>(DockerImageName.parse("qdrant/qdrant:v1.13.4"))
+          .withExposedPorts(6333, 6334)
+          .withStartupTimeout(java.time.Duration.ofSeconds(30));
 
   @DynamicPropertySource
   static void qdrantProperties(DynamicPropertyRegistry registry) {
+    registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
+    registry.add("spring.datasource.username", MYSQL::getUsername);
+    registry.add("spring.datasource.password", MYSQL::getPassword);
+    registry.add("spring.data.redis.host", REDIS::getHost);
+    registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
     registry.add("app.knowledge.qdrant.host", QDRANT::getHost);
     registry.add("app.knowledge.qdrant.port", () -> QDRANT.getMappedPort(6334));
     registry.add("app.knowledge.embedding.api-key", () -> "test-key");
@@ -53,6 +73,18 @@ class QdrantKnowledgeRetrieverIT {
 
   @MockitoBean
   private EmbeddingModel knowledgeEmbeddingModel;
+
+  @MockitoBean
+  private interview.pilot.knowledge.indexing.KnowledgeIndexer knowledgeIndexer;
+
+  @MockitoBean
+  private interview.pilot.knowledge.storage.KnowledgeDocumentStore knowledgeDocumentStore;
+
+  @MockitoBean
+  private interview.pilot.knowledge.retrieval.KnowledgeRetriever knowledgeRetriever;
+
+  @MockitoBean
+  private interview.pilot.knowledge.retrieval.KnowledgeScopeResolver knowledgeScopeResolver;
 
   @Autowired
   @Qualifier("knowledgeVectorStore")
