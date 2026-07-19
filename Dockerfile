@@ -4,7 +4,7 @@ WORKDIR /workspace
 
 COPY gradlew gradlew.bat build.gradle settings.gradle ./
 COPY gradle ./gradle
-RUN chmod +x gradlew && ./gradlew --no-daemon dependencies
+RUN sed -i 's/\r$//' gradlew && chmod +x gradlew && ./gradlew --no-daemon dependencies
 
 COPY src ./src
 RUN ./gradlew --no-daemon clean bootJar
