@@ -94,6 +94,9 @@ class KnowledgeIndexListenerIT {
   @MockitoBean
   private interview.pilot.knowledge.retrieval.KnowledgeScopeResolver knowledgeScopeResolver;
 
+  @MockitoBean
+  private interview.pilot.common.observability.AiMetrics aiMetrics;
+
   @MockitoSpyBean
   private KnowledgeIndexHandler handler;
 
