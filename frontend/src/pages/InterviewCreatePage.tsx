@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { createInterview, listInterviewSkills } from '../api/interviews'
+import { listKnowledgeBases } from '../api/knowledgeBases'
 import { listProviders } from '../api/providers'
 import { listResumes } from '../api/resumes'
 import { ErrorNotice } from '../components/InterviewUi'
 import type { AiProvider } from '../types/provider'
 import type { ResumeDetail } from '../types/resume'
 import type { Difficulty, InterviewSkill } from '../types/interview'
+import type { KnowledgeBase } from '../types/knowledge'
 
 export function InterviewCreatePage() {
   const navigate = useNavigate()
@@ -15,6 +17,7 @@ export function InterviewCreatePage() {
   const [resumes, setResumes] = useState<ResumeDetail[]>([])
   const [providers, setProviders] = useState<AiProvider[]>([])
   const [skills, setSkills] = useState<InterviewSkill[]>([])
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([])
   const [resumesLoaded, setResumesLoaded] = useState(false)
   const [providersLoaded, setProvidersLoaded] = useState(false)
   const [resumeError, setResumeError] = useState<unknown>()
@@ -22,7 +25,7 @@ export function InterviewCreatePage() {
   const [skillError, setSkillError] = useState<unknown>()
   const [submitError, setSubmitError] = useState<unknown>()
   const [submitting, setSubmitting] = useState(false)
-  const [values, setValues] = useState({ resumeId: '', skillId: '', jobTitle: '', jdText: '', difficulty: 'MEDIUM' as Difficulty, totalTurnBudget: 8, providerId: '' })
+  const [values, setValues] = useState({ resumeId: '', skillId: '', jobTitle: '', jdText: '', difficulty: 'MEDIUM' as Difficulty, totalTurnBudget: 8, providerId: '', selectedKbIds: [] as string[] })
 
   useEffect(() => {
     const id = ++owner.current
@@ -35,6 +38,8 @@ export function InterviewCreatePage() {
       .finally(() => { if (owner.current === id) setProvidersLoaded(true) })
     listInterviewSkills(controller.signal).then((rows) => { if (owner.current === id) setSkills(rows) })
       .catch((error) => { if (owner.current === id) setSkillError(error) })
+    listKnowledgeBases(controller.signal).then((rows) => { if (owner.current === id) setKnowledgeBases(rows.filter((kb) => kb.status === 'ACTIVE' && kb.readyDocumentCount > 0)) })
+      .catch(() => {})
     return () => { owner.current++; controller.abort(); submitController.current?.abort() }
   }, [])
 
@@ -51,7 +56,7 @@ export function InterviewCreatePage() {
     const controller = new AbortController(); submitController.current = controller
     setSubmitting(true); setSubmitError(undefined)
     try {
-      const response = await createInterview({ ...values, resumeId: Number(values.resumeId), jobTitle, jdText }, controller.signal)
+      const response = await createInterview({ ...values, resumeId: Number(values.resumeId), jobTitle, jdText, knowledgeBaseIds: values.selectedKbIds.length > 0 ? values.selectedKbIds : undefined }, controller.signal)
       if (id === owner.current && response.status === 201) navigate(`/interviews/${response.data.sessionId}`)
     } catch (error) { if (id === owner.current && !(error instanceof DOMException && error.name === 'AbortError')) setSubmitError(error) }
     finally { if (id === owner.current) setSubmitting(false) }
@@ -83,6 +88,15 @@ export function InterviewCreatePage() {
       {!providersLoaded && <p className="empty-copy" role="status">正在加载模型…</p>}
       <ErrorNotice error={providerError} />
       {providersLoaded && !providerError && providers.length === 0 && <p className="empty-copy">没有可用模型。<Link to="/settings">前往模型设置</Link></p>}
+      {knowledgeBases.length > 0 && <fieldset className="kb-select">
+        <legend>个人知识库（可选，最多选 5 个）</legend>
+        {knowledgeBases.map((kb) => <label key={kb.knowledgeBaseId} className="checkbox-label">
+          <input type="checkbox" checked={values.selectedKbIds.includes(kb.knowledgeBaseId)} disabled={values.selectedKbIds.length >= 5 && !values.selectedKbIds.includes(kb.knowledgeBaseId)}
+            onChange={(e) => setValues({ ...values, selectedKbIds: e.target.checked ? [...values.selectedKbIds, kb.knowledgeBaseId] : values.selectedKbIds.filter((id) => id !== kb.knowledgeBaseId) })} />
+          {kb.name} ({kb.readyDocumentCount}篇)
+        </label>)}
+      </fieldset>}
+      {knowledgeBases.length === 0 && <p className="empty-copy">没有可用的知识库。<Link to="/knowledge">前往知识库</Link>上传文档后可以在此选择，为面试出题提供参考。</p>}
       <ErrorNotice error={submitError} />
       <button className="button button-primary" disabled={submitting} type="submit">{submitting ? '创建中…' : '创建并开始面试'}</button>
     </form>

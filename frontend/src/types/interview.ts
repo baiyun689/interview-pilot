@@ -73,6 +73,12 @@ export interface CreateInterviewInput {
   totalTurnBudget: number
   providerId: string
   skillId: string
+  knowledgeBaseIds?: string[]
+}
+
+export interface InterviewKnowledgeBase {
+  knowledgeBaseId: string
+  name: string
 }
 
 export type InterviewSkillGroup = 'JOB' | 'SPECIALTY' | 'CUSTOM'

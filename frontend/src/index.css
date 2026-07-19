@@ -811,3 +811,19 @@ a:focus-visible {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Knowledge Base */
+.kb-create-form { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+.kb-create-form input { flex: 1; }
+.kb-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 0.75rem; }
+.kb-card { background: #fff; border: 1px solid #dee2e8; border-radius: 8px; padding: 1rem; }
+.kb-card-header { display: flex; align-items: center; gap: 0.75rem; cursor: pointer; }
+.kb-card-header strong { flex: 1; }
+.kb-docs { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #eee; display: flex; flex-direction: column; gap: 0.5rem; }
+.kb-doc-item { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.kb-doc-item span:first-child { flex: 1; }
+.kb-upload-btn { display: inline-block; cursor: pointer; color: #1a5fe0; font-size: 0.9rem; }
+.kb-select { border: none; padding: 0; margin: 0 0 1rem 0; }
+.kb-select legend { font-weight: 600; margin-bottom: 0.5rem; }
+.checkbox-label { display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0; cursor: pointer; }
+.button-small { font-size: 0.85rem; padding: 0.2rem 0.6rem; }
