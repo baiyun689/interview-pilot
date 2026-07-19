@@ -1,16 +1,9 @@
 package interview.pilot.knowledge.infrastructure;
 
-import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
-import org.springframework.boot.data.jpa.autoconfigure.DataJpaRepositoriesAutoConfiguration;
-import org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 
-@AutoConfiguration(after = {
-    HibernateJpaAutoConfiguration.class,
-    DataJpaRepositoriesAutoConfiguration.class
-})
-@ConditionalOnBean({KnowledgeBaseJpaRepository.class, KnowledgeDocumentJpaRepository.class})
+@Configuration(proxyBeanMethods = false)
 public class KnowledgeRepositoryAdapterAutoConfiguration {
   @Bean
   KnowledgeBaseRepository knowledgeBaseRepository(KnowledgeBaseJpaRepository delegate) {

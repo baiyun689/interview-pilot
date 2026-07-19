@@ -9,9 +9,10 @@ import org.springframework.stereotype.Component;
 
 import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.common.exception.BusinessException;
-import interview.pilot.knowledge.config.KnowledgeProperties;
 import interview.pilot.knowledge.infrastructure.KnowledgeBaseRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentRepository;
+
+import org.springframework.beans.factory.annotation.Value;
 
 @Component
 public class KnowledgeScopeResolver {
@@ -22,10 +23,10 @@ public class KnowledgeScopeResolver {
   public KnowledgeScopeResolver(
       KnowledgeBaseRepository baseRepository,
       KnowledgeDocumentRepository documentRepository,
-      KnowledgeProperties properties) {
+      @Value("${app.knowledge.embedding.model:text-embedding-v3}") String embeddingVersion) {
     this.baseRepository = baseRepository;
     this.documentRepository = documentRepository;
-    this.embeddingVersion = properties.embedding().model();
+    this.embeddingVersion = embeddingVersion;
   }
 
   /** Visible for testing. */
