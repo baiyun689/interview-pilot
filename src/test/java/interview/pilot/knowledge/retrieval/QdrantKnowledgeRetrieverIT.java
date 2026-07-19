@@ -186,6 +186,7 @@ class QdrantKnowledgeRetrieverIT {
         List.of(new org.springframework.ai.embedding.Embedding(embedding, 0)));
     when(knowledgeEmbeddingModel.call(ArgumentMatchers.<EmbeddingRequest>any()))
         .thenReturn(response);
+    when(knowledgeEmbeddingModel.dimensions()).thenReturn(1024);
 
     var doc = new Document(content, Map.of(
         "user_id", userId.toString(),
