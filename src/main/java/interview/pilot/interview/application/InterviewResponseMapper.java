@@ -28,6 +28,14 @@ public class InterviewResponseMapper {
       InterviewSessionEntity session,
       JobProfileEntity job,
       List<InterviewTurnEntity> turns) {
+    return map(session, job, turns, List.of());
+  }
+
+  public InterviewSessionResponse map(
+      InterviewSessionEntity session,
+      JobProfileEntity job,
+      List<InterviewTurnEntity> turns,
+      List<InterviewSessionResponse.KnowledgeBaseSummary> knowledgeBases) {
     InterviewPlan plan;
     SkillSnapshot skill;
     try {
@@ -44,7 +52,8 @@ public class InterviewResponseMapper {
         session.getStatus(), session.getDifficulty(), session.getCurrentTurnNo(),
         session.getTotalTurnBudget(), session.getProviderId(), session.getModelName(), plan,
         turns.stream().map(turn -> mapTurn(session, turn)).toList(),
-        skill.id(), skill.name(), skill.version());
+        skill.id(), skill.name(), skill.version(),
+        knowledgeBases);
   }
 
   private InterviewSessionResponse.TurnResponse mapTurn(

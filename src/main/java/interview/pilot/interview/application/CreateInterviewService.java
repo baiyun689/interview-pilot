@@ -1,5 +1,7 @@
 package interview.pilot.interview.application;
 
+import java.util.List;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -9,10 +11,17 @@ import interview.pilot.common.exception.BusinessException;
 import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.interview.api.CreateInterviewRequest;
 import interview.pilot.interview.api.InterviewSessionResponse;
+import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.domain.GeneratedQuestion;
 import interview.pilot.interview.domain.InterviewPlan;
+import interview.pilot.interview.rag.RagContextSnapshot;
+import interview.pilot.interview.rag.RagStatus;
 import interview.pilot.interview.skill.InterviewSkillCatalog;
 import interview.pilot.interview.skill.SkillGroup;
+import interview.pilot.knowledge.retrieval.KnowledgeRetriever;
+import interview.pilot.knowledge.retrieval.KnowledgeScopeResolver;
+import interview.pilot.knowledge.retrieval.RetrievalIntent;
+import interview.pilot.knowledge.retrieval.ValidatedKnowledgeScope;
 import interview.pilot.resume.domain.ResumeProfile;
 import interview.pilot.resume.domain.ResumeStatus;
 import interview.pilot.resume.infrastructure.ResumeEntity;
@@ -32,6 +41,8 @@ public class CreateInterviewService {
   private final ObjectMapper objectMapper;
   private final Validator validator;
   private final InterviewSkillCatalog skills;
+  private final KnowledgeScopeResolver scopeResolver;
+  private final KnowledgeRetriever retriever;
 
   public CreateInterviewService(
       ResumeRepository resumes,
@@ -42,7 +53,9 @@ public class CreateInterviewService {
       InterviewCreationStore store,
       ObjectMapper objectMapper,
       Validator validator,
-      InterviewSkillCatalog skills) {
+      InterviewSkillCatalog skills,
+      KnowledgeScopeResolver scopeResolver,
+      KnowledgeRetriever retriever) {
     this.resumes = resumes;
     this.providers = providers;
     this.extractor = extractor;
@@ -52,6 +65,8 @@ public class CreateInterviewService {
     this.objectMapper = objectMapper;
     this.validator = validator;
     this.skills = skills;
+    this.scopeResolver = scopeResolver;
+    this.retriever = retriever;
   }
 
   /** Orchestrates remote calls without opening a database transaction. */
@@ -97,8 +112,31 @@ public class CreateInterviewService {
     if (!containsAllCompetencies(plan.competencies(), requirements.competencies())) {
       throw invalidAiOutput();
     }
+    RagContextSnapshot firstRagSnapshot = RagContextSnapshot.notConfigured();
+    ValidatedKnowledgeScope scope = null;
+
+    if (!request.knowledgeBaseIds().isEmpty()) {
+      scope = scopeResolver.resolveForCreation(user, request.knowledgeBaseIds());
+      var intent = new RetrievalIntent(
+          buildQuery(plan, profile, requirements, request.difficulty()),
+          plan.competencies().getFirst(), request.difficulty().name(),
+          profile.technicalSkills(), List.of(), 5, 0.5);
+      try {
+        var result = retriever.retrieve(scope, intent);
+        firstRagSnapshot = new RagContextSnapshot(
+            convertStatus(result.status()), result.query(), result.embeddingModel(),
+            result.chunks().stream().map(c -> new RagContextSnapshot.Chunk(
+                c.pointId(), c.documentId(), c.filename(),
+                c.chunkIndex(), c.score(), c.content())).toList(),
+            result.failureReason());
+      } catch (RuntimeException exception) {
+        firstRagSnapshot = new RagContextSnapshot(
+            RagStatus.UNAVAILABLE, "", "", List.of(), exception.getMessage());
+      }
+    }
+
     GeneratedQuestion first = questions.firstQuestion(
-        providerId, plan, profile, requirements, skill.snapshot());
+        providerId, plan, profile, requirements, skill.snapshot(), firstRagSnapshot);
     if (first == null
         || !plan.competencies().stream().anyMatch(first.targetCompetency()::equalsIgnoreCase)) {
       throw invalidAiOutput();
@@ -106,7 +144,8 @@ public class CreateInterviewService {
 
     return store.create(new InterviewCreation(
         ownerId, resume.getId(), title, jdText, request.difficulty(), request.totalTurnBudget(),
-        providerId, provider.model(), skill.snapshot(), requirements, plan, first));
+        providerId, provider.model(), skill.snapshot(), requirements, plan, first,
+        scope, firstRagSnapshot));
   }
 
   @Deprecated(forRemoval = true)
@@ -154,6 +193,27 @@ public class CreateInterviewService {
       throw new IllegalArgumentException("Authenticated user is required");
     }
     return user.databaseId();
+  }
+
+  private String buildQuery(InterviewPlan plan, ResumeProfile profile,
+      Object requirements, Difficulty difficulty) {
+    var sb = new StringBuilder();
+    sb.append(String.join(" ", plan.competencies()));
+    if (profile.technicalSkills() != null && !profile.technicalSkills().isEmpty()) {
+      sb.append(' ').append(String.join(" ", profile.technicalSkills().subList(
+          0, Math.min(5, profile.technicalSkills().size()))));
+    }
+    sb.append(' ').append(difficulty.name().toLowerCase(java.util.Locale.ROOT));
+    return sb.toString();
+  }
+
+  private static RagStatus convertStatus(
+      interview.pilot.knowledge.retrieval.RetrievalStatus status) {
+    return switch (status) {
+      case RETRIEVED -> RagStatus.RETRIEVED;
+      case NO_MATCH -> RagStatus.NO_MATCH;
+      case UNAVAILABLE -> RagStatus.UNAVAILABLE;
+    };
   }
 
   private static CurrentUser legacyUser() {

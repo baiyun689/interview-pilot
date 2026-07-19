@@ -11,6 +11,7 @@ import interview.pilot.interview.domain.InterviewDecision;
 import interview.pilot.interview.domain.InterviewPlan;
 import interview.pilot.interview.domain.JobRequirements;
 import interview.pilot.interview.domain.QuestionContext;
+import interview.pilot.interview.rag.RagContextSnapshot;
 import interview.pilot.resume.domain.ResumeProfile;
 import interview.pilot.interview.skill.SkillSnapshot;
 
@@ -45,9 +46,19 @@ public class AiQuestionGenerator implements QuestionGenerator {
   public GeneratedQuestion firstQuestion(
       String providerId, InterviewPlan plan, ResumeProfile resume,
       JobRequirements job, SkillSnapshot skill) {
+    return firstQuestion(providerId, plan, resume, job, skill, RagContextSnapshot.notConfigured());
+  }
+
+  @Override
+  public GeneratedQuestion firstQuestion(
+      String providerId, InterviewPlan plan, ResumeProfile resume,
+      JobRequirements job, SkillSnapshot skill, RagContextSnapshot ragSnapshot) {
+    var ragMap = ragSnapshot.status() == interview.pilot.interview.rag.RagStatus.RETRIEVED
+        ? ragSnapshot : java.util.Map.of("status", ragSnapshot.status().name());
     String data = "\n<untrusted_context_json>\n" + json.encode(java.util.Map.of(
         "plan", plan, "resume", resume, "job", job,
-        "skill", skill == null ? java.util.Map.of() : skill))
+        "skill", skill == null ? java.util.Map.of() : skill,
+        "retrievedKnowledge", ragMap))
         + "\n</untrusted_context_json>";
     return output.invoke(new AiRequest(
         providerId, systemPrompt, firstPrompt + data, GeneratedQuestion.class),
