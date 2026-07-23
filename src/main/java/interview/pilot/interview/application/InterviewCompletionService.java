@@ -12,7 +12,6 @@ import interview.pilot.interview.infrastructure.InterviewSessionEntity;
 @Service
 public class InterviewCompletionService {
   private final AsyncTaskRepository tasks;
-
   public InterviewCompletionService(AsyncTaskRepository tasks) {
     this.tasks = tasks;
   }
@@ -23,8 +22,12 @@ public class InterviewCompletionService {
       throw new IllegalStateException("Interview must be evaluating before report work is created");
     }
     String bizKey = "interview:" + session.getSessionId();
-    return tasks.findByTaskTypeAndBizKey(AsyncTaskType.INTERVIEW_EVALUATION, bizKey)
+    Long ownerId = session.getUserAccountId();
+    if (ownerId == null) throw new IllegalStateException("Interview session owner is required");
+    return tasks.findByTaskTypeAndBizKeyAndUserAccountId(
+        AsyncTaskType.INTERVIEW_EVALUATION, bizKey, ownerId)
         .orElseGet(() -> tasks.save(AsyncTaskEntity.pending(
+            ownerId,
             AsyncTaskType.INTERVIEW_EVALUATION,
             bizKey,
             "{\"sessionId\":\"" + session.getSessionId() + "\"}")));

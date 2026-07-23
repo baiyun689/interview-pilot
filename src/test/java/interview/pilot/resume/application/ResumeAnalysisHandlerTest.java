@@ -34,6 +34,9 @@ import interview.pilot.async.domain.AsyncTaskStatus;
 import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
+import interview.pilot.auth.application.CurrentUser;
+import interview.pilot.auth.infrastructure.UserAccountEntity;
+import interview.pilot.auth.infrastructure.UserAccountRepository;
 import interview.pilot.async.messaging.TaskMessage;
 import interview.pilot.resume.domain.ResumeProfile;
 import interview.pilot.resume.domain.ResumeStatus;
@@ -47,6 +50,8 @@ import interview.pilot.resume.infrastructure.ResumeRepository;
 })
 @Testcontainers
 class ResumeAnalysisHandlerTest {
+  private static final CurrentUser LEGACY_USER = new CurrentUser(
+      1L, new UUID(0L, 1L), "legacy-demo@invalid.local", "Legacy Demo");
   @Container
   private static final MySQLContainer MYSQL =
       new MySQLContainer(DockerImageName.parse("mysql:8.4"))
@@ -77,6 +82,9 @@ class ResumeAnalysisHandlerTest {
   @Autowired
   private AsyncTaskRepository taskRepository;
 
+  @Autowired
+  private UserAccountRepository users;
+
   @BeforeEach
   void cleanDatabase() {
     taskRepository.deleteAll();
@@ -99,7 +107,7 @@ class ResumeAnalysisHandlerTest {
     assertThat(task.getStatus()).isEqualTo(AsyncTaskStatus.COMPLETED);
     assertThat(task.getAttemptCount()).isEqualTo(1);
     assertThat(task.getLastError()).isNull();
-    assertThat(queryService.get(resume.getId()).profile()).isEqualTo(validProfile());
+    assertThat(queryService.get(LEGACY_USER, resume.getId()).profile()).isEqualTo(validProfile());
   }
 
   @Test
@@ -200,6 +208,30 @@ class ResumeAnalysisHandlerTest {
   }
 
   @Test
+  void ownerMismatchedTaskCannotModifyAnotherUsersResume() {
+    UserAccountEntity otherUser = users.save(UserAccountEntity.register(
+        "other-owner-" + UUID.randomUUID() + "@example.com", "!", "Other Owner"));
+    ResumeEntity otherUsersResume = resumeRepository.saveAndFlush(ResumeEntity.pending(
+        otherUser.getId(), "other-user.txt", "b".repeat(64), "Other user resume"));
+    otherUsersResume.setSkillsSnapshot("{\"summary\":\"unchanged\"}");
+    resumeRepository.saveAndFlush(otherUsersResume);
+    String originalSnapshot = resumeRepository.findById(otherUsersResume.getId())
+        .orElseThrow().getSkillsSnapshot();
+    AsyncTaskEntity task = taskRepository.saveAndFlush(AsyncTaskEntity.pending(
+        1L, AsyncTaskType.RESUME_ANALYSIS, "resume:" + otherUsersResume.getId(), "{}"));
+
+    assertThatThrownBy(() -> handler.handle(task.getTaskId()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Resume not found");
+
+    ResumeEntity untouched = resumeRepository.findById(otherUsersResume.getId()).orElseThrow();
+    AsyncTaskEntity unchangedTask = taskRepository.findById(task.getId()).orElseThrow();
+    assertThat(untouched.getStatus()).isEqualTo(ResumeStatus.PENDING);
+    assertThat(untouched.getSkillsSnapshot()).isEqualTo(originalSnapshot);
+    assertThat(unchangedTask.getStatus()).isEqualTo(AsyncTaskStatus.PENDING);
+  }
+
+  @Test
   void malformedStoredProfileRaisesOnlyASanitizedServiceError() {
     Work work = pendingWork();
     work.resume().setSkillsSnapshot("""
@@ -208,7 +240,7 @@ class ResumeAnalysisHandlerTest {
         """);
     resumeRepository.saveAndFlush(work.resume());
 
-    assertThatThrownBy(() -> queryService.get(work.resume().getId()))
+    assertThatThrownBy(() -> queryService.get(LEGACY_USER, work.resume().getId()))
         .isInstanceOf(IllegalStateException.class)
         .hasMessage("Stored resume profile is invalid")
         .hasNoCause()
@@ -224,7 +256,7 @@ class ResumeAnalysisHandlerTest {
         """);
     resumeRepository.saveAndFlush(work.resume());
 
-    assertThatThrownBy(() -> queryService.get(work.resume().getId()))
+    assertThatThrownBy(() -> queryService.get(LEGACY_USER, work.resume().getId()))
         .isInstanceOf(IllegalStateException.class)
         .hasMessage("Stored resume profile is invalid")
         .hasNoCause();
@@ -296,7 +328,7 @@ class ResumeAnalysisHandlerTest {
       releaseNew.countDown();
       assertThat(newOwner.get(10, TimeUnit.SECONDS))
           .isEqualTo(ResumeAnalysisHandler.Outcome.TERMINAL);
-      assertThat(queryService.get(work.resume().getId()).profile()).isEqualTo(newerProfile);
+      assertThat(queryService.get(LEGACY_USER, work.resume().getId()).profile()).isEqualTo(newerProfile);
       assertThat(taskRepository.findById(work.task().getId()).orElseThrow().getAttemptCount())
           .isEqualTo(2);
     } finally {
@@ -307,13 +339,13 @@ class ResumeAnalysisHandlerTest {
   }
 
   private Work pendingWork() {
-    ResumeEntity resume = resumeRepository.saveAndFlush(ResumeEntity.pending(
+    ResumeEntity resume = resumeRepository.saveAndFlush(ResumeEntity.pending(1L,
         "candidate.txt",
         UUID.randomUUID().toString().replace("-", "")
             + UUID.randomUUID().toString().replace("-", ""),
         "Built a Payments API using Java, Spring Boot and MySQL."));
     AsyncTaskEntity task = AsyncTaskEntity.pending(
-        AsyncTaskType.RESUME_ANALYSIS,
+        1L, AsyncTaskType.RESUME_ANALYSIS,
         "resume:" + resume.getId(),
         "{\"resumeId\":" + resume.getId() + "}");
     task.setTaskId(UUID.randomUUID());

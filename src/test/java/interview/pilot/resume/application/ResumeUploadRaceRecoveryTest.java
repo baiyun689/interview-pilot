@@ -3,6 +3,7 @@ package interview.pilot.resume.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -24,6 +25,7 @@ import org.springframework.web.multipart.MultipartFile;
 import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
+import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.resume.infrastructure.ResumeEntity;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 import interview.pilot.resume.infrastructure.ResumeTextExtractor;
@@ -44,41 +46,43 @@ class ResumeUploadRaceRecoveryTest {
         .thenReturn(creationStatus, recoveryStatus);
     when(extractor.extract(any(MultipartFile.class))).thenReturn(CLEANED_TEXT);
 
-    var winningResume = ResumeEntity.pending("winner.txt", sha256(CLEANED_TEXT), CLEANED_TEXT);
+    var winningResume = ResumeEntity.pending(1L, "winner.txt", sha256(CLEANED_TEXT), CLEANED_TEXT);
     winningResume.setId(41L);
     var winningTask = AsyncTaskEntity.pending(
-        AsyncTaskType.RESUME_ANALYSIS, "resume:41", "{\"resumeId\":41}");
+        1L, AsyncTaskType.RESUME_ANALYSIS, "resume:41", "{\"resumeId\":41}");
     winningTask.setId(84L);
     UUID publicTaskId = UUID.randomUUID();
     winningTask.setTaskId(publicTaskId);
 
-    when(resumeRepository.findByContentHash(anyString()))
+    when(resumeRepository.findByUserAccountIdAndContentHash(eq(1L), anyString()))
         .thenReturn(Optional.empty())
         .thenReturn(Optional.empty())
         .thenReturn(Optional.of(winningResume));
     when(resumeRepository.saveAndFlush(any(ResumeEntity.class)))
         .thenThrow(new DataIntegrityViolationException("duplicate content_hash"));
-    when(taskRepository.findByTaskTypeAndBizKey(AsyncTaskType.RESUME_ANALYSIS, "resume:41"))
+    when(taskRepository.findByTaskTypeAndBizKeyAndUserAccountId(
+        AsyncTaskType.RESUME_ANALYSIS, "resume:41", 1L))
         .thenReturn(Optional.of(winningTask));
 
     var service = new ResumeUploadService(
         extractor, resumeRepository, taskRepository, transactionManager);
-    var result = service.upload(txt("loser.txt"));
+    var result = service.upload(new CurrentUser(1L, UUID.randomUUID(), "user@example.com", "User"),
+        txt("loser.txt"));
 
     assertThat(result.resumeId()).isEqualTo(41L);
     assertThat(result.analysisTaskId()).isEqualTo(publicTaskId);
     assertThat(result.duplicate()).isTrue();
 
     var ordered = inOrder(transactionManager, resumeRepository, taskRepository);
-    ordered.verify(resumeRepository).findByContentHash(anyString());
+    ordered.verify(resumeRepository).findByUserAccountIdAndContentHash(eq(1L), anyString());
     ordered.verify(transactionManager).getTransaction(any(TransactionDefinition.class));
-    ordered.verify(resumeRepository).findByContentHash(anyString());
+    ordered.verify(resumeRepository).findByUserAccountIdAndContentHash(eq(1L), anyString());
     ordered.verify(resumeRepository).saveAndFlush(any(ResumeEntity.class));
     ordered.verify(transactionManager).rollback(creationStatus);
     ordered.verify(transactionManager).getTransaction(any(TransactionDefinition.class));
-    ordered.verify(resumeRepository).findByContentHash(anyString());
-    ordered.verify(taskRepository).findByTaskTypeAndBizKey(
-        AsyncTaskType.RESUME_ANALYSIS, "resume:41");
+    ordered.verify(resumeRepository).findByUserAccountIdAndContentHash(eq(1L), anyString());
+    ordered.verify(taskRepository).findByTaskTypeAndBizKeyAndUserAccountId(
+        AsyncTaskType.RESUME_ANALYSIS, "resume:41", 1L);
     ordered.verify(transactionManager).commit(recoveryStatus);
   }
 

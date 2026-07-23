@@ -62,9 +62,9 @@ class InterviewQueryServiceTest {
     UUID sessionId = UUID.randomUUID();
     InterviewSessionEntity session = session(sessionId, SessionStatus.EVALUATING);
     AsyncTaskEntity task = task(UUID.randomUUID(), AsyncTaskStatus.DEAD);
-    when(sessions.findBySessionId(sessionId)).thenReturn(Optional.of(session));
-    when(tasks.findByTaskTypeAndBizKey(
-        AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + sessionId))
+    when(sessions.findBySessionIdAndUserAccountId(sessionId, 1L)).thenReturn(Optional.of(session));
+    when(tasks.findByTaskTypeAndBizKeyAndUserAccountId(
+        AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + sessionId, 1L))
         .thenReturn(Optional.of(task));
 
     var result = service.report(sessionId);
@@ -91,9 +91,9 @@ class InterviewQueryServiceTest {
     when(entity.getScoreSnapshot()).thenReturn("{\"overallScore\":91}");
     when(entity.getReportId()).thenReturn(UUID.randomUUID());
     when(entity.getCreatedAt()).thenReturn(Instant.parse("2026-07-13T10:00:00Z"));
-    when(sessions.findBySessionId(sessionId)).thenReturn(Optional.of(session));
-    when(tasks.findByTaskTypeAndBizKey(
-        AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + sessionId))
+    when(sessions.findBySessionIdAndUserAccountId(sessionId, 1L)).thenReturn(Optional.of(session));
+    when(tasks.findByTaskTypeAndBizKeyAndUserAccountId(
+        AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + sessionId, 1L))
         .thenReturn(Optional.of(task));
     when(reports.findBySessionId(10L)).thenReturn(Optional.of(entity));
 
@@ -115,9 +115,9 @@ class InterviewQueryServiceTest {
     when(entity.getReportSnapshot()).thenReturn(codec.write(sessionId, report));
     when(entity.getSummaryText()).thenReturn("Summary");
     when(entity.getScoreSnapshot()).thenReturn("{\"overallScore\":12}");
-    when(sessions.findBySessionId(sessionId)).thenReturn(Optional.of(session));
-    when(tasks.findByTaskTypeAndBizKey(
-        AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + sessionId))
+    when(sessions.findBySessionIdAndUserAccountId(sessionId, 1L)).thenReturn(Optional.of(session));
+    when(tasks.findByTaskTypeAndBizKeyAndUserAccountId(
+        AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + sessionId, 1L))
         .thenReturn(Optional.of(task));
     when(reports.findBySessionId(10L)).thenReturn(Optional.of(entity));
 
@@ -134,9 +134,9 @@ class InterviewQueryServiceTest {
     InterviewReportEntity entity = mock(InterviewReportEntity.class);
     when(entity.getSummaryText()).thenReturn("Summary");
     when(entity.getScoreSnapshot()).thenReturn("{\"overallScore\":91}");
-    when(sessions.findBySessionId(sessionId)).thenReturn(Optional.of(session));
-    when(tasks.findByTaskTypeAndBizKey(
-        AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + sessionId))
+    when(sessions.findBySessionIdAndUserAccountId(sessionId, 1L)).thenReturn(Optional.of(session));
+    when(tasks.findByTaskTypeAndBizKeyAndUserAccountId(
+        AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + sessionId, 1L))
         .thenReturn(Optional.of(task));
     when(reports.findBySessionId(10L)).thenReturn(Optional.of(entity));
     InterviewReport valid = new InterviewReport(
@@ -159,7 +159,15 @@ class InterviewQueryServiceTest {
     JobProfileEntity oldestJob = mock(JobProfileEntity.class);
     when(newestJob.getTitle()).thenReturn("Newest");
     when(oldestJob.getTitle()).thenReturn("Oldest");
-    when(sessions.findAllByOrderByCreatedAtDesc()).thenReturn(List.of(newest, oldest));
+    String skillSnapshot = """
+        {"id":"java-backend","name":"Java Backend","description":"",\
+        "group":"JOB","defaultCompetencies":[],"persona":"","rubric":"",\
+        "references":[],"version":"1"}
+        """;
+    when(newestJob.getSkillSnapshot()).thenReturn(skillSnapshot);
+    when(oldestJob.getSkillSnapshot()).thenReturn(skillSnapshot);
+    when(sessions.findAllByUserAccountIdOrderByCreatedAtDesc(1L))
+        .thenReturn(List.of(newest, oldest));
     when(jobs.findById(20L)).thenReturn(Optional.of(newestJob));
     when(jobs.findById(21L)).thenReturn(Optional.of(oldestJob));
 
@@ -176,6 +184,7 @@ class InterviewQueryServiceTest {
     when(session.getJobProfileId()).thenReturn(status == SessionStatus.INTERVIEWING ? 20L : 21L);
     when(session.getProviderId()).thenReturn("deepseek");
     when(session.getModelName()).thenReturn("deepseek-chat");
+    when(session.getCreatedAt()).thenReturn(Instant.parse("2026-07-13T10:00:00Z"));
     return session;
   }
 

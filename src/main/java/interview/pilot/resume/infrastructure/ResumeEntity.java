@@ -34,6 +34,9 @@ public class ResumeEntity {
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
 
+  @Column(name = "user_account_id")
+  private Long userAccountId;
+
   @UuidGenerator
   @JdbcTypeCode(SqlTypes.CHAR)
   @Column(name = "resume_id", nullable = false, unique = true, length = 36)
@@ -42,7 +45,7 @@ public class ResumeEntity {
   @Column(name = "original_filename", nullable = false)
   private String originalFilename;
 
-  @Column(name = "content_hash", nullable = false, unique = true, length = 64)
+  @Column(name = "content_hash", nullable = false, length = 64)
   private String contentHash;
 
   @Column(name = "parsed_text", columnDefinition = "longtext")
@@ -71,8 +74,13 @@ public class ResumeEntity {
   @Column(nullable = false)
   private long version;
 
-  public static ResumeEntity pending(String originalFilename, String contentHash, String parsedText) {
+  public static ResumeEntity pending(
+      Long userAccountId,
+      String originalFilename,
+      String contentHash,
+      String parsedText) {
     var resume = new ResumeEntity();
+    resume.userAccountId = userAccountId;
     resume.originalFilename = originalFilename;
     resume.contentHash = contentHash;
     resume.parsedText = parsedText;

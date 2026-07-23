@@ -39,6 +39,22 @@ class InfrastructureConfigurationTest {
     assertTrue(application.contains("max-request-size: 11MB"));
   }
 
+  @Test
+  @DisplayName("知识库基础设施声明 Qdrant、文件卷和 DashScope Embedding 配置")
+  void knowledgeInfrastructureDeclaresQdrantFileVolumeAndEmbeddingConfiguration() throws IOException {
+    var compose = read("docker-compose.yml");
+    var application = read("src/main/resources/application.yml");
+    var environmentExample = read(".env.example");
+
+    assertTrue(compose.contains("qdrant/qdrant:"));
+    assertTrue(compose.contains("knowledge_files:"));
+    assertTrue(application.contains("collection-name: knowledge_chunks_v1"));
+    assertTrue(application.contains("dimensions: 1024"));
+    assertTrue(environmentExample.contains("DASHSCOPE_EMBEDDING_MODEL=text-embedding-v3"));
+    assertFalse(compose.contains("KNOWLEDGE_COLLECTION_NAME"));
+    assertFalse(environmentExample.contains("KNOWLEDGE_COLLECTION_NAME"));
+  }
+
   private String read(String path) throws IOException {
     return Files.readString(Path.of(path));
   }

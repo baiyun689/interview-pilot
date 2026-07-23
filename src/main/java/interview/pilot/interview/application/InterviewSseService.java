@@ -14,6 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import interview.pilot.common.exception.BusinessException;
+import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.interview.api.InterviewStreamEvent;
 import interview.pilot.interview.api.InterviewStreamEvent.AcceptedPayload;
 import interview.pilot.interview.api.InterviewStreamEvent.CompletedPayload;
@@ -39,7 +40,7 @@ public class InterviewSseService {
     this.processingSla = processingSla;
   }
 
-  public SseEmitter stream(UUID sessionId, SubmitAnswerRequest request) {
+  public SseEmitter stream(CurrentUser user, UUID sessionId, SubmitAnswerRequest request) {
     SseEmitter emitter = createEmitter(processingSla.sseTimeoutMillis());
     AtomicBoolean transportTerminal = new AtomicBoolean();
     emitter.onTimeout(() -> transportTerminal.compareAndSet(false, true));
@@ -50,7 +51,7 @@ public class InterviewSseService {
       taskExecutor.execute(() -> {
         ClaimedWork work = admittedWork.join();
         if (work != null) {
-          process(emitter, transportTerminal, work.sessionId(), work.request(), work.claim());
+          process(emitter, transportTerminal, work.user(), work.sessionId(), work.request(), work.claim());
         }
       });
     } catch (TaskRejectedException exception) {
@@ -61,7 +62,7 @@ public class InterviewSseService {
 
     InterviewTurnClaim claim;
     try {
-      claim = answers.claim(sessionId, request);
+      claim = answers.claim(user, sessionId, request);
     } catch (RuntimeException exception) {
       admittedWork.complete(null);
       throw exception;
@@ -72,19 +73,26 @@ public class InterviewSseService {
           new AcceptedPayload(request.requestId(), !claim.owner())));
     } finally {
       // Capacity is already reserved, so durable owner processing starts even if transport fails.
-      admittedWork.complete(new ClaimedWork(sessionId, request, claim));
+      admittedWork.complete(new ClaimedWork(user, sessionId, request, claim));
     }
     return emitter;
+  }
+
+  @Deprecated(forRemoval = true)
+  public SseEmitter stream(UUID sessionId, SubmitAnswerRequest request) {
+    return stream(new CurrentUser(1L, new UUID(0L, 1L),
+        "legacy-demo@invalid.local", "Legacy Demo"), sessionId, request);
   }
 
   private void process(
       SseEmitter emitter,
       AtomicBoolean transportTerminal,
+      CurrentUser user,
       UUID sessionId,
       SubmitAnswerRequest request,
       InterviewTurnClaim claim) {
     try {
-      AnswerProcessingResult result = answers.processClaim(sessionId, request, claim);
+      AnswerProcessingResult result = answers.processClaim(user, sessionId, request, claim);
       send(emitter, transportTerminal, new InterviewStreamEvent(
           EventType.FEEDBACK, sessionId, result.turnNo(),
           new FeedbackPayload(
@@ -158,5 +166,5 @@ public class InterviewSseService {
   }
 
   private record ClaimedWork(
-      UUID sessionId, SubmitAnswerRequest request, InterviewTurnClaim claim) {}
+      CurrentUser user, UUID sessionId, SubmitAnswerRequest request, InterviewTurnClaim claim) {}
 }

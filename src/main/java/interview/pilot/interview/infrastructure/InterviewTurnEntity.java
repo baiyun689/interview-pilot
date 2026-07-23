@@ -59,6 +59,15 @@ public class InterviewTurnEntity {
   @Column(name = "target_competency", nullable = false, length = 100)
   private String targetCompetency;
 
+  @Enumerated(EnumType.STRING)
+  @Column(name = "rag_status", nullable = false, length = 32)
+  private interview.pilot.interview.rag.RagStatus ragStatus =
+      interview.pilot.interview.rag.RagStatus.NOT_CONFIGURED;
+
+  @JdbcTypeCode(SqlTypes.JSON)
+  @Column(name = "rag_context_snapshot", columnDefinition = "json")
+  private String ragContextSnapshot;
+
   @Column(name = "answer_text", columnDefinition = "longtext")
   private String answerText;
 

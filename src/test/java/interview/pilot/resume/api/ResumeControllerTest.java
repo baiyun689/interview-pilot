@@ -24,6 +24,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import interview.pilot.common.exception.BusinessException;
 import interview.pilot.common.exception.GlobalExceptionHandler;
+import interview.pilot.auth.application.CurrentUser;
+import interview.pilot.auth.application.CurrentUserProvider;
 import interview.pilot.resume.application.ResumeQueryService;
 import interview.pilot.resume.application.ResumeUploadService;
 import interview.pilot.resume.application.ResumeUploadService.UploadResumeResult;
@@ -32,14 +34,18 @@ import interview.pilot.resume.domain.ResumeStatus;
 class ResumeControllerTest {
   private ResumeUploadService uploadService;
   private ResumeQueryService queryService;
+  private CurrentUserProvider currentUser;
   private MockMvc mockMvc;
+  private final CurrentUser user = new CurrentUser(1L, UUID.randomUUID(), "user@example.com", "User");
 
   @BeforeEach
   void setUp() {
     uploadService = mock(ResumeUploadService.class);
     queryService = mock(ResumeQueryService.class);
+    currentUser = mock(CurrentUserProvider.class);
+    when(currentUser.require()).thenReturn(user);
     mockMvc = MockMvcBuilders
-        .standaloneSetup(new ResumeController(uploadService, queryService))
+        .standaloneSetup(new ResumeController(uploadService, queryService, currentUser))
         .setControllerAdvice(new GlobalExceptionHandler())
         .build();
   }
@@ -48,7 +54,7 @@ class ResumeControllerTest {
   void newUploadReturnsAcceptedWithResumeAndTaskIds() throws Exception {
     long resumeId = 101L;
     UUID taskId = UUID.randomUUID();
-    when(uploadService.upload(org.mockito.ArgumentMatchers.any()))
+    when(uploadService.upload(org.mockito.ArgumentMatchers.eq(user), org.mockito.ArgumentMatchers.any()))
         .thenReturn(new UploadResumeResult(resumeId, taskId, false));
 
     mockMvc.perform(multipart("/api/resumes").file(txt("resume.txt")))
@@ -62,7 +68,7 @@ class ResumeControllerTest {
   void duplicateUploadReturnsOkWithExistingIds() throws Exception {
     long resumeId = 102L;
     UUID taskId = UUID.randomUUID();
-    when(uploadService.upload(org.mockito.ArgumentMatchers.any()))
+    when(uploadService.upload(org.mockito.ArgumentMatchers.eq(user), org.mockito.ArgumentMatchers.any()))
         .thenReturn(new UploadResumeResult(resumeId, taskId, true));
 
     mockMvc.perform(multipart("/api/resumes").file(txt("duplicate.txt")))
@@ -76,7 +82,7 @@ class ResumeControllerTest {
   void listsResumesWithAnalysisTaskId() throws Exception {
     long resumeId = 103L;
     UUID taskId = UUID.randomUUID();
-    when(queryService.list()).thenReturn(List.of(response(resumeId, taskId)));
+    when(queryService.list(user)).thenReturn(List.of(response(resumeId, taskId)));
 
     mockMvc.perform(get("/api/resumes"))
         .andExpect(status().isOk())
@@ -88,7 +94,7 @@ class ResumeControllerTest {
   void returnsResumeDetailWithNullProfileBeforeAnalysis() throws Exception {
     long resumeId = 104L;
     UUID taskId = UUID.randomUUID();
-    when(queryService.get(resumeId)).thenReturn(response(resumeId, taskId));
+    when(queryService.get(user, resumeId)).thenReturn(response(resumeId, taskId));
 
     mockMvc.perform(get("/api/resumes/{id}", resumeId))
         .andExpect(status().isOk())
@@ -99,7 +105,7 @@ class ResumeControllerTest {
 
   @Test
   void businessErrorsUseSemanticStatusAndSafeErrorShape() throws Exception {
-    when(uploadService.upload(org.mockito.ArgumentMatchers.any()))
+    when(uploadService.upload(org.mockito.ArgumentMatchers.eq(user), org.mockito.ArgumentMatchers.any()))
         .thenThrow(new BusinessException(
             "UNSUPPORTED_FILE_TYPE", "Only PDF, DOCX, and TXT documents are supported",
             HttpStatus.UNSUPPORTED_MEDIA_TYPE));
@@ -115,7 +121,7 @@ class ResumeControllerTest {
   @Test
   void missingResumeReturnsNotFoundError() throws Exception {
     long resumeId = 999L;
-    when(queryService.get(resumeId)).thenThrow(
+    when(queryService.get(user, resumeId)).thenThrow(
         new BusinessException("RESUME_NOT_FOUND", "Resume not found", HttpStatus.NOT_FOUND));
 
     mockMvc.perform(get("/api/resumes/{id}", resumeId))

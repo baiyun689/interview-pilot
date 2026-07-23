@@ -1,6 +1,7 @@
 package interview.pilot.interview.infrastructure;
 
 import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
 
 import org.hibernate.annotations.CreationTimestamp;
@@ -30,6 +31,9 @@ public class JobProfileEntity {
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
+
+  @Column(name = "user_account_id", nullable = false, updatable = false)
+  private Long userAccountId;
 
   @UuidGenerator
   @JdbcTypeCode(SqlTypes.CHAR)
@@ -63,8 +67,9 @@ public class JobProfileEntity {
   private long version;
 
   public static JobProfileEntity create(
+      Long userAccountId,
       String title, String descriptionText, String requirementsSnapshot) {
-    return create(title, descriptionText, requirementsSnapshot, """
+    return create(userAccountId, title, descriptionText, requirementsSnapshot, """
         {"id":"custom","name":"自定义岗位","description":"历史面试兼容快照",
          "group":"CUSTOM","defaultCompetencies":[],"persona":"","rubric":"",
          "references":[],"version":"legacy"}
@@ -72,13 +77,21 @@ public class JobProfileEntity {
   }
 
   public static JobProfileEntity create(
+      Long userAccountId,
       String title, String descriptionText, String requirementsSnapshot, String skillSnapshot) {
     var job = new JobProfileEntity();
+    job.userAccountId = Objects.requireNonNull(userAccountId, "userAccountId");
     job.jobId = UUID.randomUUID();
     job.title = title;
     job.descriptionText = descriptionText;
     job.requirementsSnapshot = requirementsSnapshot;
     job.skillSnapshot = skillSnapshot;
     return job;
+  }
+
+  @Deprecated(forRemoval = true)
+  public static JobProfileEntity create(
+      String title, String descriptionText, String requirementsSnapshot) {
+    return create(1L, title, descriptionText, requirementsSnapshot);
   }
 }

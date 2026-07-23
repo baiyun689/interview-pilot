@@ -31,7 +31,9 @@ import org.testcontainers.utility.DockerImageName;
 import interview.pilot.async.domain.AsyncTaskStatus;
 import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
+import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.resume.domain.ResumeStatus;
+import interview.pilot.resume.infrastructure.ResumeEntity;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 import interview.pilot.resume.infrastructure.ResumeTextExtractor;
 
@@ -39,6 +41,8 @@ import interview.pilot.resume.infrastructure.ResumeTextExtractor;
     "spring.autoconfigure.exclude=org.redisson.spring.starter.RedissonAutoConfigurationV4")
 @Testcontainers
 class ResumeUploadServiceTest {
+  private static final CurrentUser LEGACY_USER = new CurrentUser(
+      1L, new java.util.UUID(0L, 1L), "legacy-demo@invalid.local", "Legacy Demo");
   @MockitoBean
   private RedissonClient redissonClient;
 
@@ -80,7 +84,7 @@ class ResumeUploadServiceTest {
 
   @Test
   void newUploadCreatesPendingResumeAndAnalysisTask() throws Exception {
-    var result = service.upload(txt("candidate.txt", CLEANED_TEXT));
+    var result = service.upload(LEGACY_USER, txt("candidate.txt", CLEANED_TEXT));
 
     assertThat(result.duplicate()).isFalse();
     var resume = resumeRepository.findById(result.resumeId()).orElseThrow();
@@ -88,11 +92,14 @@ class ResumeUploadServiceTest {
     assertThat(resume.getParsedText()).isEqualTo(CLEANED_TEXT);
     assertThat(resume.getContentHash()).isEqualTo(sha256(CLEANED_TEXT));
     assertThat(resume.getStatus()).isEqualTo(ResumeStatus.PENDING);
+    assertThat(resume.getUserAccountId()).isEqualTo(1L);
 
     var task = taskRepository.findByTaskTypeAndBizKey(
         AsyncTaskType.RESUME_ANALYSIS, "resume:" + result.resumeId()).orElseThrow();
     assertThat(result.analysisTaskId()).isEqualTo(task.getTaskId());
-    assertThat(taskRepository.findByTaskId(result.analysisTaskId())).contains(task);
+    assertThat(taskRepository.findByTaskId(result.analysisTaskId()))
+        .map(taskEntity -> taskEntity.getId())
+        .contains(task.getId());
     assertThat(task.getStatus()).isEqualTo(AsyncTaskStatus.PENDING);
     assertThat(task.getAttemptCount()).isZero();
     assertThat(task.getPayloadSnapshot()).contains(result.resumeId().toString());
@@ -100,8 +107,8 @@ class ResumeUploadServiceTest {
 
   @Test
   void duplicateCleanedContentReturnsExistingResumeAndUniqueTask() {
-    var first = service.upload(txt("first.txt", CLEANED_TEXT));
-    var duplicate = service.upload(txt(
+    var first = service.upload(LEGACY_USER, txt("first.txt", CLEANED_TEXT));
+    var duplicate = service.upload(LEGACY_USER, txt(
         "renamed.txt",
         "\r\n" + CLEANED_TEXT + "   \r\n\r\n\r\n"));
 
@@ -128,11 +135,11 @@ class ResumeUploadServiceTest {
     try {
       var first = executor.submit(() -> {
         start.await(10, TimeUnit.SECONDS);
-        return service.upload(txt("first.txt", CLEANED_TEXT));
+        return service.upload(LEGACY_USER, txt("first.txt", CLEANED_TEXT));
       });
       var second = executor.submit(() -> {
         start.await(10, TimeUnit.SECONDS);
-        return service.upload(txt("second.txt", CLEANED_TEXT));
+        return service.upload(LEGACY_USER, txt("second.txt", CLEANED_TEXT));
       });
 
       var results = List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
@@ -144,6 +151,10 @@ class ResumeUploadServiceTest {
           .containsOnly(results.getFirst().analysisTaskId());
       assertThat(resumeRepository.count()).isEqualTo(1);
       assertThat(taskRepository.count()).isEqualTo(1);
+      assertThat(resumeRepository.findAll())
+          .singleElement()
+          .extracting(ResumeEntity::getUserAccountId)
+          .isEqualTo(1L);
     } finally {
       executor.shutdownNow();
     }
@@ -151,20 +162,20 @@ class ResumeUploadServiceTest {
 
   @Test
   void queryResponsesResolveTheUniqueAnalysisTaskAndLeaveProfileNull() {
-    var uploaded = service.upload(txt("candidate.txt", CLEANED_TEXT));
+    var uploaded = service.upload(LEGACY_USER, txt("candidate.txt", CLEANED_TEXT));
 
-    var detail = queryService.get(uploaded.resumeId());
+    var detail = queryService.get(LEGACY_USER, uploaded.resumeId());
     assertThat(detail.id()).isEqualTo(uploaded.resumeId());
     assertThat(detail.analysisTaskId()).isEqualTo(uploaded.analysisTaskId());
     assertThat(detail.profile()).isNull();
-    assertThat(queryService.list()).extracting("analysisTaskId")
+    assertThat(queryService.list(LEGACY_USER)).extracting("analysisTaskId")
         .containsExactly(uploaded.analysisTaskId());
   }
 
   @Test
   void uploadMethodKeepsDocumentExtractionOutsideTheTransaction() throws Exception {
     var method = ResumeUploadService.class.getMethod(
-        "upload", org.springframework.web.multipart.MultipartFile.class);
+        "upload", CurrentUser.class, org.springframework.web.multipart.MultipartFile.class);
     assertThat(method.getAnnotation(Transactional.class)).isNull();
   }
 

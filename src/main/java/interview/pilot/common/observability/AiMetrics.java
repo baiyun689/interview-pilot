@@ -54,6 +54,32 @@ public class AiMetrics {
     meters.counter("interview_pilot.optimistic_lock.conflicts").increment();
   }
 
+  public void knowledgeIndexDuration(Duration latency, int chunkCount) {
+    meters.timer("interview_pilot.knowledge.index.duration").record(latency);
+    meters.counter("interview_pilot.knowledge.index.chunks").increment(chunkCount);
+  }
+
+  public void knowledgeRetrievalDuration(String status, Duration latency, int matchCount) {
+    String safe = switch (status) {
+      case "RETRIEVED" -> "retrieved";
+      case "NO_MATCH" -> "no_match";
+      default -> "unavailable";
+    };
+    meters.timer("interview_pilot.knowledge.retrieval.duration", "status", safe).record(latency);
+    meters.counter("interview_pilot.knowledge.retrieval.matches", "status", safe)
+        .increment(matchCount);
+  }
+
+  public void interviewRagQuestion(String status) {
+    meters.counter("interview_pilot.interview.rag.question", "status",
+        status.toLowerCase(Locale.ROOT)).increment();
+  }
+
+  public void interviewRagFallback(String reason) {
+    meters.counter("interview_pilot.interview.rag.fallback", "reason",
+        reason).increment();
+  }
+
   public void afterCommit(Runnable recording) {
     if (TransactionSynchronizationManager.isSynchronizationActive()) {
       TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {

@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import interview.pilot.common.exception.BusinessException;
+import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.interview.api.InterviewSessionResponse;
 import interview.pilot.interview.api.InterviewHistoryResponse;
 import interview.pilot.interview.api.InterviewReportResponse;
@@ -55,18 +56,19 @@ public class InterviewQueryService {
   }
 
   @Transactional(readOnly = true)
-  public InterviewSessionResponse get(UUID sessionId) {
-    var session = sessions.findBySessionId(sessionId)
-        .orElseThrow(() -> new BusinessException(
-            "INTERVIEW_NOT_FOUND", "Interview session not found", HttpStatus.NOT_FOUND));
+  public InterviewSessionResponse get(CurrentUser user, UUID sessionId) {
+    var session = session(user, sessionId);
     var job = jobs.findById(session.getJobProfileId())
         .orElseThrow(() -> new IllegalStateException("Interview job profile is missing"));
     return mapper.map(session, job, turns.findAllBySessionIdOrderByTurnNo(session.getId()));
   }
 
+  @Deprecated(forRemoval = true)
+  public InterviewSessionResponse get(UUID sessionId) { return get(legacyUser(), sessionId); }
+
   @Transactional(readOnly = true)
-  public List<InterviewHistoryResponse> list() {
-    return sessions.findAllByOrderByCreatedAtDesc().stream().map(session -> {
+  public List<InterviewHistoryResponse> list(CurrentUser user) {
+    return sessions.findAllByUserAccountIdOrderByCreatedAtDesc(requireOwner(user)).stream().map(session -> {
       var job = jobs.findById(session.getJobProfileId())
           .orElseThrow(() -> new IllegalStateException("Interview job profile is missing"));
       SkillSnapshot skill = readSkill(job.getSkillSnapshot());
@@ -78,13 +80,15 @@ public class InterviewQueryService {
     }).toList();
   }
 
+  @Deprecated(forRemoval = true)
+  public List<InterviewHistoryResponse> list() { return list(legacyUser()); }
+
   @Transactional(readOnly = true)
-  public ReportQueryResult report(UUID sessionId) {
-    var session = sessions.findBySessionId(sessionId)
-        .orElseThrow(() -> new BusinessException(
-            "INTERVIEW_NOT_FOUND", "Interview session not found", HttpStatus.NOT_FOUND));
-    var task = tasks.findByTaskTypeAndBizKey(
-        AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + sessionId).orElse(null);
+  public ReportQueryResult report(CurrentUser user, UUID sessionId) {
+    Long ownerId = requireOwner(user);
+    var session = session(ownerId, sessionId);
+    var task = tasks.findByTaskTypeAndBizKeyAndUserAccountId(
+        AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + sessionId, ownerId).orElse(null);
     if (session.getStatus() == SessionStatus.COMPLETED) {
       if (task == null || task.getStatus() != AsyncTaskStatus.COMPLETED) throw inconsistent();
       var entity = reports.findBySessionId(session.getId()).orElseThrow(this::inconsistent);
@@ -112,6 +116,9 @@ public class InterviewQueryService {
         task.getLastError(), retryable));
   }
 
+  @Deprecated(forRemoval = true)
+  public ReportQueryResult report(UUID sessionId) { return report(legacyUser(), sessionId); }
+
   private int scoreFrom(String snapshot) {
     try {
       var node = objectMapper.readTree(snapshot);
@@ -137,6 +144,29 @@ public class InterviewQueryService {
     return new BusinessException(
         "INTERVIEW_REPORT_STATE_INVALID", "Interview report state is inconsistent",
         HttpStatus.CONFLICT);
+  }
+
+  private interview.pilot.interview.infrastructure.InterviewSessionEntity session(
+      CurrentUser user, UUID sessionId) {
+    return session(requireOwner(user), sessionId);
+  }
+
+  private interview.pilot.interview.infrastructure.InterviewSessionEntity session(
+      Long ownerId, UUID sessionId) {
+    return sessions.findBySessionIdAndUserAccountId(sessionId, ownerId)
+        .orElseThrow(() -> new BusinessException(
+            "INTERVIEW_NOT_FOUND", "Interview session not found", HttpStatus.NOT_FOUND));
+  }
+
+  private static Long requireOwner(CurrentUser user) {
+    if (user == null || user.databaseId() == null) {
+      throw new IllegalArgumentException("Authenticated user is required");
+    }
+    return user.databaseId();
+  }
+
+  private static CurrentUser legacyUser() {
+    return new CurrentUser(1L, new UUID(0L, 1L), "legacy-demo@invalid.local", "Legacy Demo");
   }
 
   public record ReportQueryResult(HttpStatus status, Object body) {}

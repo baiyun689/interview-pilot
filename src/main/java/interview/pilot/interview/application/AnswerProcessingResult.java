@@ -8,6 +8,7 @@ import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.domain.GeneratedQuestion;
 import interview.pilot.interview.domain.InterviewDecision;
 import interview.pilot.interview.domain.SessionStatus;
+import interview.pilot.interview.rag.RagContextSnapshot;
 
 public record AnswerProcessingResult(
     UUID sessionId,
@@ -18,7 +19,16 @@ public record AnswerProcessingResult(
     GeneratedQuestion nextQuestion,
     Difficulty nextDifficulty,
     SessionStatus sessionStatus,
-    boolean replayed) {
+    boolean replayed,
+    RagContextSnapshot nextRagSnapshot) {
+
+  public AnswerProcessingResult(
+      UUID sessionId, UUID requestId, int turnNo, AnswerEvaluation evaluation,
+      InterviewDecision decision, GeneratedQuestion nextQuestion,
+      Difficulty nextDifficulty, SessionStatus sessionStatus, boolean replayed) {
+    this(sessionId, requestId, turnNo, evaluation, decision, nextQuestion,
+        nextDifficulty, sessionStatus, replayed, RagContextSnapshot.notConfigured());
+  }
 
   public AnswerProcessingResult {
     sessionId = Objects.requireNonNull(sessionId, "sessionId must not be null");
@@ -34,11 +44,12 @@ public record AnswerProcessingResult(
     if ((sessionStatus == SessionStatus.EVALUATING) != (nextQuestion == null)) {
       throw new IllegalArgumentException("nextQuestion does not match session status");
     }
+    nextRagSnapshot = nextRagSnapshot == null ? RagContextSnapshot.notConfigured() : nextRagSnapshot;
   }
 
   public AnswerProcessingResult asReplay() {
     return new AnswerProcessingResult(
         sessionId, requestId, turnNo, evaluation, decision, nextQuestion,
-        nextDifficulty, sessionStatus, true);
+        nextDifficulty, sessionStatus, true, nextRagSnapshot);
   }
 }

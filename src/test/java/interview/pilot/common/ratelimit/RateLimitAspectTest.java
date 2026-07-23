@@ -12,6 +12,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.ArgumentMatchers.eq;
 
 import java.time.Duration;
+import java.lang.reflect.Method;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -19,18 +20,27 @@ import org.junit.jupiter.api.Test;
 import org.springframework.aop.aspectj.annotation.AspectJProxyFactory;
 import org.springframework.mock.web.MockHttpServletRequest;
 
+import interview.pilot.auth.application.CurrentUser;
+import interview.pilot.auth.application.CurrentUserProvider;
+import interview.pilot.ai.provider.AiProviderController;
+import interview.pilot.async.api.AsyncTaskController;
+import interview.pilot.interview.api.InterviewController;
+import interview.pilot.interview.api.SubmitAnswerRequest;
+
 class RateLimitAspectTest {
   private RateLimiter limiter;
   private SampleApi api;
+  private CurrentUserProvider currentUserProvider;
 
   @BeforeEach
   void setUp() {
     limiter = mock(RateLimiter.class);
+    currentUserProvider = mock(CurrentUserProvider.class);
     when(limiter.allowFixedWindow(anyString(), anyInt(), any(Duration.class))).thenReturn(true);
     var request = new MockHttpServletRequest();
     request.setRemoteAddr("192.0.2.10");
     var factory = new AspectJProxyFactory(new SampleApi());
-    factory.addAspect(new RateLimitAspect(limiter, request));
+    factory.addAspect(new RateLimitAspect(limiter, request, currentUserProvider));
     api = factory.getProxy();
   }
 
@@ -91,6 +101,36 @@ class RateLimitAspectTest {
     assertThat(keys.getAllValues()).hasSize(2).doesNotHaveDuplicates();
   }
 
+  @Test
+  void userBucketIsDerivedFromTheAuthenticatedUser() {
+    UUID userId = UUID.randomUUID();
+    when(currentUserProvider.require()).thenReturn(
+        new CurrentUser(7L, userId, "user@example.com", "User"));
+
+    api.userScoped();
+
+    verify(limiter).allowFixedWindow(
+        eq("user:sampleapi.userscoped:" + userId), eq(4), eq(Duration.ofSeconds(60)));
+  }
+
+  @Test
+  void everyExpensiveAuthenticatedEndpointHasAUserQuotaMatchingItsIpQuota() throws Exception {
+    assertUserQuota(AiProviderController.class.getMethod("test", String.class), 10);
+    assertUserQuota(AsyncTaskController.class.getMethod(
+        "retry", UUID.class, jakarta.servlet.http.HttpServletRequest.class), 10);
+    assertUserQuota(InterviewController.class.getMethod(
+        "submitAnswer", UUID.class, SubmitAnswerRequest.class), 30);
+  }
+
+  private static void assertUserQuota(Method method, int capacity) {
+    assertThat(method.getAnnotationsByType(RateLimit.class))
+        .anySatisfy(rule -> {
+          assertThat(rule.scope()).isEqualTo(RateLimitScope.USER);
+          assertThat(rule.capacity()).isEqualTo(capacity);
+          assertThat(rule.expensive()).isTrue();
+        });
+  }
+
   static class SampleApi {
     @RateLimit(scope = RateLimitScope.IP, capacity = 1, expensive = true)
     public String expensive() { return "ok"; }
@@ -104,5 +144,8 @@ class RateLimitAspectTest {
     @RateLimit(scope = RateLimitScope.IP, capacity = 2, expensive = true)
     @RateLimit(scope = RateLimitScope.SESSION, capacity = 3, expensive = true)
     public String both(UUID sessionId) { return "ok"; }
+
+    @RateLimit(scope = RateLimitScope.USER, capacity = 4, expensive = true)
+    public String userScoped() { return "ok"; }
   }
 }

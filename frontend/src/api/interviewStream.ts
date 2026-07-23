@@ -1,4 +1,4 @@
-import { ApiClientError } from './request'
+import { ApiClientError, authenticatedInit, notifyUnauthorized } from './request'
 import type { InterviewStreamEvent } from '../types/interview'
 
 interface StreamOptions {
@@ -30,15 +30,18 @@ export async function postInterviewAnswerStream(
 ): Promise<void> {
   let response: Response
   try {
-    response = await fetch(`/api/interviews/${encodeURIComponent(sessionId)}/answers/stream`, {
+    response = await fetch(`/api/interviews/${encodeURIComponent(sessionId)}/answers/stream`, authenticatedInit({
       method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
       body: JSON.stringify(input), signal: options.signal,
-    })
+    }))
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
     throw new ApiClientError(0, 'STREAM_DISCONNECTED', '连接中断，请确认恢复状态后重试', null)
   }
-  if (!response.ok) throw await httpError(response)
+  if (!response.ok) {
+    if (response.status === 401) notifyUnauthorized()
+    throw await httpError(response)
+  }
   if (!response.body) throw new ApiClientError(response.status, 'EMPTY_STREAM', '服务未返回流式数据', traceId(response))
 
   const reader = response.body.getReader()

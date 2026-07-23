@@ -6,7 +6,9 @@ import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ResumeRepository extends JpaRepository<ResumeEntity, Long> {
-  Optional<ResumeEntity> findByContentHash(String contentHash);
+  Optional<ResumeEntity> findByIdAndUserAccountId(Long id, Long userAccountId);
 
-  List<ResumeEntity> findAllByOrderByCreatedAtDesc();
+  Optional<ResumeEntity> findByUserAccountIdAndContentHash(Long userAccountId, String contentHash);
+
+  List<ResumeEntity> findAllByUserAccountIdOrderByCreatedAtDesc(Long userAccountId);
 }

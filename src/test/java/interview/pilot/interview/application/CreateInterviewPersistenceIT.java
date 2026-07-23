@@ -86,7 +86,7 @@ class CreateInterviewPersistenceIT {
         "Java engineer", List.of("Java"), List.of(), List.of("Reliable APIs"), List.of());
     requirements = new JobRequirements(List.of("Java", "Spring"), List.of("MySQL"));
     plan = new InterviewPlan(List.of("Java", "Spring"), 8);
-    ResumeEntity resume = ResumeEntity.pending(
+    ResumeEntity resume = ResumeEntity.pending(1L,
         "candidate.txt", UUID.randomUUID().toString().replace("-", "")
             + UUID.randomUUID().toString().replace("-", ""),
         "Built Java services");
@@ -151,7 +151,8 @@ class CreateInterviewPersistenceIT {
     stubSuccessfulAi("deepseek", "deepseek-chat");
     when(questions.firstQuestion(org.mockito.ArgumentMatchers.eq("deepseek"),
         org.mockito.ArgumentMatchers.eq(plan), org.mockito.ArgumentMatchers.eq(profile),
-        org.mockito.ArgumentMatchers.eq(requirements), org.mockito.ArgumentMatchers.any()))
+        org.mockito.ArgumentMatchers.eq(requirements), org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any()))
         .thenAnswer(invocation -> {
       ResumeEntity changed = resumes.findById(resumeId).orElseThrow();
       changed.setStatus(ResumeStatus.FAILED);
@@ -206,7 +207,8 @@ class CreateInterviewPersistenceIT {
     });
     when(questions.firstQuestion(org.mockito.ArgumentMatchers.eq(providerId),
         org.mockito.ArgumentMatchers.eq(plan), org.mockito.ArgumentMatchers.eq(profile),
-        org.mockito.ArgumentMatchers.eq(requirements), org.mockito.ArgumentMatchers.any()))
+        org.mockito.ArgumentMatchers.eq(requirements), org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.any()))
         .thenAnswer(invocation -> {
       assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
       return new GeneratedQuestion("Explain optimistic locking.", "Java");

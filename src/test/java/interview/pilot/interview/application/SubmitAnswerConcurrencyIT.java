@@ -105,7 +105,7 @@ class SubmitAnswerConcurrencyIT {
     executor = Executors.newFixedThreadPool(2);
     reset(answerEvaluator, questionGenerator);
 
-    ResumeEntity resume = ResumeEntity.pending(
+    ResumeEntity resume = ResumeEntity.pending(1L,
         "candidate.txt", UUID.randomUUID().toString().replace("-", "")
             + UUID.randomUUID().toString().replace("-", ""), "Java services");
     resume.setStatus(ResumeStatus.READY);

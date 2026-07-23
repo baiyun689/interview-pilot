@@ -51,20 +51,22 @@ class CreateInterviewServiceTest {
     InterviewPlan plan = new InterviewPlan(List.of("Java", "Spring"), 8);
     GeneratedQuestion first = new GeneratedQuestion("Explain optimistic locking.", "Java");
 
-    when(resumes.findById(7L)).thenReturn(java.util.Optional.of(resume));
+    when(resumes.findByIdAndUserAccountId(7L, 1L)).thenReturn(java.util.Optional.of(resume));
     when(providers.resolveEnabled("deepseek"))
         .thenReturn(new AiProviderDescriptor("deepseek", "DeepSeek", "deepseek-chat", true, false));
     when(extractor.extract(eq("deepseek"), eq("Build reliable Java services"), any())).thenReturn(job);
     when(planner.plan(eq("deepseek"), eq(profile), eq(job), eq(Difficulty.MEDIUM), eq(8), any()))
         .thenReturn(plan);
-    when(questions.firstQuestion(eq("deepseek"), eq(plan), eq(profile), eq(job), any()))
+    when(questions.firstQuestion(eq("deepseek"), eq(plan), eq(profile), eq(job), any(), any()))
         .thenReturn(first);
     when(validator.validate(any(ResumeProfile.class))).thenReturn(Set.of());
     when(store.create(any())).thenReturn(response("deepseek", "deepseek-chat"));
 
+    var scopeResolver = mock(interview.pilot.knowledge.retrieval.KnowledgeScopeResolver.class);
+    var retriever = mock(interview.pilot.knowledge.retrieval.KnowledgeRetriever.class);
     CreateInterviewService service = new CreateInterviewService(
         resumes, providers, extractor, planner, questions, store, objectMapper, validator,
-        new ClasspathInterviewSkillCatalog());
+        new ClasspathInterviewSkillCatalog(), scopeResolver, retriever);
 
     InterviewSessionResponse result = service.create(new CreateInterviewRequest(
         7L, " Backend Engineer ", " Build reliable Java services ", Difficulty.MEDIUM, 8,
@@ -76,7 +78,7 @@ class CreateInterviewServiceTest {
     verify(providers).resolveEnabled("deepseek");
     verify(extractor).extract(eq("deepseek"), eq("Build reliable Java services"), any());
     verify(planner).plan(eq("deepseek"), eq(profile), eq(job), eq(Difficulty.MEDIUM), eq(8), any());
-    verify(questions).firstQuestion(eq("deepseek"), eq(plan), eq(profile), eq(job), any());
+    verify(questions).firstQuestion(eq("deepseek"), eq(plan), eq(profile), eq(job), any(), any());
     verify(store).create(org.mockito.ArgumentMatchers.argThat(creation ->
         creation.skillSnapshot().id().equals("java-backend")
             && creation.skillSnapshot().rubric().contains("评分标准")));
@@ -92,12 +94,14 @@ class CreateInterviewServiceTest {
     InterviewCreationStore store = mock(InterviewCreationStore.class);
     ObjectMapper objectMapper = new ObjectMapper();
     Validator validator = mock(Validator.class);
-    ResumeEntity pending = ResumeEntity.pending("resume.txt", "a".repeat(64), "Java");
-    when(resumes.findById(7L)).thenReturn(java.util.Optional.of(pending));
+    ResumeEntity pending = ResumeEntity.pending(1L, "resume.txt", "a".repeat(64), "Java");
+    when(resumes.findByIdAndUserAccountId(7L, 1L)).thenReturn(java.util.Optional.of(pending));
 
+    var scopeResolver = mock(interview.pilot.knowledge.retrieval.KnowledgeScopeResolver.class);
+    var retriever = mock(interview.pilot.knowledge.retrieval.KnowledgeRetriever.class);
     CreateInterviewService service = new CreateInterviewService(
         resumes, providers, extractor, planner, questions, store, objectMapper, validator,
-        new ClasspathInterviewSkillCatalog());
+        new ClasspathInterviewSkillCatalog(), scopeResolver, retriever);
 
     assertThatThrownBy(() -> service.create(new CreateInterviewRequest(
         7L, "Backend Engineer", "Build reliable Java services", Difficulty.MEDIUM, 8, null)))
@@ -119,16 +123,19 @@ class CreateInterviewServiceTest {
     InterviewCreationStore store = mock(InterviewCreationStore.class);
     Validator validator = mock(Validator.class);
     JobRequirements job = new JobRequirements(List.of("Java"), List.of());
-    when(resumes.findById(7L)).thenReturn(java.util.Optional.of(readyResume()));
+    when(resumes.findByIdAndUserAccountId(7L, 1L))
+        .thenReturn(java.util.Optional.of(readyResume()));
     when(validator.validate(any(ResumeProfile.class))).thenReturn(Set.of());
     when(providers.resolveEnabled(null)).thenReturn(
         new AiProviderDescriptor("qwen", "Qwen", "qwen-plus", true, true));
     when(extractor.extract(eq("qwen"), eq("Build reliable Java services"), any())).thenReturn(job);
     when(planner.plan(eq("qwen"), eq(profile()), eq(job), eq(Difficulty.MEDIUM), eq(8), any()))
         .thenReturn(new InterviewPlan(List.of("Java"), 9));
+    var scopeResolver = mock(interview.pilot.knowledge.retrieval.KnowledgeScopeResolver.class);
+    var retriever = mock(interview.pilot.knowledge.retrieval.KnowledgeRetriever.class);
     var service = new CreateInterviewService(
         resumes, providers, extractor, planner, questions, store, new ObjectMapper(), validator,
-        new ClasspathInterviewSkillCatalog());
+        new ClasspathInterviewSkillCatalog(), scopeResolver, retriever);
 
     assertThatThrownBy(() -> service.create(new CreateInterviewRequest(
         7L, "Backend Engineer", "Build reliable Java services", Difficulty.MEDIUM, 8, null)))
@@ -149,8 +156,11 @@ class CreateInterviewServiceTest {
     QuestionGenerator questions = mock(QuestionGenerator.class);
     InterviewCreationStore store = mock(InterviewCreationStore.class);
     Validator validator = mock(Validator.class);
+    var scopeResolver = mock(interview.pilot.knowledge.retrieval.KnowledgeScopeResolver.class);
+    var retriever = mock(interview.pilot.knowledge.retrieval.KnowledgeRetriever.class);
     JobRequirements job = new JobRequirements(List.of("Java", "Spring"), List.of());
-    when(resumes.findById(7L)).thenReturn(java.util.Optional.of(readyResume()));
+    when(resumes.findByIdAndUserAccountId(7L, 1L))
+        .thenReturn(java.util.Optional.of(readyResume()));
     when(validator.validate(any(ResumeProfile.class))).thenReturn(Set.of());
     when(providers.resolveEnabled(null)).thenReturn(
         new AiProviderDescriptor("qwen", "Qwen", "qwen-plus", true, true));
@@ -159,7 +169,7 @@ class CreateInterviewServiceTest {
         .thenReturn(new InterviewPlan(List.of("Java"), 8));
     var service = new CreateInterviewService(
         resumes, providers, extractor, planner, questions, store, new ObjectMapper(), validator,
-        new ClasspathInterviewSkillCatalog());
+        new ClasspathInterviewSkillCatalog(), scopeResolver, retriever);
 
     assertThatThrownBy(() -> service.create(new CreateInterviewRequest(
         7L, "Backend Engineer", "Build reliable Java services", Difficulty.MEDIUM, 8, null)))
@@ -170,7 +180,7 @@ class CreateInterviewServiceTest {
   }
 
   private static ResumeEntity readyResume() {
-    ResumeEntity resume = ResumeEntity.pending("resume.txt", "a".repeat(64), "Java Spring");
+    ResumeEntity resume = ResumeEntity.pending(1L, "resume.txt", "a".repeat(64), "Java Spring");
     resume.setStatus(ResumeStatus.READY);
     resume.setSkillsSnapshot("""
         {"summary":"Backend engineer","technicalSkills":["Java"],"projects":[],

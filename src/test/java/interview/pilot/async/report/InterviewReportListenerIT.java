@@ -41,6 +41,9 @@ import interview.pilot.ai.AiStructuredOutputException;
 import interview.pilot.async.domain.AsyncTaskStatus;
 import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.application.AsyncTaskService;
+import interview.pilot.auth.application.CurrentUser;
+import interview.pilot.auth.infrastructure.UserAccountEntity;
+import interview.pilot.auth.infrastructure.UserAccountRepository;
 import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.common.exception.BusinessException;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
@@ -111,6 +114,7 @@ class InterviewReportListenerIT {
   @Autowired MeterRegistry meters;
   @Autowired ProcessingClaim claims;
   @Autowired AsyncTaskService taskService;
+  @Autowired UserAccountRepository users;
   @MockitoSpyBean InterviewReportHandler handler;
 
   @BeforeEach
@@ -225,7 +229,7 @@ class InterviewReportListenerIT {
     String token = claims.acquire(key, Duration.ofMinutes(1)).orElseThrow();
     claims.complete(key, token, Duration.ofHours(1));
 
-    var retried = taskService.retry(task.getTaskId(), UUID.randomUUID());
+    var retried = taskService.retry(owner(), task.getTaskId(), UUID.randomUUID());
 
     assertThat(retried.status()).isEqualTo(AsyncTaskStatus.PENDING);
     assertThat(retried.attemptCount()).isEqualTo(4);
@@ -249,7 +253,7 @@ class InterviewReportListenerIT {
     claims.acquire(key, Duration.ofMinutes(1)).orElseThrow();
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
-            () -> taskService.retry(task.getTaskId(), UUID.randomUUID()))
+            () -> taskService.retry(owner(), task.getTaskId(), UUID.randomUUID()))
         .isInstanceOf(BusinessException.class)
         .hasMessage("Task processing is still active");
     assertThat(tasks.findById(work.taskId()).orElseThrow().getStatus())
@@ -312,7 +316,7 @@ class InterviewReportListenerIT {
     AsyncTaskEntity task = tasks.findById(work.taskId()).orElseThrow();
     task.setStatus(AsyncTaskStatus.DEAD);
     tasks.saveAndFlush(task);
-    taskService.retry(task.getTaskId(), UUID.randomUUID());
+    taskService.retry(owner(), task.getTaskId(), UUID.randomUUID());
     assertThat(tasks.findById(work.taskId()).orElseThrow().getExecutionEpoch()).isEqualTo(1);
 
     send(work.message(), 3);
@@ -355,7 +359,7 @@ class InterviewReportListenerIT {
     AsyncTaskEntity task = tasks.findById(work.taskId()).orElseThrow();
     task.setStatus(AsyncTaskStatus.DEAD);
     tasks.saveAndFlush(task);
-    taskService.retry(task.getTaskId(), UUID.randomUUID());
+    taskService.retry(owner(), task.getTaskId(), UUID.randomUUID());
 
     continueOldDelivery.countDown();
     verify(handler, org.mockito.Mockito.timeout(10_000)).handle(work.message());
@@ -369,7 +373,7 @@ class InterviewReportListenerIT {
   }
 
   private Work completedInterview() {
-    ResumeEntity resume = resumes.saveAndFlush(ResumeEntity.pending(
+    ResumeEntity resume = resumes.saveAndFlush(ResumeEntity.pending(1L,
         "candidate.txt", UUID.randomUUID().toString().replace("-", "")
             + UUID.randomUUID().toString().replace("-", ""), "Java"));
     JobProfileEntity job = jobs.saveAndFlush(JobProfileEntity.create(
@@ -400,7 +404,7 @@ class InterviewReportListenerIT {
     turn.setStatus(TurnStatus.COMPLETED);
     turns.saveAndFlush(turn);
     AsyncTaskEntity task = AsyncTaskEntity.pending(
-        AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + session.getSessionId(),
+        1L, AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + session.getSessionId(),
         "{\"sessionId\":\"" + session.getSessionId() + "\"}");
     task.setTaskId(UUID.randomUUID());
     task = tasks.saveAndFlush(task);
@@ -445,6 +449,29 @@ class InterviewReportListenerIT {
 
   private static String anyString() {
     return org.mockito.ArgumentMatchers.anyString();
+  }
+
+  @Test
+  void taskOwnerMismatchCannotGenerateOrWriteAnotherUsersReport() {
+    Work work = completedInterview();
+    UserAccountEntity other = users.save(UserAccountEntity.register(
+        "report-mismatch-" + UUID.randomUUID() + "@example.com", "!", "Other"));
+    tasks.deleteById(work.taskId());
+    tasks.flush();
+    AsyncTaskEntity task = tasks.saveAndFlush(AsyncTaskEntity.pending(
+        other.getId(), AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + work.sessionId(),
+        "{\"sessionId\":\"" + work.sessionId() + "\"}"));
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> handler.handle(task.getTaskId()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Interview report business key is invalid");
+    verify(generator, never()).generate(anyString(), anyString(), anyList(),
+        org.mockito.ArgumentMatchers.any());
+    assertThat(reports.count()).isZero();
+  }
+
+  private static CurrentUser owner() {
+    return new CurrentUser(1L, new UUID(0L, 1L), "legacy-demo@invalid.local", "Legacy Demo");
   }
 
   private record Work(UUID sessionId, Long taskId, TaskMessage message) {}

@@ -18,6 +18,7 @@ import org.springframework.web.multipart.MultipartFile;
 import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
+import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.common.exception.BusinessException;
 import interview.pilot.resume.infrastructure.ResumeEntity;
 import interview.pilot.resume.infrastructure.ResumeRepository;
@@ -42,36 +43,39 @@ public class ResumeUploadService {
     this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
   }
 
-  public UploadResumeResult upload(MultipartFile file) {
+  public UploadResumeResult upload(CurrentUser user, MultipartFile file) {
     String cleanedText = extractor.extract(file);
     String contentHash = sha256(cleanedText);
+    Long userAccountId = requireOwner(user);
 
-    var existing = resumeRepository.findByContentHash(contentHash);
+    var existing = resumeRepository.findByUserAccountIdAndContentHash(userAccountId, contentHash);
     if (existing.isPresent()) {
       return existingResult(existing.orElseThrow());
     }
 
     try {
       return Objects.requireNonNull(transactionTemplate.execute(status ->
-          createOrFindExisting(file.getOriginalFilename(), contentHash, cleanedText)));
+          createOrFindExisting(userAccountId, file.getOriginalFilename(), contentHash, cleanedText)));
     } catch (DataIntegrityViolationException conflict) {
-      return recoverWinner(contentHash, conflict);
+      return recoverWinner(userAccountId, contentHash, conflict);
     }
   }
 
   private UploadResumeResult createOrFindExisting(
+      Long userAccountId,
       String originalFilename,
       String contentHash,
       String cleanedText) {
-    var existing = resumeRepository.findByContentHash(contentHash);
+    var existing = resumeRepository.findByUserAccountIdAndContentHash(userAccountId, contentHash);
     if (existing.isPresent()) {
       return existingResult(existing.orElseThrow());
     }
 
     ResumeEntity resume = resumeRepository.saveAndFlush(ResumeEntity.pending(
-        originalFilename, contentHash, cleanedText));
+        userAccountId, originalFilename, contentHash, cleanedText));
     String bizKey = bizKey(resume.getId());
     AsyncTaskEntity task = taskRepository.save(AsyncTaskEntity.pending(
+        userAccountId,
         AsyncTaskType.RESUME_ANALYSIS,
         bizKey,
         "{\"resumeId\":" + resume.getId() + "}"));
@@ -79,17 +83,18 @@ public class ResumeUploadService {
   }
 
   private UploadResumeResult recoverWinner(
+      Long userAccountId,
       String contentHash,
       DataIntegrityViolationException conflict) {
     return Objects.requireNonNull(transactionTemplate.execute(status ->
-        resumeRepository.findByContentHash(contentHash)
+        resumeRepository.findByUserAccountIdAndContentHash(userAccountId, contentHash)
             .map(this::existingResult)
             .orElseThrow(() -> conflict)));
   }
 
   private UploadResumeResult existingResult(ResumeEntity resume) {
-    AsyncTaskEntity task = taskRepository.findByTaskTypeAndBizKey(
-        AsyncTaskType.RESUME_ANALYSIS, bizKey(resume.getId()))
+    AsyncTaskEntity task = taskRepository.findByTaskTypeAndBizKeyAndUserAccountId(
+        AsyncTaskType.RESUME_ANALYSIS, bizKey(resume.getId()), resume.getUserAccountId())
         .orElseThrow(() -> new BusinessException(
             "ANALYSIS_TASK_NOT_FOUND",
             "The resume analysis task could not be found",
@@ -99,6 +104,10 @@ public class ResumeUploadService {
 
   private static String bizKey(Long resumeId) {
     return "resume:" + resumeId;
+  }
+
+  private static Long requireOwner(CurrentUser user) {
+    return Objects.requireNonNull(Objects.requireNonNull(user, "user").databaseId(), "user.databaseId");
   }
 
   private static String sha256(String cleanedText) {

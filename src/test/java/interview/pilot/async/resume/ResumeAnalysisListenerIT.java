@@ -40,6 +40,7 @@ import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.async.messaging.RabbitTopologyConfig;
 import interview.pilot.async.messaging.TaskMessage;
 import interview.pilot.async.application.AsyncTaskService;
+import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.resume.application.ResumeProfiler;
 import interview.pilot.resume.application.ResumeAnalysisHandler;
 import interview.pilot.resume.domain.ResumeProfile;
@@ -298,7 +299,7 @@ class ResumeAnalysisListenerIT {
     String token = processingClaim.acquire(key, Duration.ofMinutes(1)).orElseThrow();
     processingClaim.complete(key, token, Duration.ofHours(1));
 
-    var retried = taskService.retry(task.getTaskId(), UUID.randomUUID());
+    var retried = taskService.retry(owner(), task.getTaskId(), UUID.randomUUID());
 
     assertThat(retried.status()).isEqualTo(AsyncTaskStatus.PENDING);
     assertThat(retried.attemptCount()).isEqualTo(4);
@@ -333,7 +334,7 @@ class ResumeAnalysisListenerIT {
     AsyncTaskEntity task = taskRepository.findById(work.task().getId()).orElseThrow();
     task.setStatus(AsyncTaskStatus.DEAD);
     taskRepository.saveAndFlush(task);
-    taskService.retry(task.getTaskId(), UUID.randomUUID());
+    taskService.retry(owner(), task.getTaskId(), UUID.randomUUID());
 
     continueOldDelivery.countDown();
     verify(handler, org.mockito.Mockito.timeout(10_000)).handle(work.message());
@@ -370,13 +371,13 @@ class ResumeAnalysisListenerIT {
   }
 
   private Work pendingWork() {
-    ResumeEntity resume = resumeRepository.saveAndFlush(ResumeEntity.pending(
+    ResumeEntity resume = resumeRepository.saveAndFlush(ResumeEntity.pending(1L,
         "candidate.txt",
         UUID.randomUUID().toString().replace("-", "")
             + UUID.randomUUID().toString().replace("-", ""),
         "Built a Payments API using Java and Spring Boot."));
     AsyncTaskEntity task = AsyncTaskEntity.pending(
-        AsyncTaskType.RESUME_ANALYSIS,
+        1L, AsyncTaskType.RESUME_ANALYSIS,
         "resume:" + resume.getId(),
         "{\"resumeId\":" + resume.getId() + "}");
     task.setTaskId(UUID.randomUUID());
@@ -393,6 +394,10 @@ class ResumeAnalysisListenerIT {
             "Payments API", "Built an API", List.of("Spring Boot"))),
         List.of("Backend engineering"),
         List.of("Scale not stated"));
+  }
+
+  private static CurrentUser owner() {
+    return new CurrentUser(1L, new UUID(0L, 1L), "legacy-demo@invalid.local", "Legacy Demo");
   }
 
   private AsyncTaskStatus taskStatus(Work work) {

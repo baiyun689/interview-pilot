@@ -1,6 +1,7 @@
 package interview.pilot.async.infrastructure;
 
 import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
 
 import org.hibernate.annotations.CreationTimestamp;
@@ -34,6 +35,10 @@ public class AsyncTaskEntity {
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
+
+  @Setter(AccessLevel.NONE)
+  @Column(name = "user_account_id", nullable = false)
+  private Long userAccountId;
 
   @UuidGenerator
   @JdbcTypeCode(SqlTypes.CHAR)
@@ -83,10 +88,12 @@ public class AsyncTaskEntity {
   private long version;
 
   public static AsyncTaskEntity pending(
+      Long userAccountId,
       AsyncTaskType taskType,
       String bizKey,
       String payloadSnapshot) {
     var task = new AsyncTaskEntity();
+    task.userAccountId = Objects.requireNonNull(userAccountId, "userAccountId");
     task.taskType = taskType;
     task.bizKey = bizKey;
     task.status = AsyncTaskStatus.PENDING;
@@ -96,4 +103,5 @@ public class AsyncTaskEntity {
     task.publishAttempts = 0;
     return task;
   }
+
 }

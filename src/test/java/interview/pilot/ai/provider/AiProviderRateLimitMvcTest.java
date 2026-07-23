@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -41,6 +42,8 @@ import interview.pilot.common.ratelimit.RateLimitAspect;
 import interview.pilot.common.ratelimit.RateLimitBackendException;
 import interview.pilot.common.ratelimit.RateLimitProperties;
 import interview.pilot.common.ratelimit.RateLimiter;
+import interview.pilot.auth.application.CurrentUser;
+import interview.pilot.auth.application.CurrentUserProvider;
 
 @WebMvcTest(
     controllers = AiProviderController.class,
@@ -75,13 +78,16 @@ class AiProviderRateLimitMvcTest {
   @MockitoBean AiSettingRepository settings;
   @MockitoBean RateLimiter limiter;
   @MockitoBean AiMetrics metrics;
+  @MockitoBean CurrentUserProvider currentUserProvider;
 
   @BeforeEach
   void setUp() {
-    reset(limiter, settings, metrics);
+    reset(limiter, settings, metrics, currentUserProvider);
     var setting = new AiSettingEntity();
     setting.setProviderId("test");
     when(settings.findById(1L)).thenReturn(Optional.of(setting));
+    when(currentUserProvider.require()).thenReturn(
+        new CurrentUser(1L, UUID.randomUUID(), "user@example.com", "User"));
   }
 
   @Test

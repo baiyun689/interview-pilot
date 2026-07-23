@@ -4,7 +4,7 @@ WORKDIR /workspace
 
 COPY gradlew gradlew.bat build.gradle settings.gradle ./
 COPY gradle ./gradle
-RUN chmod +x gradlew && ./gradlew --no-daemon dependencies
+RUN sed -i 's/\r$//' gradlew && chmod +x gradlew && ./gradlew --no-daemon dependencies
 
 COPY src ./src
 RUN ./gradlew --no-daemon clean bootJar
@@ -15,7 +15,9 @@ RUN apt-get update \
     && apt-get install --no-install-recommends -y curl \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system interviewpilot \
-    && useradd --system --gid interviewpilot --home-dir /app --shell /usr/sbin/nologin interviewpilot
+    && useradd --system --gid interviewpilot --home-dir /app --shell /usr/sbin/nologin interviewpilot \
+    && mkdir -p /app/data/knowledge \
+    && chown -R interviewpilot:interviewpilot /app
 
 WORKDIR /app
 COPY --from=build --chown=interviewpilot:interviewpilot /workspace/build/libs/interview-pilot-*.jar app.jar

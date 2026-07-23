@@ -18,6 +18,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import interview.pilot.interview.application.CreateInterviewService;
 import interview.pilot.interview.application.InterviewQueryService;
 import interview.pilot.interview.application.InterviewSseService;
+import interview.pilot.auth.application.CurrentUserProvider;
 import jakarta.validation.Valid;
 import interview.pilot.common.ratelimit.RateLimit;
 import interview.pilot.common.ratelimit.RateLimitScope;
@@ -28,39 +29,43 @@ public class InterviewController {
   private final CreateInterviewService createService;
   private final InterviewQueryService queryService;
   private final InterviewSseService sseService;
+  private final CurrentUserProvider currentUser;
 
   public InterviewController(
       CreateInterviewService createService,
       InterviewQueryService queryService,
-      InterviewSseService sseService) {
+      InterviewSseService sseService,
+      CurrentUserProvider currentUser) {
     this.createService = createService;
     this.queryService = queryService;
     this.sseService = sseService;
+    this.currentUser = currentUser;
   }
 
   @PostMapping
   @RateLimit(scope = RateLimitScope.IP, capacity = 10, expensive = true)
+  @RateLimit(scope = RateLimitScope.USER, capacity = 10, expensive = true)
   @ResponseStatus(HttpStatus.CREATED)
   public InterviewSessionResponse create(@Valid @RequestBody CreateInterviewRequest request) {
-    return createService.create(request);
+    return createService.create(currentUser.require(), request);
   }
 
   @GetMapping("/{sessionId}")
   @RateLimit(scope = RateLimitScope.IP, capacity = 120)
   public InterviewSessionResponse get(@PathVariable UUID sessionId) {
-    return queryService.get(sessionId);
+    return queryService.get(currentUser.require(), sessionId);
   }
 
   @GetMapping
   @RateLimit(scope = RateLimitScope.IP, capacity = 120)
   public List<InterviewHistoryResponse> list() {
-    return queryService.list();
+    return queryService.list(currentUser.require());
   }
 
   @GetMapping("/{sessionId}/report")
   @RateLimit(scope = RateLimitScope.IP, capacity = 120)
   public ResponseEntity<?> report(@PathVariable UUID sessionId) {
-    var result = queryService.report(sessionId);
+    var result = queryService.report(currentUser.require(), sessionId);
     return ResponseEntity.status(result.status()).body(result.body());
   }
 
@@ -70,9 +75,10 @@ public class InterviewController {
       produces = MediaType.TEXT_EVENT_STREAM_VALUE)
   @RateLimit(scope = RateLimitScope.IP, capacity = 30, expensive = true)
   @RateLimit(scope = RateLimitScope.SESSION, capacity = 12, expensive = true)
+  @RateLimit(scope = RateLimitScope.USER, capacity = 30, expensive = true)
   public SseEmitter submitAnswer(
       @PathVariable UUID sessionId,
       @Valid @RequestBody SubmitAnswerRequest request) {
-    return sseService.stream(sessionId, request);
+    return sseService.stream(currentUser.require(), sessionId, request);
   }
 }

@@ -25,19 +25,24 @@ public record InterviewSessionResponse(
     List<TurnResponse> turns,
     String skillId,
     String skillName,
-    String skillVersion) {
+    String skillVersion,
+    List<KnowledgeBaseSummary> knowledgeBases) {
 
   public InterviewSessionResponse(
       UUID sessionId, Long resumeId, String jobTitle, String jdText,
       SessionStatus status, Difficulty difficulty, int currentTurnNo, int totalTurnBudget,
       String providerId, String modelName, InterviewPlan plan, List<TurnResponse> turns) {
     this(sessionId, resumeId, jobTitle, jdText, status, difficulty, currentTurnNo,
-        totalTurnBudget, providerId, modelName, plan, turns, "custom", "自定义岗位", "legacy");
+        totalTurnBudget, providerId, modelName, plan, turns, "custom", "自定义岗位", "legacy",
+        List.of());
   }
 
   public InterviewSessionResponse {
     turns = List.copyOf(turns);
+    knowledgeBases = knowledgeBases == null ? List.of() : List.copyOf(knowledgeBases);
   }
+
+  public record KnowledgeBaseSummary(UUID knowledgeBaseId, String name) {}
 
   public record TurnResponse(
       UUID requestId,

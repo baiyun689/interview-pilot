@@ -18,4 +18,11 @@ public record ResumeProfile(
       @NotBlank @Size(max = 200) String name,
       @NotBlank @Size(max = 1_000) String description,
       @NotNull @Size(max = 64) List<@NotBlank @Size(max = 100) String> technologies) {}
+
+  /** Fallback when the interviewer creates a session without a resume. */
+  public static ResumeProfile empty() {
+    return new ResumeProfile(
+        "候选人未提供简历，请完全依据岗位要求与面试技能方向评估。",
+        List.of(), List.of(), List.of(), List.of());
+  }
 }

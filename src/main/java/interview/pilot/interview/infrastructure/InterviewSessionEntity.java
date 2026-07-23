@@ -1,6 +1,7 @@
 package interview.pilot.interview.infrastructure;
 
 import java.time.Instant;
+import java.util.Objects;
 import java.util.UUID;
 
 import org.hibernate.annotations.CreationTimestamp;
@@ -35,12 +36,15 @@ public class InterviewSessionEntity {
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
 
+  @Column(name = "user_account_id", nullable = false, updatable = false)
+  private Long userAccountId;
+
   @UuidGenerator
   @JdbcTypeCode(SqlTypes.CHAR)
   @Column(name = "session_id", nullable = false, unique = true, length = 36)
   private UUID sessionId;
 
-  @Column(name = "resume_id", nullable = false)
+  @Column(name = "resume_id")
   private Long resumeId;
 
   @Column(name = "job_profile_id", nullable = false)
@@ -77,6 +81,10 @@ public class InterviewSessionEntity {
   @Column(name = "context_snapshot", columnDefinition = "json")
   private String contextSnapshot;
 
+  @JdbcTypeCode(SqlTypes.JSON)
+  @Column(name = "knowledge_scope_snapshot", columnDefinition = "json")
+  private String knowledgeScopeSnapshot;
+
   @CreationTimestamp
   @Column(name = "created_at", nullable = false, updatable = false)
   private Instant createdAt;
@@ -93,6 +101,7 @@ public class InterviewSessionEntity {
   private long version;
 
   public static InterviewSessionEntity create(
+      Long userAccountId,
       Long resumeId,
       Long jobProfileId,
       Difficulty difficulty,
@@ -101,6 +110,7 @@ public class InterviewSessionEntity {
       String modelName,
       String planSnapshot) {
     var session = new InterviewSessionEntity();
+    session.userAccountId = Objects.requireNonNull(userAccountId, "userAccountId");
     session.sessionId = UUID.randomUUID();
     session.resumeId = resumeId;
     session.jobProfileId = jobProfileId;
@@ -112,6 +122,14 @@ public class InterviewSessionEntity {
     session.modelName = modelName;
     session.planSnapshot = planSnapshot;
     return session;
+  }
+
+  @Deprecated(forRemoval = true)
+  public static InterviewSessionEntity create(
+      Long resumeId, Long jobProfileId, Difficulty difficulty, int totalTurnBudget,
+      String providerId, String modelName, String planSnapshot) {
+    return create(1L, resumeId, jobProfileId, difficulty, totalTurnBudget,
+        providerId, modelName, planSnapshot);
   }
 
   public void start() {

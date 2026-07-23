@@ -188,7 +188,7 @@ public class InterviewReportHandler {
     var job = jobs.findById(session.getJobProfileId())
         .orElseThrow(() -> new IllegalStateException("Interview job profile is missing"));
     SkillSnapshot skill = readSkill(job.getSkillSnapshot());
-    return new Work(task.getTaskId(), session.getId(), session.getSessionId(),
+    return new Work(task.getTaskId(), session.getId(), session.getUserAccountId(), session.getSessionId(),
         session.getProviderId(), session.getModelName(), evidence, skill, task.getAttemptCount());
   }
 
@@ -228,7 +228,8 @@ public class InterviewReportHandler {
 
   private Outcome complete(Work work, InterviewReport report, String snapshot) {
     AsyncTaskEntity task = requireTask(work.taskId());
-    InterviewSessionEntity session = sessions.findById(work.sessionDatabaseId()).orElseThrow();
+    InterviewSessionEntity session = sessions.findByIdAndUserAccountId(
+        work.sessionDatabaseId(), work.userAccountId()).orElse(null);
     if (!current(task, session, work)) return Outcome.STALE;
     if (reports.findBySessionId(session.getId()).isPresent()) return Outcome.STALE;
     reports.saveAndFlush(InterviewReportEntity.create(
@@ -243,7 +244,8 @@ public class InterviewReportHandler {
 
   private Outcome failInvalid(Work work) {
     AsyncTaskEntity task = requireTask(work.taskId());
-    InterviewSessionEntity session = sessions.findById(work.sessionDatabaseId()).orElseThrow();
+    InterviewSessionEntity session = sessions.findByIdAndUserAccountId(
+        work.sessionDatabaseId(), work.userAccountId()).orElse(null);
     if (!current(task, session, work)) return Outcome.STALE;
     task.setStatus(AsyncTaskStatus.FAILED);
     task.setLastError(INVALID_REPORT_ERROR);
@@ -253,14 +255,20 @@ public class InterviewReportHandler {
 
   private boolean recordRetryableFailure(Work work) {
     AsyncTaskEntity task = requireTask(work.taskId());
-    InterviewSessionEntity session = sessions.findById(work.sessionDatabaseId()).orElseThrow();
+    InterviewSessionEntity session = sessions.findByIdAndUserAccountId(
+        work.sessionDatabaseId(), work.userAccountId()).orElse(null);
     if (!current(task, session, work)) return false;
     task.setLastError(RETRYABLE_ERROR);
     return true;
   }
 
   private boolean current(AsyncTaskEntity task, InterviewSessionEntity session, Work work) {
-    return task.getStatus() == AsyncTaskStatus.PUBLISHED
+    return session != null
+        && task.getUserAccountId() != null
+        && task.getUserAccountId().equals(work.userAccountId())
+        && session.getId().equals(work.sessionDatabaseId())
+        && session.getUserAccountId().equals(work.userAccountId())
+        && task.getStatus() == AsyncTaskStatus.PUBLISHED
         && task.getAttemptCount() == work.attemptGeneration()
         && session.getStatus() == SessionStatus.EVALUATING;
   }
@@ -315,7 +323,9 @@ public class InterviewReportHandler {
     }
     try {
       UUID publicId = UUID.fromString(task.getBizKey().substring(prefix.length()));
-      return sessions.findBySessionId(publicId)
+      Long ownerId = Objects.requireNonNull(
+          task.getUserAccountId(), "Interview report task owner is required");
+      return sessions.findBySessionIdAndUserAccountId(publicId, ownerId)
           .orElseThrow(() -> new IllegalArgumentException("Interview session not found"));
     } catch (IllegalArgumentException exception) {
       throw new IllegalArgumentException("Interview report business key is invalid");
@@ -323,7 +333,7 @@ public class InterviewReportHandler {
   }
 
   private record Work(
-      UUID taskId, Long sessionDatabaseId, UUID publicSessionId,
+      UUID taskId, Long sessionDatabaseId, Long userAccountId, UUID publicSessionId,
       String providerId, String modelName, List<ReportEvidence> evidence,
       SkillSnapshot skill, int attemptGeneration) {}
 

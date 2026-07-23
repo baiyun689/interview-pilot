@@ -2,6 +2,7 @@ package interview.pilot.common.ratelimit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
 import org.redisson.Redisson;
@@ -9,6 +10,8 @@ import org.redisson.api.RedissonClient;
 import org.redisson.config.Config;
 import org.springframework.aop.aspectj.annotation.AspectJProxyFactory;
 import org.springframework.mock.web.MockHttpServletRequest;
+
+import interview.pilot.auth.application.CurrentUserProvider;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.utility.DockerImageName;
 
@@ -30,7 +33,8 @@ class RedisRateLimitFailureIT {
       var request = new MockHttpServletRequest();
       request.setRemoteAddr("198.51.100.7");
       var proxy = new AspectJProxyFactory(new Api());
-      proxy.addAspect(new RateLimitAspect(new RedisRateLimiter(client), request));
+      proxy.addAspect(new RateLimitAspect(
+          new RedisRateLimiter(client), request, mock(CurrentUserProvider.class)));
       Api api = proxy.getProxy();
 
       redis.stop();

@@ -4,6 +4,47 @@ import { ApiClientError, request } from './request'
 afterEach(() => vi.unstubAllGlobals())
 
 describe('request', () => {
+  it('为会改变状态的请求附加 CSRF token 和会话凭据', async () => {
+    document.cookie = 'XSRF-TOKEN=csrf-123; path=/'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    })))
+
+    await request('/api/example', { method: 'POST', body: '{}' })
+
+    const [, init] = vi.mocked(fetch).mock.calls[0]
+    expect(init).toMatchObject({ credentials: 'include' })
+    expect(new Headers(init?.headers).get('X-XSRF-TOKEN')).toBe('csrf-123')
+  })
+
+  it('保留调用方为状态变更请求提供的 CSRF header', async () => {
+    document.cookie = 'XSRF-TOKEN=cookie-token; path=/'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    })))
+
+    await request('/api/example', {
+      method: 'PATCH',
+      headers: { 'X-XSRF-TOKEN': 'caller-token' },
+    })
+
+    const [, init] = vi.mocked(fetch).mock.calls[0]
+    expect(new Headers(init?.headers).get('X-XSRF-TOKEN')).toBe('caller-token')
+  })
+
+  it('不为安全方法附加 CSRF token，但始终携带会话凭据', async () => {
+    document.cookie = 'XSRF-TOKEN=csrf-123; path=/'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    })))
+
+    await request('/api/example', { method: 'GET' })
+
+    const [, init] = vi.mocked(fetch).mock.calls[0]
+    expect(init).toMatchObject({ credentials: 'include' })
+    expect(new Headers(init?.headers).get('X-XSRF-TOKEN')).toBeNull()
+  })
+
   it('将后端语义错误解析为带 HTTP 状态和 traceId 的客户端错误', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       code: 'PROVIDER_DISABLED',
