@@ -66,13 +66,14 @@ export interface InterviewHistory {
 }
 
 export interface CreateInterviewInput {
-  resumeId: number
+  resumeId: number | null
   jobTitle: string
   jdText: string
   difficulty: Difficulty
   totalTurnBudget: number
   providerId: string
   skillId: string
+  knowledgeBaseIds: string[]
 }
 
 export type InterviewSkillGroup = 'JOB' | 'SPECIALTY' | 'CUSTOM'

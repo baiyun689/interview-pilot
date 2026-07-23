@@ -29,7 +29,9 @@ import interview.pilot.resume.infrastructure.ResumeRepository;
 import jakarta.validation.Validator;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 public class CreateInterviewService {
   private final ResumeRepository resumes;
@@ -72,14 +74,22 @@ public class CreateInterviewService {
   /** Orchestrates remote calls without opening a database transaction. */
   public InterviewSessionResponse create(CurrentUser user, CreateInterviewRequest request) {
     Long ownerId = requireOwner(user);
-    ResumeEntity resume = resumes.findByIdAndUserAccountId(request.resumeId(), ownerId)
-        .orElseThrow(() -> new BusinessException(
-            "RESUME_NOT_FOUND", "Resume not found", HttpStatus.NOT_FOUND));
-    if (resume.getStatus() != ResumeStatus.READY) {
-      throw new BusinessException(
-          "RESUME_NOT_READY", "Resume analysis is not ready", HttpStatus.CONFLICT);
+    ResumeProfile profile;
+    Long resumeId;
+    if (request.resumeId() != null) {
+      ResumeEntity resume = resumes.findByIdAndUserAccountId(request.resumeId(), ownerId)
+          .orElseThrow(() -> new BusinessException(
+              "RESUME_NOT_FOUND", "Resume not found", HttpStatus.NOT_FOUND));
+      if (resume.getStatus() != ResumeStatus.READY) {
+        throw new BusinessException(
+            "RESUME_NOT_READY", "Resume analysis is not ready", HttpStatus.CONFLICT);
+      }
+      profile = readProfile(resume.getSkillsSnapshot());
+      resumeId = resume.getId();
+    } else {
+      profile = ResumeProfile.empty();
+      resumeId = null;
     }
-    ResumeProfile profile = readProfile(resume.getSkillsSnapshot());
     String title = normalize(request.jobTitle());
     String jdText = normalize(request.jdText());
     var skill = skills.require(request.skillId());
@@ -99,19 +109,34 @@ public class CreateInterviewService {
 
     AiProviderDescriptor provider = providers.resolveEnabled(request.providerId());
     String providerId = provider.id();
+    log.info("createInterview provider={} model={} skill={} difficulty={} turns={} hasResume={} kbCount={}",
+        providerId, provider.model(), request.skillId(), request.difficulty(),
+        request.totalTurnBudget(), resumeId != null, request.knowledgeBaseIds().size());
+
     var requirements = extractor.extract(providerId, jdText, skill.snapshot());
     if (requirements == null) {
+      log.warn("createInterview failed: AI job-profile extractor returned null for skill={}", request.skillId());
       throw invalidAiOutput();
     }
     InterviewPlan plan = planner.plan(
         providerId, profile, requirements, request.difficulty(), request.totalTurnBudget(),
         skill.snapshot());
-    if (plan == null || plan.totalTurnBudget() != request.totalTurnBudget()) {
+    if (plan == null) {
+      log.warn("createInterview failed: AI planner returned null plan for skill={}", request.skillId());
+      throw invalidAiOutput();
+    }
+    if (plan.totalTurnBudget() != request.totalTurnBudget()) {
+      log.warn("createInterview failed: AI planner budget mismatch expected={} actual={}",
+          request.totalTurnBudget(), plan.totalTurnBudget());
       throw invalidAiOutput();
     }
     if (!containsAllCompetencies(plan.competencies(), requirements.competencies())) {
+      log.warn("createInterview failed: AI planner competencies {} don't cover required {}",
+          plan.competencies(), requirements.competencies());
       throw invalidAiOutput();
     }
+    log.info("createInterview plan competencies={} budget={}", plan.competencies(), plan.totalTurnBudget());
+
     RagContextSnapshot firstRagSnapshot = RagContextSnapshot.notConfigured();
     ValidatedKnowledgeScope scope = null;
 
@@ -123,6 +148,9 @@ public class CreateInterviewService {
           profile.technicalSkills(), List.of(), 5, 0.5);
       try {
         var result = retriever.retrieve(scope, intent);
+        log.info("createInterview rag query=\"{}\" status={} chunks={} scores={}",
+            intent.query(), result.status(), result.chunks().size(),
+            result.chunks().stream().map(c -> String.format("%.2f", c.score())).toList());
         firstRagSnapshot = new RagContextSnapshot(
             convertStatus(result.status()), result.query(), result.embeddingModel(),
             result.chunks().stream().map(c -> new RagContextSnapshot.Chunk(
@@ -137,13 +165,19 @@ public class CreateInterviewService {
 
     GeneratedQuestion first = questions.firstQuestion(
         providerId, plan, profile, requirements, skill.snapshot(), firstRagSnapshot);
-    if (first == null
-        || !plan.competencies().stream().anyMatch(first.targetCompetency()::equalsIgnoreCase)) {
+    if (first == null) {
+      log.warn("createInterview failed: AI question generator returned null skill={}", request.skillId());
       throw invalidAiOutput();
     }
+    if (!plan.competencies().stream().anyMatch(first.targetCompetency()::equalsIgnoreCase)) {
+      log.warn("createInterview failed: AI first question competency '{}' not in plan {}",
+          first.targetCompetency(), plan.competencies());
+      throw invalidAiOutput();
+    }
+    log.info("createInterview success firstQuestion competency={}", first.targetCompetency());
 
     return store.create(new InterviewCreation(
-        ownerId, resume.getId(), title, jdText, request.difficulty(), request.totalTurnBudget(),
+        ownerId, resumeId, title, jdText, request.difficulty(), request.totalTurnBudget(),
         providerId, provider.model(), skill.snapshot(), requirements, plan, first,
         scope, firstRagSnapshot));
   }

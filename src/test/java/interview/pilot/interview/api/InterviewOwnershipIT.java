@@ -6,7 +6,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 
+import java.time.Duration;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -33,6 +38,7 @@ import interview.pilot.common.ratelimit.RateLimiter;
 import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.infrastructure.InterviewSessionEntity;
 import interview.pilot.interview.infrastructure.InterviewSessionRepository;
+import interview.pilot.interview.infrastructure.InterviewTurnEntity;
 import interview.pilot.interview.infrastructure.InterviewTurnRepository;
 import interview.pilot.interview.infrastructure.JobProfileEntity;
 import interview.pilot.interview.infrastructure.JobProfileRepository;
@@ -74,6 +80,8 @@ class InterviewOwnershipIT {
 
   @BeforeEach
   void setUp() {
+    when(rateLimiter.allowFixedWindow(anyString(), anyInt(), any(Duration.class)))
+        .thenReturn(true);
     tasks.deleteAll();
     turns.deleteAll();
     sessions.deleteAll();
@@ -139,16 +147,19 @@ class InterviewOwnershipIT {
         ownerId, "Backend Engineer", "Java services",
         "{\"competencies\":[\"Java\"],\"tools\":[]}"));
     InterviewSessionEntity session = InterviewSessionEntity.create(
-        ownerId, resumeId, job.getId(), Difficulty.MEDIUM, 1, "provider", "model",
-        "{\"competencies\":[\"Java\"],\"totalTurnBudget\":1}");
+        ownerId, resumeId, job.getId(), Difficulty.MEDIUM, 5, "provider", "model",
+        "{\"competencies\":[\"Java\"],\"totalTurnBudget\":5}");
     session.start();
-    return sessions.saveAndFlush(session).getSessionId();
+    session = sessions.saveAndFlush(session);
+    turns.saveAndFlush(InterviewTurnEntity.firstAsked(
+        session.getId(), Difficulty.MEDIUM, "Explain Java concurrency.", "Java"));
+    return session.getSessionId();
   }
 
   private static String createRequest(Long resumeId) {
     return """
         {"resumeId":%d,"jobTitle":"Backend Engineer","jdText":"Java services",
-         "difficulty":"MEDIUM","totalTurnBudget":1,"providerId":"qwen","skillId":"java-backend"}
+         "difficulty":"MEDIUM","totalTurnBudget":5,"providerId":"qwen","skillId":"java-backend"}
         """.formatted(resumeId);
   }
 

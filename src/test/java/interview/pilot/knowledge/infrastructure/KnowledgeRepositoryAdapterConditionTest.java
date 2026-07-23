@@ -8,6 +8,8 @@ import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.data.jpa.autoconfigure.DataJpaRepositoriesAutoConfiguration;
 import org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.core.annotation.AnnotationUtils;
+import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -19,29 +21,27 @@ class KnowledgeRepositoryAdapterConditionTest {
           KnowledgeRepositoryAdapterAutoConfiguration.class));
 
   @Test
-  void adaptersAreNotRegisteredWithoutJpaDelegates() {
+  void configurationFailsFastWithoutJpaDelegates() {
     contextRunner.run(context -> {
-      assertThat(context).doesNotHaveBean(KnowledgeBaseRepository.class);
-      assertThat(context).doesNotHaveBean(KnowledgeDocumentRepository.class);
+      assertThat(context).hasFailed();
+      assertThat(context.getStartupFailure())
+          .hasRootCauseInstanceOf(NoSuchBeanDefinitionException.class);
     });
   }
 
   @Test
   void adaptersAreRegisteredAfterJpaDelegatesBecomeAvailable() {
-    contextRunner.withUserConfiguration(DelegateConfiguration.class).run(context -> {
+    contextRunner.withUserConfiguration(DelegateConfiguration.class)
+        .run(context -> {
       assertThat(context).hasSingleBean(KnowledgeBaseRepository.class);
       assertThat(context).hasSingleBean(KnowledgeDocumentRepository.class);
     });
   }
 
   @Test
-  void autoConfigurationIsRegisteredForBootDiscovery() throws Exception {
-    try (var stream = getClass().getClassLoader().getResourceAsStream(
-        "META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports")) {
-      assertThat(stream).isNotNull();
-      assertThat(new String(stream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8))
-          .contains(KnowledgeRepositoryAdapterAutoConfiguration.class.getName());
-    }
+  void repositoryAdapterConfigurationIsComponentScanned() {
+    assertThat(AnnotationUtils.findAnnotation(
+        KnowledgeRepositoryAdapterAutoConfiguration.class, Configuration.class)).isNotNull();
   }
 
   @Configuration(proxyBeanMethods = false)

@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.UUID;
 
 public record CreateInterviewRequest(
-    @NotNull @Positive Long resumeId,
+    @Positive Long resumeId,
     @Size(max = 200) String jobTitle,
     @Size(max = 20_000) String jdText,
     @NotNull Difficulty difficulty,

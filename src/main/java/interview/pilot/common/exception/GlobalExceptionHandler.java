@@ -80,8 +80,8 @@ public class GlobalExceptionHandler {
   @ExceptionHandler(Exception.class)
   public ResponseEntity<ApiError> handleUnexpected(Exception exception, HttpServletRequest request) {
     String traceId = traceId(request);
-    log.error("request_failed traceId={} code=INTERNAL_ERROR exceptionType={}",
-        traceId, exception.getClass().getName());
+    log.error("request_failed traceId={} code=INTERNAL_ERROR exceptionType={} message={}",
+        traceId, exception.getClass().getName(), exception.getMessage(), exception);
     if (exception instanceof ErrorResponse frameworkError) {
       int statusCode = frameworkError.getStatusCode().value();
       HttpStatus status = HttpStatus.resolve(statusCode);

@@ -44,7 +44,7 @@ public class InterviewSessionEntity {
   @Column(name = "session_id", nullable = false, unique = true, length = 36)
   private UUID sessionId;
 
-  @Column(name = "resume_id", nullable = false)
+  @Column(name = "resume_id")
   private Long resumeId;
 
   @Column(name = "job_profile_id", nullable = false)

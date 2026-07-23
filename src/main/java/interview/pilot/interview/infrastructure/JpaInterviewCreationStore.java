@@ -52,12 +52,14 @@ public class JpaInterviewCreationStore implements InterviewCreationStore {
   @Override
   @Transactional
   public InterviewSessionResponse create(InterviewCreation creation) {
-    var resume = resumes.findByIdAndUserAccountId(creation.resumeId(), creation.userAccountId())
-        .orElseThrow(() -> new BusinessException(
-            "RESUME_NOT_FOUND", "Resume not found", HttpStatus.NOT_FOUND));
-    if (resume.getStatus() != ResumeStatus.READY) {
-      throw new BusinessException(
-          "RESUME_NOT_READY", "Resume analysis is not ready", HttpStatus.CONFLICT);
+    if (creation.resumeId() != null) {
+      var resume = resumes.findByIdAndUserAccountId(creation.resumeId(), creation.userAccountId())
+          .orElseThrow(() -> new BusinessException(
+              "RESUME_NOT_FOUND", "Resume not found", HttpStatus.NOT_FOUND));
+      if (resume.getStatus() != ResumeStatus.READY) {
+        throw new BusinessException(
+            "RESUME_NOT_READY", "Resume analysis is not ready", HttpStatus.CONFLICT);
+      }
     }
     try {
       var job = jobs.save(JobProfileEntity.create(

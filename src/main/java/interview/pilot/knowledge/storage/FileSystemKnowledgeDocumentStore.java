@@ -268,7 +268,7 @@ public final class FileSystemKnowledgeDocumentStore implements KnowledgeDocument
     try {
       Files.move(source, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
     } catch (AtomicMoveNotSupportedException exception) {
-      throw exception;
+      Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
     }
   }
 

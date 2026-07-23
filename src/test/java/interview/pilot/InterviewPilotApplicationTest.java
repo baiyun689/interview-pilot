@@ -30,7 +30,10 @@ import interview.pilot.interview.infrastructure.JobProfileRepository;
 import interview.pilot.interview.infrastructure.AnswerAttemptRepository;
 import interview.pilot.interview.infrastructure.InterviewReportRepository;
 import interview.pilot.interview.api.InterviewController;
+import interview.pilot.interview.infrastructure.InterviewKnowledgeBaseRepository;
 import interview.pilot.auth.infrastructure.UserAccountRepository;
+import interview.pilot.knowledge.infrastructure.KnowledgeBaseJpaRepository;
+import interview.pilot.knowledge.infrastructure.KnowledgeDocumentJpaRepository;
 import org.springframework.aop.support.AopUtils;
 
 @SpringBootTest(properties = {
@@ -72,10 +75,19 @@ class InterviewPilotApplicationTest {
   private InterviewReportRepository interviewReportRepository;
 
   @MockitoBean
+  private InterviewKnowledgeBaseRepository interviewKnowledgeBaseRepository;
+
+  @MockitoBean
   private PlatformTransactionManager transactionManager;
 
   @MockitoBean
   private UserAccountRepository userAccountRepository;
+
+  @MockitoBean
+  private KnowledgeBaseJpaRepository knowledgeBaseJpaRepository;
+
+  @MockitoBean
+  private KnowledgeDocumentJpaRepository knowledgeDocumentJpaRepository;
 
   @Autowired
   private ApplicationContext applicationContext;

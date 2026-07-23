@@ -10,7 +10,7 @@ import interview.pilot.knowledge.retrieval.ValidatedKnowledgeScope;
 
 public record InterviewCreation(
     Long userAccountId,
-    Long resumeId,
+    Long resumeId,   // nullable – interview may be created without a resume
     String jobTitle,
     String jdText,
     Difficulty difficulty,

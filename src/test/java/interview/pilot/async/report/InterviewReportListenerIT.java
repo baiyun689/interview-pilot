@@ -456,6 +456,8 @@ class InterviewReportListenerIT {
     Work work = completedInterview();
     UserAccountEntity other = users.save(UserAccountEntity.register(
         "report-mismatch-" + UUID.randomUUID() + "@example.com", "!", "Other"));
+    tasks.deleteById(work.taskId());
+    tasks.flush();
     AsyncTaskEntity task = tasks.saveAndFlush(AsyncTaskEntity.pending(
         other.getId(), AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + work.sessionId(),
         "{\"sessionId\":\"" + work.sessionId() + "\"}"));

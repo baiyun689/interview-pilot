@@ -41,11 +41,11 @@ class AiResumeProfilerTest {
     assertThat(request.getValue().providerId()).isEqualTo("deepseek");
     assertThat(request.getValue().responseType()).isEqualTo(ResumeProfile.class);
     assertThat(request.getValue().systemPrompt())
-        .containsIgnoringCase("do not invent")
+        .contains("不得编造")
         .contains("summary", "technicalSkills", "projects", "strengths", "risks");
     assertThat(request.getValue().userPrompt())
         .contains("Built the Atlas API with Java and Spring Boot.")
-        .containsIgnoringCase("resume text")
-        .containsIgnoringCase("evidence");
+        .contains("简历原文")
+        .contains("只依据");
   }
 }

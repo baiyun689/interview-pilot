@@ -232,43 +232,43 @@ class InterviewJourneyIT {
         .isEqualTo(AsyncTaskStatus.COMPLETED);
     assertThat(reports.count()).isEqualTo(1);
 
-    verifyPromptContract(ResumeProfile.class, "You analyze resumes", 1);
-    verifyPromptContract(JobRequirements.class, "You extract interview requirements", 1);
-    verifyPromptContract(InterviewPlan.class, "You create a compact interview plan", 1);
-    verifyPromptContract(GeneratedQuestion.class, "You generate one interview question", 5);
-    verifyPromptContract(AnswerEvaluation.class, "You evaluate one interview answer", 5);
-    verifyPromptContract(InterviewReport.class, "You generate an evidence-grounded", 1);
+    verifyPromptContract(ResumeProfile.class, "严谨的中文简历分析师", 1);
+    verifyPromptContract(JobRequirements.class, "资深招聘需求分析师", 1);
+    verifyPromptContract(InterviewPlan.class, "资深技术面试负责人", 1);
+    verifyPromptContract(GeneratedQuestion.class, "中文技术面试官", 5);
+    verifyPromptContract(AnswerEvaluation.class, "中文技术面试评审官", 5);
+    verifyPromptContract(InterviewReport.class, "资深面试委员会评审", 1);
   }
 
   private static void stubJourneyResponses() {
     List<Fixture> responses = List.of(
-        new Fixture(ResumeProfile.class, "You analyze resumes",
+        new Fixture(ResumeProfile.class, "严谨的中文简历分析师",
             "{\"summary\":\"Java backend engineer\",\"technicalSkills\":[\"Java\",\"Spring Boot\",\"Redis\"],\"projects\":[{\"name\":\"InterviewPilot\",\"description\":\"Reliable adaptive interviews\",\"technologies\":[\"Spring Boot\"]}],\"strengths\":[\"Idempotency\"],\"risks\":[\"Scale not measured\"]}"),
-        new Fixture(JobRequirements.class, "You extract interview requirements",
+        new Fixture(JobRequirements.class, "资深招聘需求分析师",
             "{\"competencies\":[\"Java\",\"System Design\",\"Observability\"],\"preferredSkills\":[\"Redis\"]}"),
-        new Fixture(InterviewPlan.class, "You create a compact interview plan",
+        new Fixture(InterviewPlan.class, "资深技术面试负责人",
             "{\"competencies\":[\"Java\",\"System Design\",\"Observability\"],\"totalTurnBudget\":5}"),
-        new Fixture(GeneratedQuestion.class, "You generate one interview question",
+        new Fixture(GeneratedQuestion.class, "中文技术面试官",
             question("How do you make answer submission idempotent?", "Java")),
-        new Fixture(AnswerEvaluation.class, "You evaluate one interview answer",
+        new Fixture(AnswerEvaluation.class, "中文技术面试评审官",
             evaluation("NEXT_TOPIC", "INCREASE", "System Design")),
-        new Fixture(GeneratedQuestion.class, "You generate one interview question",
+        new Fixture(GeneratedQuestion.class, "中文技术面试官",
             question("Design the durable interview answer flow.", "System Design")),
-        new Fixture(AnswerEvaluation.class, "You evaluate one interview answer",
+        new Fixture(AnswerEvaluation.class, "中文技术面试评审官",
             evaluation("NEXT_TOPIC", "KEEP", "Observability")),
-        new Fixture(GeneratedQuestion.class, "You generate one interview question",
+        new Fixture(GeneratedQuestion.class, "中文技术面试官",
             question("How would you observe AI failures?", "Observability")),
-        new Fixture(AnswerEvaluation.class, "You evaluate one interview answer",
+        new Fixture(AnswerEvaluation.class, "中文技术面试评审官",
             evaluation("FOLLOW_UP", "DECREASE", "Observability")),
-        new Fixture(GeneratedQuestion.class, "You generate one interview question",
+        new Fixture(GeneratedQuestion.class, "中文技术面试官",
             question("Which metrics and traces would you retain?", "Observability")),
-        new Fixture(AnswerEvaluation.class, "You evaluate one interview answer",
+        new Fixture(AnswerEvaluation.class, "中文技术面试评审官",
             evaluation("FOLLOW_UP", "KEEP", "Observability")),
-        new Fixture(GeneratedQuestion.class, "You generate one interview question",
+        new Fixture(GeneratedQuestion.class, "中文技术面试官",
             question("How do retries affect those signals?", "Observability")),
-        new Fixture(AnswerEvaluation.class, "You evaluate one interview answer",
+        new Fixture(AnswerEvaluation.class, "中文技术面试评审官",
             evaluation("FINISH", "KEEP", "Observability")),
-        new Fixture(InterviewReport.class, "You generate an evidence-grounded",
+        new Fixture(InterviewReport.class, "资深面试委员会评审",
             "{\"overallScore\":86,\"competencyScores\":{\"Java\":88,\"System Design\":84,\"Observability\":86},\"strengths\":[\"Concrete idempotency evidence\"],\"improvements\":[\"Quantify trade-offs\"],\"summary\":\"Strong backend reasoning grounded in the completed turns.\"}"));
     String state = com.github.tomakehurst.wiremock.stubbing.Scenario.STARTED;
     for (int index = 0; index < responses.size(); index++) {

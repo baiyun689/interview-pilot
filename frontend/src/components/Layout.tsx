@@ -1,4 +1,4 @@
-import { BrainCircuit, FileText, History, LogOut, PlayCircle, Settings2 } from 'lucide-react'
+import { BookOpen, BrainCircuit, FileText, History, LogOut, PlayCircle, Settings2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
@@ -13,6 +13,7 @@ const navigation: NavigationItem[] = [
   { label: '简历', to: '/resumes', icon: FileText },
   { label: '开始面试', to: '/interviews/new', icon: PlayCircle },
   { label: '面试记录', to: '/interviews', icon: History },
+  { label: '知识库', to: '/knowledge', icon: BookOpen },
   { label: '模型设置', to: '/settings', icon: Settings2 },
 ]
 

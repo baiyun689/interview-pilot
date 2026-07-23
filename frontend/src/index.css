@@ -870,6 +870,42 @@ a:focus-visible {
   .history-card dl { flex-wrap: wrap; }
 }
 
+.kb-create-form { display: flex; gap: 12px; max-width: 760px; margin-bottom: 22px; }
+.kb-create-input { flex: 1; padding: 11px 13px; color: var(--slate-950); background: var(--white); border: 1px solid var(--slate-300); border-radius: 10px; font: inherit; }
+.kb-create-form .error-notice { flex-basis: 100%; margin: 0; }
+
+.kb-list { display: grid; gap: 13px; }
+
+.kb-card { background: rgb(255 255 255 / 94%); border: 1px solid var(--slate-200); border-radius: 18px; box-shadow: 0 14px 35px rgb(15 23 42 / 6%); overflow: hidden; }
+.kb-card-header { display: flex; align-items: center; gap: 12px; padding: 18px 20px; cursor: pointer; user-select: none; transition: background 140ms ease; }
+.kb-card-header:hover { background: rgb(248 250 255); }
+.kb-chevron { color: var(--slate-500); display: flex; }
+.kb-icon { color: var(--indigo-600); flex-shrink: 0; }
+.kb-card-info { min-width: 0; }
+.kb-card-info h3 { margin: 0; color: var(--slate-950); font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-meta { color: var(--slate-500); font-size: 12px; }
+
+.kb-docs { padding: 0 20px 18px; border-top: 1px solid var(--slate-100); }
+.kb-upload-zone { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 14px 16px; color: var(--indigo-600); background: #fafbff; border: 1.5px dashed #c7d2fe; border-radius: 12px; cursor: pointer; font-size: 13px; font-weight: 650; transition: background 140ms ease; }
+.kb-upload-zone:hover { background: #eef0ff; }
+.kb-doc-list { list-style: none; margin: 15px 0 0; padding: 0; display: grid; gap: 8px; }
+.kb-doc-item { display: flex; align-items: center; gap: 10px; padding: 11px 13px; background: var(--slate-100); border-radius: 10px; font-size: 13px; }
+.kb-doc-icon { color: var(--slate-500); flex-shrink: 0; }
+.kb-doc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--slate-700); font-weight: 650; }
+.kb-doc-chunks { color: var(--slate-500); font-size: 12px; white-space: nowrap; }
+.kb-doc-error { color: var(--danger); font-size: 12px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-reindex-btn { display: inline-flex; align-items: center; gap: 5px; padding: 0 10px; min-height: 30px; font-size: 12px; white-space: nowrap; flex-shrink: 0; }
+
+.kb-select-fieldset { border: none; padding: 0; margin: 0; }
+.kb-select-fieldset legend { color: var(--slate-700); font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+.kb-select-hint { margin: 0 0 10px; color: var(--slate-500); font-size: 12px; }
+.kb-select-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.kb-select-item { display: flex; align-items: center; gap: 8px; padding: 9px 13px; border: 1px solid var(--slate-300); border-radius: 10px; cursor: pointer; font-size: 13px; background: var(--white); transition: border-color 140ms ease, background 140ms ease; }
+.kb-select-item:hover { border-color: #c7d2fe; }
+.kb-select-item.kb-selected { border-color: var(--indigo-600); background: var(--indigo-100); }
+.kb-select-name { color: var(--slate-700); font-weight: 650; }
+.kb-select-count { color: var(--slate-500); font-size: 12px; white-space: nowrap; }
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

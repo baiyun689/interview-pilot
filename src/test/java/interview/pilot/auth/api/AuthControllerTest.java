@@ -43,6 +43,9 @@ import interview.pilot.interview.infrastructure.InterviewTurnRepository;
 import interview.pilot.interview.infrastructure.JobProfileRepository;
 import interview.pilot.common.ratelimit.RateLimiter;
 import interview.pilot.resume.infrastructure.ResumeRepository;
+import interview.pilot.knowledge.infrastructure.KnowledgeBaseJpaRepository;
+import interview.pilot.knowledge.infrastructure.KnowledgeDocumentJpaRepository;
+import interview.pilot.interview.infrastructure.InterviewKnowledgeBaseRepository;
 
 @SpringBootTest(properties = {
     "spring.flyway.enabled=false",
@@ -67,6 +70,9 @@ class AuthControllerTest {
   @MockitoBean AiProviderService aiProviderService;
   @MockitoBean UserAccountRepository accounts;
   @MockitoBean RateLimiter rateLimiter;
+  @MockitoBean KnowledgeBaseJpaRepository knowledgeBaseJpaRepository;
+  @MockitoBean KnowledgeDocumentJpaRepository knowledgeDocumentJpaRepository;
+  @MockitoBean InterviewKnowledgeBaseRepository interviewKnowledgeBaseRepository;
 
   @Autowired MockMvc mvc;
   @Autowired PasswordEncoder passwordEncoder;

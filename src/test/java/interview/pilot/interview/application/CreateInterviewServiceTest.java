@@ -51,13 +51,13 @@ class CreateInterviewServiceTest {
     InterviewPlan plan = new InterviewPlan(List.of("Java", "Spring"), 8);
     GeneratedQuestion first = new GeneratedQuestion("Explain optimistic locking.", "Java");
 
-    when(resumes.findById(7L)).thenReturn(java.util.Optional.of(resume));
+    when(resumes.findByIdAndUserAccountId(7L, 1L)).thenReturn(java.util.Optional.of(resume));
     when(providers.resolveEnabled("deepseek"))
         .thenReturn(new AiProviderDescriptor("deepseek", "DeepSeek", "deepseek-chat", true, false));
     when(extractor.extract(eq("deepseek"), eq("Build reliable Java services"), any())).thenReturn(job);
     when(planner.plan(eq("deepseek"), eq(profile), eq(job), eq(Difficulty.MEDIUM), eq(8), any()))
         .thenReturn(plan);
-    when(questions.firstQuestion(eq("deepseek"), eq(plan), eq(profile), eq(job), any()))
+    when(questions.firstQuestion(eq("deepseek"), eq(plan), eq(profile), eq(job), any(), any()))
         .thenReturn(first);
     when(validator.validate(any(ResumeProfile.class))).thenReturn(Set.of());
     when(store.create(any())).thenReturn(response("deepseek", "deepseek-chat"));
@@ -78,7 +78,7 @@ class CreateInterviewServiceTest {
     verify(providers).resolveEnabled("deepseek");
     verify(extractor).extract(eq("deepseek"), eq("Build reliable Java services"), any());
     verify(planner).plan(eq("deepseek"), eq(profile), eq(job), eq(Difficulty.MEDIUM), eq(8), any());
-    verify(questions).firstQuestion(eq("deepseek"), eq(plan), eq(profile), eq(job), any());
+    verify(questions).firstQuestion(eq("deepseek"), eq(plan), eq(profile), eq(job), any(), any());
     verify(store).create(org.mockito.ArgumentMatchers.argThat(creation ->
         creation.skillSnapshot().id().equals("java-backend")
             && creation.skillSnapshot().rubric().contains("评分标准")));
@@ -95,7 +95,7 @@ class CreateInterviewServiceTest {
     ObjectMapper objectMapper = new ObjectMapper();
     Validator validator = mock(Validator.class);
     ResumeEntity pending = ResumeEntity.pending(1L, "resume.txt", "a".repeat(64), "Java");
-    when(resumes.findById(7L)).thenReturn(java.util.Optional.of(pending));
+    when(resumes.findByIdAndUserAccountId(7L, 1L)).thenReturn(java.util.Optional.of(pending));
 
     var scopeResolver = mock(interview.pilot.knowledge.retrieval.KnowledgeScopeResolver.class);
     var retriever = mock(interview.pilot.knowledge.retrieval.KnowledgeRetriever.class);
@@ -123,7 +123,8 @@ class CreateInterviewServiceTest {
     InterviewCreationStore store = mock(InterviewCreationStore.class);
     Validator validator = mock(Validator.class);
     JobRequirements job = new JobRequirements(List.of("Java"), List.of());
-    when(resumes.findById(7L)).thenReturn(java.util.Optional.of(readyResume()));
+    when(resumes.findByIdAndUserAccountId(7L, 1L))
+        .thenReturn(java.util.Optional.of(readyResume()));
     when(validator.validate(any(ResumeProfile.class))).thenReturn(Set.of());
     when(providers.resolveEnabled(null)).thenReturn(
         new AiProviderDescriptor("qwen", "Qwen", "qwen-plus", true, true));
@@ -158,7 +159,8 @@ class CreateInterviewServiceTest {
     var scopeResolver = mock(interview.pilot.knowledge.retrieval.KnowledgeScopeResolver.class);
     var retriever = mock(interview.pilot.knowledge.retrieval.KnowledgeRetriever.class);
     JobRequirements job = new JobRequirements(List.of("Java", "Spring"), List.of());
-    when(resumes.findById(7L)).thenReturn(java.util.Optional.of(readyResume()));
+    when(resumes.findByIdAndUserAccountId(7L, 1L))
+        .thenReturn(java.util.Optional.of(readyResume()));
     when(validator.validate(any(ResumeProfile.class))).thenReturn(Set.of());
     when(providers.resolveEnabled(null)).thenReturn(
         new AiProviderDescriptor("qwen", "Qwen", "qwen-plus", true, true));

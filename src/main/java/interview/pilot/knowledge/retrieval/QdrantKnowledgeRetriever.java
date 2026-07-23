@@ -15,12 +15,14 @@ import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.filter.Filter;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import interview.pilot.common.observability.AiMetrics;
 import interview.pilot.knowledge.config.KnowledgeProperties;
 
 @Component
+@ConditionalOnProperty(prefix = "app.knowledge", name = "enabled", havingValue = "true")
 public class QdrantKnowledgeRetriever implements KnowledgeRetriever {
   private static final Logger log = LoggerFactory.getLogger(QdrantKnowledgeRetriever.class);
   private static final int MIN_SEARCH_CANDIDATES = 12;

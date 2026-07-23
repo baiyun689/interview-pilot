@@ -50,7 +50,9 @@ import interview.pilot.common.observability.AiMetrics;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import jakarta.validation.Validator;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 public class SubmitAnswerService {
   private static final double MINIMUM_DECISION_CONFIDENCE = 0.55;
@@ -161,17 +163,32 @@ public class SubmitAnswerService {
     }
 
     try {
+      String sid = shortId(sessionId);
       WorkContext context = requiresNew.execute(status -> loadContext(user, sessionId, claim));
+      log.info("interview session={} turn={} step=start competency={} difficulty={}",
+          sid, claim.turnNo(), context.currentCompetency(), context.currentDifficulty());
       // Use the current turn's RAG snapshot for evaluation
       RagContextSnapshot currentRag = readRagSnapshot(claim);
+      if (currentRag.status() == RagStatus.RETRIEVED) {
+        log.info("interview session={} turn={} step=eval_rag chunks={} scores={}",
+            sid, claim.turnNo(), currentRag.chunks().size(),
+            currentRag.chunks().stream().map(c -> String.format("%.2f", c.score())).toList());
+      }
+
+      long evalStart = System.nanoTime();
       AnswerEvaluation evaluation = evaluator.evaluate(new AnswerEvaluationRequest(
           context.providerId(), context.modelName(), claim.turnNo(), context.currentDifficulty(),
           context.currentCompetency(), context.question(), context.answer(),
           context.requirements().competencies(), context.plan().competencies(),
           context.priorEvidence(), context.skill(), currentRag));
+      long evalMs = (System.nanoTime() - evalStart) / 1_000_000;
       if (evaluation == null) {
         throw new IllegalStateException("Answer evaluator returned no result");
       }
+      log.info("interview session={} turn={} step=evaluate provider={} model={} score={} latency_ms={}",
+          sid, claim.turnNo(), context.providerId(), context.modelName(),
+          evaluation.score(), evalMs);
+
       DecisionContext decisionContext = decisionContexts.create(
           context.currentDifficulty(), context.currentCompetency(),
           context.requirements().competencies(), claim.turnNo(), context.plan().totalTurnBudget(),
@@ -181,17 +198,32 @@ public class SubmitAnswerService {
       Difficulty nextDifficulty = adjust(context.currentDifficulty(), decision.difficultyAdjustment());
       boolean finish = decision.nextStep() == NextStep.FINISH
           || claim.turnNo() >= context.plan().totalTurnBudget();
+      log.info("interview session={} turn={} step=decision nextStep={} targetCompetency={} nextDifficulty={} confidence={}",
+          sid, claim.turnNo(), decision.nextStep(), decision.targetCompetency(),
+          nextDifficulty, decision.confidence());
+
       // Retrieve next RAG snapshot after Java decision
       RagContextSnapshot nextRag = finish
           ? RagContextSnapshot.notConfigured()
-          : retrieveNextRag(user, sessionId, context, decision, nextDifficulty);
+          : retrieveNextRag(user, sessionId, claim.turnNo(), context, decision, nextDifficulty);
+
+      long genStart = System.nanoTime();
       GeneratedQuestion nextQuestion = finish ? null : questionGenerator.nextQuestion(
           context.providerId(), context.modelName(),
           new QuestionContext(
               context.plan(), context.resume(), context.requirements(), nextDifficulty,
               context.question(), context.answer(), context.skill()).withRag(nextRag),
           decision);
+      long genMs = (System.nanoTime() - genStart) / 1_000_000;
       validateNextQuestion(nextQuestion, decision, context.plan(), finish);
+      if (!finish) {
+        log.info("interview session={} turn={} step=generate_question provider={} model={} competency={} latency_ms={}",
+            sid, claim.turnNo(), context.providerId(), context.modelName(),
+            nextQuestion.targetCompetency(), genMs);
+      } else {
+        log.info("interview session={} turn={} step=finish totalTurns={}",
+            sid, claim.turnNo(), claim.turnNo());
+      }
       AnswerProcessingResult result = new AnswerProcessingResult(
           sessionId, request.requestId(), claim.turnNo(), evaluation, decision, nextQuestion,
           nextDifficulty, finish ? SessionStatus.EVALUATING : SessionStatus.INTERVIEWING, false,
@@ -266,17 +298,22 @@ public class SubmitAnswerService {
     }
     var job = jobs.findById(session.getJobProfileId())
         .orElseThrow(() -> new IllegalStateException("Interview job profile is missing"));
-    var resume = resumes.findById(session.getResumeId())
-        .orElseThrow(() -> new IllegalStateException("Interview resume is missing"));
+    ResumeProfile profile;
+    if (session.getResumeId() != null) {
+      var resume = resumes.findById(session.getResumeId())
+          .orElseThrow(() -> new IllegalStateException("Interview resume is missing"));
+      profile = read(resume.getSkillsSnapshot(), ResumeProfile.class);
+      if (!validator.validate(profile).isEmpty()) {
+        throw new IllegalStateException("Stored resume profile is invalid");
+      }
+    } else {
+      profile = ResumeProfile.empty();
+    }
     InterviewPlan plan = read(session.getPlanSnapshot(), InterviewPlan.class);
     JobRequirements requirements = read(job.getRequirementsSnapshot(), JobRequirements.class);
     SkillSnapshot skill = read(job.getSkillSnapshot(), SkillSnapshot.class);
     if (!containsAllCompetencies(plan.competencies(), requirements.competencies())) {
       throw new IllegalStateException("Stored interview target set is invalid");
-    }
-    ResumeProfile profile = read(resume.getSkillsSnapshot(), ResumeProfile.class);
-    if (!validator.validate(profile).isEmpty()) {
-      throw new IllegalStateException("Stored resume profile is invalid");
     }
     List<InterviewTurnEntity> allTurns = turns.findAllBySessionIdOrderByTurnNo(session.getId());
     return new WorkContext(
@@ -492,7 +529,7 @@ public class SubmitAnswerService {
   }
 
   private RagContextSnapshot retrieveNextRag(
-      CurrentUser user, UUID sessionId, WorkContext context,
+      CurrentUser user, UUID sessionId, int currentTurnNo, WorkContext context,
       InterviewDecision decision, Difficulty nextDifficulty) {
     try {
       var session = sessions.findBySessionIdAndUserAccountId(sessionId, requireOwner(user))
@@ -508,7 +545,14 @@ public class SubmitAnswerService {
       var intent = new RetrievalIntent(
           query, decision.targetCompetency(), nextDifficulty.name(),
           context.plan().competencies(), List.of(), 5, 0.5);
+      long ragStart = System.nanoTime();
       var result = retriever.retrieve(scope, intent);
+      long ragMs = (System.nanoTime() - ragStart) / 1_000_000;
+      log.info("interview session={} turn={} step=retrieve_rag query=\"{}\" status={} chunks={} scores={} latency_ms={}",
+          shortId(sessionId), currentTurnNo, query, result.status(),
+          result.chunks().size(),
+          result.chunks().stream().map(c -> String.format("%.2f", c.score())).toList(),
+          ragMs);
       return new RagContextSnapshot(
           convertStatus(result.status()), result.query(), result.embeddingModel(),
           result.chunks().stream().map(c -> new RagContextSnapshot.Chunk(
@@ -531,6 +575,11 @@ public class SubmitAnswerService {
       case NO_MATCH -> RagStatus.NO_MATCH;
       case UNAVAILABLE -> RagStatus.UNAVAILABLE;
     };
+  }
+
+  private static String shortId(UUID id) {
+    String s = id.toString();
+    return s.substring(0, 8);
   }
 
   private record WorkContext(

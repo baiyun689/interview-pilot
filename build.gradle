@@ -58,4 +58,8 @@ dependencies {
 
 tasks.named('test') {
   useJUnitPlatform()
+  environment 'KNOWLEDGE_ENABLED', 'false'
+  environment 'DASHSCOPE_ENABLED', 'false'
+  environment 'DEEPSEEK_ENABLED', 'false'
+  environment 'KIMI_ENABLED', 'false'
 }
