@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import * as authApi from '../api/auth'
-import { ApiClientError, onUnauthorized } from '../api/request'
+import { ApiClientError, onUnauthorized, setAccessToken } from '../api/request'
 import type { AuthenticatedUser, LoginInput, RegisterInput } from '../types/auth'
 
 interface AuthContextValue {
@@ -26,24 +26,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let active = true
     const unsubscribe = onUnauthorized(() => {
-      if (active) setUser(null)
+      if (active) {
+        setUser(null)
+        setAccessToken(null)
+      }
     })
 
-    void authApi.getCurrentUser()
-      .then((currentUser) => {
+    void authApi.refresh()
+      .then((result) => {
         if (!active) return
-        setUser(currentUser)
+        setAccessToken(result.accessToken)
+        setUser({ userId: result.userId, email: result.email, displayName: result.displayName })
         setError(null)
       })
-      .catch((failure: unknown) => {
+      .catch(() => {
         if (!active) return
-        const apiError = asApiClientError(failure)
-        if (apiError?.status === 401) {
-          setUser(null)
-          setError(null)
-          return
-        }
-        setError(apiError ?? new ApiClientError(0, 'AUTH_STATE_ERROR', '无法恢复登录状态，请稍后重试', null))
+        setAccessToken(null)
+        setUser(null)
+        setError(null)
       })
       .finally(() => {
         if (active) setLoading(false)
@@ -58,10 +58,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function login(input: LoginInput) {
     setError(null)
     try {
-      setUser(await authApi.login(input))
+      const result = await authApi.login(input)
+      setAccessToken(result.accessToken)
+      setUser({ userId: result.userId, email: result.email, displayName: result.displayName })
     } catch (failure) {
       const apiError = asApiClientError(failure)
-      if (apiError?.status === 401) setUser(null)
+      if (apiError?.status === 401) {
+        setUser(null)
+        setAccessToken(null)
+      }
       setError(apiError)
       throw failure
     }
@@ -70,10 +75,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function register(input: RegisterInput) {
     setError(null)
     try {
-      setUser(await authApi.register(input))
+      const result = await authApi.register(input)
+      setAccessToken(result.accessToken)
+      setUser({ userId: result.userId, email: result.email, displayName: result.displayName })
     } catch (failure) {
       const apiError = asApiClientError(failure)
-      if (apiError?.status === 401) setUser(null)
+      if (apiError?.status === 401) {
+        setUser(null)
+        setAccessToken(null)
+      }
       setError(apiError)
       throw failure
     }
@@ -83,12 +93,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setError(null)
     try {
       await authApi.logout()
+    } finally {
+      setAccessToken(null)
       setUser(null)
-    } catch (failure) {
-      const apiError = asApiClientError(failure)
-      if (apiError?.status === 401) setUser(null)
-      setError(apiError)
-      throw failure
     }
   }
 

@@ -48,25 +48,12 @@ export interface ApiResponse<T> {
   traceId: string | null
 }
 
-const unsafeMethods = new Set(['GET', 'HEAD', 'OPTIONS'])
 const unauthorizedHandlers = new Set<() => void>()
 
-function csrfToken(): string | null {
-  const prefix = 'XSRF-TOKEN='
-  const token = document.cookie
-    .split('; ')
-    .find((part) => part.startsWith(prefix))
-  return token ? decodeURIComponent(token.slice(prefix.length)) : null
-}
+let accessToken: string | null = null
 
-export function authenticatedInit(init: RequestInit = {}): RequestInit {
-  const headers = new Headers(init.headers)
-  const method = (init.method ?? 'GET').toUpperCase()
-  const token = csrfToken()
-  if (!unsafeMethods.has(method) && token && !headers.has('X-XSRF-TOKEN')) {
-    headers.set('X-XSRF-TOKEN', token)
-  }
-  return { ...init, headers, credentials: 'include' }
+export function setAccessToken(token: string | null) {
+  accessToken = token
 }
 
 export function onUnauthorized(handler: () => void): () => void {
@@ -76,6 +63,14 @@ export function onUnauthorized(handler: () => void): () => void {
 
 export function notifyUnauthorized() {
   unauthorizedHandlers.forEach((handler) => handler())
+}
+
+export function authenticatedInit(init: RequestInit = {}): RequestInit {
+  const headers = new Headers(init.headers)
+  if (accessToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${accessToken}`)
+  }
+  return { ...init, headers }
 }
 
 export async function requestWithMeta<T>(path: string, init?: RequestInit): Promise<ApiResponse<T>> {

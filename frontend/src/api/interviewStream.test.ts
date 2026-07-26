@@ -1,6 +1,10 @@
-import { describe, expect, it, vi } from 'vitest'
-import { ApiClientError } from './request'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ApiClientError, setAccessToken } from './request'
 import { postInterviewAnswerStream } from './interviewStream'
+
+afterEach(() => {
+  setAccessToken(null)
+})
 
 const encoder = new TextEncoder()
 
@@ -14,16 +18,15 @@ function streamResponse(chunks: string[], status = 200, headers: Record<string, 
 }
 
 describe('POST SSE client', () => {
-  it('sends session credentials and the CSRF token for the answer stream', async () => {
-    document.cookie = 'XSRF-TOKEN=stream-csrf; path=/'
+  it('injects Bearer token into the answer stream request', async () => {
+    setAccessToken('jwt-stream-token')
     const fetchMock = vi.fn().mockResolvedValue(streamResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     await postInterviewAnswerStream('s1', { requestId: 'r1', answer: 'answer' }, { onEvent: vi.fn() })
 
     const [, init] = fetchMock.mock.calls[0]
-    expect(init).toMatchObject({ credentials: 'include' })
-    expect(new Headers(init.headers).get('X-XSRF-TOKEN')).toBe('stream-csrf')
+    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer jwt-stream-token')
   })
 
   it('parses split CRLF chunks, named events, multiline data, and final buffered events', async () => {

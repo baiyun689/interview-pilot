@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiClientError, request } from './request'
+import { ApiClientError, request, setAccessToken } from './request'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  setAccessToken(null)
+})
 
 describe('request', () => {
-  it('为会改变状态的请求附加 CSRF token 和会话凭据', async () => {
-    document.cookie = 'XSRF-TOKEN=csrf-123; path=/'
+  it('当 accessToken 存在时自动注入 Bearer 头', async () => {
+    setAccessToken('jwt-access-token')
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
       headers: { 'Content-Type': 'application/json' },
     })))
@@ -13,27 +16,11 @@ describe('request', () => {
     await request('/api/example', { method: 'POST', body: '{}' })
 
     const [, init] = vi.mocked(fetch).mock.calls[0]
-    expect(init).toMatchObject({ credentials: 'include' })
-    expect(new Headers(init?.headers).get('X-XSRF-TOKEN')).toBe('csrf-123')
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer jwt-access-token')
   })
 
-  it('保留调用方为状态变更请求提供的 CSRF header', async () => {
-    document.cookie = 'XSRF-TOKEN=cookie-token; path=/'
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
-      headers: { 'Content-Type': 'application/json' },
-    })))
-
-    await request('/api/example', {
-      method: 'PATCH',
-      headers: { 'X-XSRF-TOKEN': 'caller-token' },
-    })
-
-    const [, init] = vi.mocked(fetch).mock.calls[0]
-    expect(new Headers(init?.headers).get('X-XSRF-TOKEN')).toBe('caller-token')
-  })
-
-  it('不为安全方法附加 CSRF token，但始终携带会话凭据', async () => {
-    document.cookie = 'XSRF-TOKEN=csrf-123; path=/'
+  it('accessToken 为 null 时不注入 Authorization 头', async () => {
+    setAccessToken(null)
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
       headers: { 'Content-Type': 'application/json' },
     })))
@@ -41,8 +28,22 @@ describe('request', () => {
     await request('/api/example', { method: 'GET' })
 
     const [, init] = vi.mocked(fetch).mock.calls[0]
-    expect(init).toMatchObject({ credentials: 'include' })
-    expect(new Headers(init?.headers).get('X-XSRF-TOKEN')).toBeNull()
+    expect(new Headers(init?.headers).get('Authorization')).toBeNull()
+  })
+
+  it('调用方已提供 Authorization 头时不覆盖', async () => {
+    setAccessToken('module-level-token')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
+      headers: { 'Content-Type': 'application/json' },
+    })))
+
+    await request('/api/example', {
+      method: 'PATCH',
+      headers: { Authorization: 'Bearer caller-token' },
+    })
+
+    const [, init] = vi.mocked(fetch).mock.calls[0]
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer caller-token')
   })
 
   it('将后端语义错误解析为带 HTTP 状态和 traceId 的客户端错误', async () => {

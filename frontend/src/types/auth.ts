@@ -9,6 +9,15 @@ export interface LoginInput {
   password: string
 }
 
-export interface RegisterInput extends LoginInput {
+export interface RegisterInput {
+  email: string
+  password: string
+  displayName: string
+}
+
+export interface TokenPairResponse {
+  accessToken: string
+  userId: string
+  email: string
   displayName: string
 }

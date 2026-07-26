@@ -12,6 +12,15 @@ function jsonResponse(body: unknown, status = 200) {
   })
 }
 
+function tokenPairResponse(overrides: Partial<{ accessToken: string; userId: string; email: string; displayName: string }> = {}) {
+  return jsonResponse({
+    accessToken: overrides.accessToken ?? 'jwt-token',
+    userId: overrides.userId ?? '31883977-a15f-4c8a-9e37-10cc267ea5da',
+    email: overrides.email ?? 'ada@example.com',
+    displayName: overrides.displayName ?? 'Ada',
+  })
+}
+
 function LocationProbe() {
   const location = useLocation()
   return <output data-testid="location">{JSON.stringify(location)}</output>
@@ -39,7 +48,6 @@ function renderApp(path: string | { pathname: string; search?: string; state?: u
 
 afterEach(() => {
   vi.unstubAllGlobals()
-  document.cookie = 'XSRF-TOKEN=; Max-Age=0; path=/'
 })
 
 describe('应用壳层', () => {
@@ -54,11 +62,7 @@ describe('应用壳层', () => {
 
   it('已登录用户访问登录页会跳转到简历页', async () => {
     const fetchMock = vi.fn((path: string) => {
-      if (path === '/api/auth/me') return Promise.resolve(jsonResponse({
-        userId: '31883977-a15f-4c8a-9e37-10cc267ea5da',
-        email: 'ada@example.com',
-        displayName: 'Ada',
-      }))
+      if (path === '/api/auth/refresh') return Promise.resolve(tokenPairResponse())
       return Promise.resolve(jsonResponse([]))
     })
 
@@ -70,10 +74,8 @@ describe('应用壳层', () => {
   it('匿名用户登录后回到最初请求的深层内部路由', async () => {
     const user = userEvent.setup()
     const fetchMock = vi.fn((path: string) => {
-      if (path === '/api/auth/me') return Promise.resolve(jsonResponse({ code: 'UNAUTHENTICATED' }, 401))
-      if (path === '/api/auth/login') return Promise.resolve(jsonResponse({
-        userId: '31883977-a15f-4c8a-9e37-10cc267ea5da', email: 'ada@example.com', displayName: 'Ada',
-      }))
+      if (path === '/api/auth/refresh') return Promise.resolve(jsonResponse({ code: 'UNAUTHENTICATED' }, 401))
+      if (path === '/api/auth/login') return Promise.resolve(tokenPairResponse())
       if (path === '/api/resumes/42') return Promise.resolve(jsonResponse({ code: 'NOT_FOUND' }, 404))
       return Promise.resolve(jsonResponse([]))
     })
@@ -106,10 +108,8 @@ describe('应用壳层', () => {
   it('恶意 return-to 在认证成功后回退到简历页', async () => {
     const user = userEvent.setup()
     const fetchMock = vi.fn((path: string) => {
-      if (path === '/api/auth/me') return Promise.resolve(jsonResponse({ code: 'UNAUTHENTICATED' }, 401))
-      if (path === '/api/auth/login') return Promise.resolve(jsonResponse({
-        userId: '31883977-a15f-4c8a-9e37-10cc267ea5da', email: 'ada@example.com', displayName: 'Ada',
-      }))
+      if (path === '/api/auth/refresh') return Promise.resolve(jsonResponse({ code: 'UNAUTHENTICATED' }, 401))
+      if (path === '/api/auth/login') return Promise.resolve(tokenPairResponse())
       return Promise.resolve(jsonResponse([]))
     })
     renderApp({ pathname: '/login', state: { from: { pathname: '//evil.example/phish' } } }, fetchMock)
@@ -124,9 +124,7 @@ describe('应用壳层', () => {
 
   it('已登录用户访问匿名页面时忽略恶意 return-to 并进入简历页', async () => {
     const fetchMock = vi.fn((path: string) => {
-      if (path === '/api/auth/me') return Promise.resolve(jsonResponse({
-        userId: '31883977-a15f-4c8a-9e37-10cc267ea5da', email: 'ada@example.com', displayName: 'Ada',
-      }))
+      if (path === '/api/auth/refresh') return Promise.resolve(tokenPairResponse())
       return Promise.resolve(jsonResponse([]))
     })
     renderApp({ pathname: '/login', state: { from: { pathname: '//evil.example/phish' } } }, fetchMock)
@@ -137,11 +135,7 @@ describe('应用壳层', () => {
 
   it('根路径跳转到简历页，并提供四个精确导航入口', async () => {
     const fetchMock = vi.fn((path: string) => {
-      if (path === '/api/auth/me') return Promise.resolve(jsonResponse({
-        userId: '31883977-a15f-4c8a-9e37-10cc267ea5da',
-        email: 'ada@example.com',
-        displayName: 'Ada',
-      }))
+      if (path === '/api/auth/refresh') return Promise.resolve(tokenPairResponse())
       return Promise.resolve(jsonResponse([]))
     })
     renderApp('/', fetchMock)
@@ -155,11 +149,7 @@ describe('应用壳层', () => {
 
   it('以 aria-current 标明当前导航', async () => {
     const fetchMock = vi.fn((path: string) => {
-      if (path === '/api/auth/me') return Promise.resolve(jsonResponse({
-        userId: '31883977-a15f-4c8a-9e37-10cc267ea5da',
-        email: 'ada@example.com',
-        displayName: 'Ada',
-      }))
+      if (path === '/api/auth/refresh') return Promise.resolve(tokenPairResponse())
       return new Promise(() => undefined)
     })
     renderApp('/settings', fetchMock)
@@ -170,11 +160,7 @@ describe('应用壳层', () => {
 
   it('退出后清除登录状态并回到登录页', async () => {
     const fetchMock = vi.fn((path: string) => {
-      if (path === '/api/auth/me') return Promise.resolve(jsonResponse({
-        userId: '31883977-a15f-4c8a-9e37-10cc267ea5da',
-        email: 'ada@example.com',
-        displayName: 'Ada',
-      }))
+      if (path === '/api/auth/refresh') return Promise.resolve(tokenPairResponse())
       if (path === '/api/auth/logout') return Promise.resolve(new Response(null, { status: 204 }))
       return Promise.resolve(jsonResponse([]))
     })
