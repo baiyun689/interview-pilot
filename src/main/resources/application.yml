@@ -16,14 +16,6 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
-  session:
-    redis:
-      namespace: interview-pilot:session
-    servlet:
-      cookie:
-        http-only: true
-        same-site: lax
-        secure: ${SESSION_COOKIE_SECURE:false}
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
@@ -45,6 +37,10 @@ server:
   forward-headers-strategy: framework
 
 app:
+  jwt:
+    access-token-ttl: 15m
+    refresh-token-ttl: 7d
+    hmac-secret: ${JWT_HMAC_SECRET}
   rate-limit:
     llm-max-concurrency: ${LLM_MAX_CONCURRENCY:4}
     llm-lease: ${LLM_LEASE:90s}
