@@ -5,7 +5,10 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -18,11 +21,13 @@ import org.redisson.api.RBucket;
 import org.redisson.api.RedissonClient;
 
 import interview.pilot.auth.application.CurrentUser;
+import tools.jackson.databind.ObjectMapper;
 
 @ExtendWith(MockitoExtension.class)
 class JwtTokenServiceImplTest {
 
   @Mock RedissonClient redisson;
+  @Mock ObjectMapper objectMapper;
 
   JwtProperties properties = new JwtProperties(
       Duration.ofMinutes(15), Duration.ofDays(7),
@@ -36,7 +41,7 @@ class JwtTokenServiceImplTest {
 
   @BeforeEach
   void setUp() {
-    service = new JwtTokenServiceImpl(redisson, properties);
+    service = new JwtTokenServiceImpl(redisson, properties, objectMapper);
   }
 
   @Test
@@ -50,14 +55,20 @@ class JwtTokenServiceImplTest {
   }
 
   @Test
-  void verifyAccessTokenRejectsExpiredToken() throws Exception {
+  void verifyAccessTokenRejectsExpiredToken() {
     JwtProperties shortLived = new JwtProperties(
-        Duration.ofNanos(1), Duration.ofDays(7),
+        Duration.ofMinutes(1), Duration.ofDays(7),
         "this-is-a-test-hmac-secret-with-at-least-32-chars!!");
-    JwtTokenServiceImpl shortService = new JwtTokenServiceImpl(redisson, shortLived);
+    Clock fixedClock = Clock.fixed(Instant.now(), ZoneOffset.UTC);
+    JwtTokenServiceImpl shortService = new JwtTokenServiceImpl(
+        redisson, shortLived, objectMapper, fixedClock);
     String token = shortService.issueAccessToken(user);
-    Thread.sleep(1);
-    Optional<CurrentUser> result = shortService.verifyAccessToken(token);
+    // Now advance the clock: create a new service with clock advanced past TTL
+    Clock advancedClock = Clock.fixed(
+        fixedClock.instant().plus(Duration.ofHours(1)), ZoneOffset.UTC);
+    JwtTokenServiceImpl advancedService = new JwtTokenServiceImpl(
+        redisson, shortLived, objectMapper, advancedClock);
+    Optional<CurrentUser> result = advancedService.verifyAccessToken(token);
     assertThat(result).isEmpty();
   }
 

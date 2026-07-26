@@ -1,8 +1,11 @@
 package interview.pilot.auth.jwt;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -18,6 +21,7 @@ import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
+import tools.jackson.databind.ObjectMapper;
 
 @Slf4j
 @Component
@@ -25,21 +29,33 @@ public class JwtTokenServiceImpl implements JwtTokenService {
 
   private static final String REFRESH_PREFIX = "interview-pilot:refresh:";
   private static final String USED_PREFIX = "interview-pilot:used_refresh:";
-  private static final Duration REPLAY_WINDOW = Duration.ofMinutes(5);
+  private static final Duration REPLAY_WINDOW = Duration.ofSeconds(30);
 
   private final RedissonClient redisson;
   private final JwtProperties properties;
   private final SecretKey hmacKey;
+  private final ObjectMapper objectMapper;
+  private final Clock clock;
 
-  public JwtTokenServiceImpl(RedissonClient redisson, JwtProperties properties) {
+  // Production constructor (used by Spring via @Component)
+  public JwtTokenServiceImpl(RedissonClient redisson, JwtProperties properties,
+                              ObjectMapper objectMapper) {
+    this(redisson, properties, objectMapper, Clock.systemUTC());
+  }
+
+  // Test constructor
+  JwtTokenServiceImpl(RedissonClient redisson, JwtProperties properties,
+                       ObjectMapper objectMapper, Clock clock) {
     this.redisson = redisson;
     this.properties = properties;
-    this.hmacKey = Keys.hmacShaKeyFor(properties.hmacSecret().getBytes());
+    this.objectMapper = objectMapper;
+    this.clock = clock;
+    this.hmacKey = Keys.hmacShaKeyFor(properties.hmacSecret().getBytes(StandardCharsets.UTF_8));
   }
 
   @Override
   public String issueAccessToken(CurrentUser user) {
-    Instant now = Instant.now();
+    Instant now = clock.instant();
     return Jwts.builder()
         .subject(user.userId().toString())
         .claim("dbId", user.databaseId())
@@ -65,6 +81,7 @@ public class JwtTokenServiceImpl implements JwtTokenService {
   public Optional<CurrentUser> verifyAccessToken(String token) {
     try {
       Claims claims = Jwts.parser()
+          .clock(() -> Date.from(clock.instant()))
           .verifyWith(hmacKey)
           .build()
           .parseSignedClaims(token)
@@ -120,37 +137,38 @@ public class JwtTokenServiceImpl implements JwtTokenService {
     }
   }
 
+  private static final class StoredRefreshToken {
+    public String userId;
+    public String email;
+    public String displayName;
+    public String tokenFamily;
+  }
+
   private RefreshToken parseStored(String json, String tokenValue) {
     try {
-      int uStart = json.indexOf("\"userId\":\"") + 10;
-      int uEnd = json.indexOf("\"", uStart);
-      int eStart = json.indexOf("\"email\":\"") + 9;
-      int eEnd = json.indexOf("\"", eStart);
-      int dStart = json.indexOf("\"displayName\":\"") + 15;
-      int dEnd = json.indexOf("\"", dStart);
-      int fStart = json.indexOf("\"tokenFamily\":\"") + 15;
-      int fEnd = json.indexOf("\"", fStart);
+      StoredRefreshToken s = objectMapper.readValue(json, StoredRefreshToken.class);
       return new RefreshToken(
           tokenValue,
-          UUID.fromString(json.substring(uStart, uEnd)),
-          json.substring(eStart, eEnd),
-          json.substring(dStart, dEnd),
-          json.substring(fStart, fEnd),
-          Instant.now(),
-          Instant.now().plus(properties.refreshTokenTtl()));
+          UUID.fromString(s.userId),
+          s.email,
+          s.displayName,
+          s.tokenFamily,
+          clock.instant(),
+          clock.instant().plus(properties.refreshTokenTtl()));
     } catch (Exception e) {
-      throw new JwtException("Invalid refresh token data");
+      throw new JwtException("Invalid refresh token data", e);
     }
   }
 
   private String toJson(RefreshToken token) {
-    return "{\"userId\":\"" + token.userId()
-        + "\",\"email\":\"" + escape(token.email())
-        + "\",\"displayName\":\"" + escape(token.displayName())
-        + "\",\"tokenFamily\":\"" + token.tokenFamily() + "\"}";
-  }
-
-  private String escape(String value) {
-    return value.replace("\\", "\\\\").replace("\"", "\\\"");
+    try {
+      return objectMapper.writeValueAsString(Map.of(
+          "userId", token.userId().toString(),
+          "email", token.email(),
+          "displayName", token.displayName(),
+          "tokenFamily", token.tokenFamily()));
+    } catch (Exception e) {
+      throw new JwtException("Failed to serialize refresh token", e);
+    }
   }
 }

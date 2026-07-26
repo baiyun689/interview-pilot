@@ -13,7 +13,7 @@ public record JwtProperties(
   public JwtProperties {
     if (hmacSecret == null || hmacSecret.length() < 32) {
       throw new IllegalArgumentException(
-          "app.jwt.hmac-secret must be at least 32 characters (256 bits in Base64)");
+          "app.jwt.hmac-secret must be at least 32 characters");
     }
   }
 }
