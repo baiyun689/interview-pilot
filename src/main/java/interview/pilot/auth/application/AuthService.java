@@ -4,8 +4,6 @@ import java.util.Locale;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,7 +15,7 @@ import interview.pilot.auth.infrastructure.UserAccountRepository;
 import interview.pilot.common.exception.BusinessException;
 
 @Service
-public class AuthService implements UserDetailsService {
+public class AuthService {
   private final UserAccountRepository accounts;
   private final PasswordEncoder passwordEncoder;
 
@@ -26,8 +24,23 @@ public class AuthService implements UserDetailsService {
     this.passwordEncoder = passwordEncoder;
   }
 
+  public CurrentUser authenticate(String email, String password) {
+    String normalized = normalizeEmail(email);
+    UserAccountEntity account = accounts.findByEmail(normalized)
+        .orElseThrow(() -> authFailed());
+    if (account.getStatus() != UserStatus.ACTIVE) {
+      throw authFailed();
+    }
+    if (!passwordEncoder.matches(password, account.getPasswordHash())) {
+      throw authFailed();
+    }
+    return new CurrentUser(
+        account.getId(), account.getUserId(),
+        account.getEmail(), account.getDisplayName());
+  }
+
   @Transactional
-  public AuthenticatedUser register(RegisterRequest request) {
+  public CurrentUser register(RegisterRequest request) {
     String email = normalizeEmail(request.email());
     if (accounts.findByEmail(email).isPresent()) {
       throw emailAlreadyExists();
@@ -35,35 +48,24 @@ public class AuthService implements UserDetailsService {
     try {
       UserAccountEntity account = accounts.save(UserAccountEntity.register(
           email, passwordEncoder.encode(request.password()), request.displayName().trim()));
-      return authenticated(account);
+      return new CurrentUser(
+          account.getId(), account.getUserId(),
+          account.getEmail(), account.getDisplayName());
     } catch (DataIntegrityViolationException exception) {
       throw emailAlreadyExists();
     }
-  }
-
-  @Override
-  @Transactional(readOnly = true)
-  public AuthenticatedUser loadUserByUsername(String email) {
-    return accounts.findByEmail(normalizeEmail(email))
-        .map(this::authenticated)
-        .orElseThrow(() -> new UsernameNotFoundException("Account not found"));
   }
 
   public String normalizeEmail(String email) {
     return email.trim().toLowerCase(Locale.ROOT);
   }
 
-  private AuthenticatedUser authenticated(UserAccountEntity account) {
-    return new AuthenticatedUser(
-        account.getId(),
-        account.getUserId(),
-        account.getEmail(),
-        account.getDisplayName(),
-        account.getPasswordHash(),
-        account.getStatus() == UserStatus.ACTIVE);
+  private BusinessException authFailed() {
+    return new BusinessException(
+        "AUTHENTICATION_FAILED", "Email or password is incorrect", HttpStatus.UNAUTHORIZED);
   }
 
-  private static BusinessException emailAlreadyExists() {
+  private BusinessException emailAlreadyExists() {
     return new BusinessException(
         "EMAIL_ALREADY_EXISTS", "An account with this email already exists", HttpStatus.CONFLICT);
   }

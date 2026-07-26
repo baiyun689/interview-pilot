@@ -13,6 +13,7 @@ import javax.crypto.SecretKey;
 
 import org.redisson.api.RBucket;
 import org.redisson.api.RedissonClient;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import interview.pilot.auth.application.CurrentUser;
@@ -37,7 +38,8 @@ public class JwtTokenServiceImpl implements JwtTokenService {
   private final ObjectMapper objectMapper;
   private final Clock clock;
 
-  // Production constructor (used by Spring via @Component)
+  // 生产环境构造函数 (由 Spring @Component 调用)
+  @Autowired
   public JwtTokenServiceImpl(RedissonClient redisson, JwtProperties properties,
                               ObjectMapper objectMapper) {
     this(redisson, properties, objectMapper, Clock.systemUTC());
