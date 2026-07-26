@@ -182,11 +182,6 @@ public class CreateInterviewService {
         scope, firstRagSnapshot));
   }
 
-  @Deprecated(forRemoval = true)
-  public InterviewSessionResponse create(CreateInterviewRequest request) {
-    return create(legacyUser(), request);
-  }
-
   private BusinessException invalidAiOutput() {
     return new BusinessException(
         "INVALID_AI_OUTPUT", "AI output did not match the interview plan", HttpStatus.BAD_GATEWAY);
@@ -250,8 +245,4 @@ public class CreateInterviewService {
     };
   }
 
-  private static CurrentUser legacyUser() {
-    return new CurrentUser(1L, new java.util.UUID(0L, 1L),
-        "legacy-demo@invalid.local", "Legacy Demo");
-  }
 }

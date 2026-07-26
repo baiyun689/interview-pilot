@@ -18,6 +18,7 @@ import org.springframework.http.HttpStatus;
 
 import interview.pilot.ai.provider.AiProviderDescriptor;
 import interview.pilot.ai.provider.AiProviderService;
+import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.common.exception.BusinessException;
 import interview.pilot.interview.api.CreateInterviewRequest;
 import interview.pilot.interview.api.InterviewSessionResponse;
@@ -34,6 +35,8 @@ import jakarta.validation.Validator;
 import tools.jackson.databind.ObjectMapper;
 
 class CreateInterviewServiceTest {
+  private static final CurrentUser LEGACY_USER = new CurrentUser(
+      1L, new UUID(0L, 1L), "legacy-demo@invalid.local", "Legacy Demo");
 
   @Test
   void resolvesProviderOnceAndUsesTheImmutableSnapshotForEveryAiStep() {
@@ -68,7 +71,7 @@ class CreateInterviewServiceTest {
         resumes, providers, extractor, planner, questions, store, objectMapper, validator,
         new ClasspathInterviewSkillCatalog(), scopeResolver, retriever);
 
-    InterviewSessionResponse result = service.create(new CreateInterviewRequest(
+    InterviewSessionResponse result = service.create(LEGACY_USER,new CreateInterviewRequest(
         7L, " Backend Engineer ", " Build reliable Java services ", Difficulty.MEDIUM, 8,
         "deepseek", "java-backend"));
 
@@ -103,7 +106,7 @@ class CreateInterviewServiceTest {
         resumes, providers, extractor, planner, questions, store, objectMapper, validator,
         new ClasspathInterviewSkillCatalog(), scopeResolver, retriever);
 
-    assertThatThrownBy(() -> service.create(new CreateInterviewRequest(
+    assertThatThrownBy(() -> service.create(LEGACY_USER,new CreateInterviewRequest(
         7L, "Backend Engineer", "Build reliable Java services", Difficulty.MEDIUM, 8, null)))
         .isInstanceOfSatisfying(BusinessException.class, exception -> {
           assertThat(exception.status()).isEqualTo(HttpStatus.CONFLICT);
@@ -137,7 +140,7 @@ class CreateInterviewServiceTest {
         resumes, providers, extractor, planner, questions, store, new ObjectMapper(), validator,
         new ClasspathInterviewSkillCatalog(), scopeResolver, retriever);
 
-    assertThatThrownBy(() -> service.create(new CreateInterviewRequest(
+    assertThatThrownBy(() -> service.create(LEGACY_USER,new CreateInterviewRequest(
         7L, "Backend Engineer", "Build reliable Java services", Difficulty.MEDIUM, 8, null)))
         .isInstanceOfSatisfying(BusinessException.class, exception -> {
           assertThat(exception.status()).isEqualTo(HttpStatus.BAD_GATEWAY);
@@ -171,7 +174,7 @@ class CreateInterviewServiceTest {
         resumes, providers, extractor, planner, questions, store, new ObjectMapper(), validator,
         new ClasspathInterviewSkillCatalog(), scopeResolver, retriever);
 
-    assertThatThrownBy(() -> service.create(new CreateInterviewRequest(
+    assertThatThrownBy(() -> service.create(LEGACY_USER,new CreateInterviewRequest(
         7L, "Backend Engineer", "Build reliable Java services", Difficulty.MEDIUM, 8, null)))
         .isInstanceOfSatisfying(BusinessException.class, exception ->
             assertThat(exception.code()).isEqualTo("INVALID_AI_OUTPUT"));

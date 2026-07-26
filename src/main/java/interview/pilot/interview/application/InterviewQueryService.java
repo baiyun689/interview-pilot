@@ -63,9 +63,6 @@ public class InterviewQueryService {
     return mapper.map(session, job, turns.findAllBySessionIdOrderByTurnNo(session.getId()));
   }
 
-  @Deprecated(forRemoval = true)
-  public InterviewSessionResponse get(UUID sessionId) { return get(legacyUser(), sessionId); }
-
   @Transactional(readOnly = true)
   public List<InterviewHistoryResponse> list(CurrentUser user) {
     return sessions.findAllByUserAccountIdOrderByCreatedAtDesc(requireOwner(user)).stream().map(session -> {
@@ -79,9 +76,6 @@ public class InterviewQueryService {
           skill.id(), skill.name());
     }).toList();
   }
-
-  @Deprecated(forRemoval = true)
-  public List<InterviewHistoryResponse> list() { return list(legacyUser()); }
 
   @Transactional(readOnly = true)
   public ReportQueryResult report(CurrentUser user, UUID sessionId) {
@@ -115,9 +109,6 @@ public class InterviewQueryService {
         sessionId, session.getStatus(), task.getTaskId(), task.getStatus(),
         task.getLastError(), retryable));
   }
-
-  @Deprecated(forRemoval = true)
-  public ReportQueryResult report(UUID sessionId) { return report(legacyUser(), sessionId); }
 
   private int scoreFrom(String snapshot) {
     try {
@@ -163,10 +154,6 @@ public class InterviewQueryService {
       throw new IllegalArgumentException("Authenticated user is required");
     }
     return user.databaseId();
-  }
-
-  private static CurrentUser legacyUser() {
-    return new CurrentUser(1L, new UUID(0L, 1L), "legacy-demo@invalid.local", "Legacy Demo");
   }
 
   public record ReportQueryResult(HttpStatus status, Object body) {}

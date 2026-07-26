@@ -78,12 +78,6 @@ public class InterviewSseService {
     return emitter;
   }
 
-  @Deprecated(forRemoval = true)
-  public SseEmitter stream(UUID sessionId, SubmitAnswerRequest request) {
-    return stream(new CurrentUser(1L, new UUID(0L, 1L),
-        "legacy-demo@invalid.local", "Legacy Demo"), sessionId, request);
-  }
-
   private void process(
       SseEmitter emitter,
       AtomicBoolean transportTerminal,

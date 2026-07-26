@@ -74,11 +74,6 @@ public class InterviewTurnClaimer {
     }
   }
 
-  @Deprecated(forRemoval = true)
-  public InterviewTurnClaim claim(UUID sessionId, UUID requestId, String answer) {
-    return claim(legacyUser(), sessionId, requestId, answer);
-  }
-
   private InterviewTurnClaim createOrReplay(
       Long ownerId, UUID publicSessionId, UUID requestId, String answer) {
     var session = session(ownerId, publicSessionId);
@@ -180,7 +175,4 @@ public class InterviewTurnClaimer {
     return user.databaseId();
   }
 
-  private static CurrentUser legacyUser() {
-    return new CurrentUser(1L, new UUID(0L, 1L), "legacy-demo@invalid.local", "Legacy Demo");
-  }
 }

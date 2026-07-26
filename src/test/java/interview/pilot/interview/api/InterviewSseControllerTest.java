@@ -226,7 +226,7 @@ class InterviewSseControllerTest {
     when(answers.claim(any(), eq(sessionId), any())).thenReturn(claim);
     when(answers.processClaim(any(), eq(sessionId), any(), eq(claim))).thenReturn(finishResult());
 
-    var emitter = sse.stream(sessionId, new SubmitAnswerRequest(requestId, "answer"));
+    var emitter = sse.stream(new CurrentUser(1L, new UUID(0L, 1L), "legacy-demo@invalid.local", "Legacy Demo"), sessionId, new SubmitAnswerRequest(requestId, "answer"));
     emitter.complete();
     executor.task.run();
 
@@ -258,7 +258,7 @@ class InterviewSseControllerTest {
     when(answers.processClaim(any(), eq(sessionId), any(), eq(claim))).thenReturn(finishResult());
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
-        () -> service.stream(sessionId, new SubmitAnswerRequest(requestId, "answer")))
+        () -> service.stream(new CurrentUser(1L, new UUID(0L, 1L), "legacy-demo@invalid.local", "Legacy Demo"), sessionId, new SubmitAnswerRequest(requestId, "answer")))
         .isInstanceOf(IllegalStateException.class)
         .hasMessage("SSE connection closed");
     executor.task.run();

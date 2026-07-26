@@ -32,6 +32,7 @@ import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import interview.pilot.common.exception.BusinessException;
+import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.async.domain.AsyncTaskStatus;
 import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
@@ -90,6 +91,9 @@ class SubmitAnswerConcurrencyIT {
   @Autowired private InterviewTurnRepository turns;
   @Autowired private AsyncTaskRepository tasks;
   @Autowired private ObjectMapper objectMapper;
+
+  private static final CurrentUser LEGACY_USER = new CurrentUser(
+      1L, new UUID(0L, 1L), "legacy-demo@invalid.local", "Legacy Demo");
 
   private ExecutorService executor;
   private UUID sessionId;
@@ -174,10 +178,10 @@ class SubmitAnswerConcurrencyIT {
   @Test
   void oneRequestIdCannotBeReusedForAnotherAnswerOrSession() throws Exception {
     UUID requestId = UUID.randomUUID();
-    claimer.claim(sessionId, requestId, "Original answer");
+    claimer.claim(LEGACY_USER, sessionId, requestId, "Original answer");
 
     org.assertj.core.api.Assertions.assertThatThrownBy(
-            () -> claimer.claim(sessionId, requestId, "Different answer"))
+            () -> claimer.claim(LEGACY_USER, sessionId, requestId, "Different answer"))
         .isInstanceOf(BusinessException.class)
         .hasMessage("The requestId was already used for another answer");
 
@@ -193,7 +197,7 @@ class SubmitAnswerConcurrencyIT {
 
     UUID otherSessionId = other.getSessionId();
     org.assertj.core.api.Assertions.assertThatThrownBy(
-            () -> claimer.claim(otherSessionId, requestId, "Original answer"))
+            () -> claimer.claim(LEGACY_USER, otherSessionId, requestId, "Original answer"))
         .isInstanceOf(BusinessException.class)
         .hasMessage("The requestId was already used for another answer");
   }
@@ -220,7 +224,7 @@ class SubmitAnswerConcurrencyIT {
     var persisted = sessions.findBySessionId(sessionId).orElseThrow();
     assertThat(turns.findAllBySessionIdOrderByTurnNo(persisted.getId())).hasSize(2);
     assertThat(turns.findAllBySessionIdOrderByTurnNo(persisted.getId()).get(1).getRequestId()).isNull();
-    var reconnected = queryService.get(sessionId).turns().get(0);
+    var reconnected = queryService.get(LEGACY_USER, sessionId).turns().get(0);
     assertThat(reconnected.answer()).isEqualTo("Use a version column.");
     assertThat(reconnected.feedback()).isEqualTo("Good concurrency explanation");
     assertThat(reconnected.score()).isEqualTo(82);
@@ -243,10 +247,10 @@ class SubmitAnswerConcurrencyIT {
         org.mockito.ArgumentMatchers.eq("deepseek-chat"), any(), any()))
         .thenReturn(new GeneratedQuestion("Explain Spring transactions.", "Spring"));
     UUID requestId = UUID.randomUUID();
-    Future<AnswerProcessingResult> owner = executor.submit(() -> submitService.submit(
+    Future<AnswerProcessingResult> owner = executor.submit(() -> submitService.submit(LEGACY_USER,
         sessionId, new SubmitAnswerRequest(requestId, "Slow answer")));
     assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue();
-    Future<AnswerProcessingResult> duplicate = executor.submit(() -> submitService.submit(
+    Future<AnswerProcessingResult> duplicate = executor.submit(() -> submitService.submit(LEGACY_USER,
         sessionId, new SubmitAnswerRequest(requestId, "Slow answer")));
 
     AnswerProcessingResult ownerResult = owner.get(15, TimeUnit.SECONDS);
@@ -271,7 +275,7 @@ class SubmitAnswerConcurrencyIT {
         org.mockito.ArgumentMatchers.eq("deepseek-chat"), any(), any()))
         .thenReturn(new GeneratedQuestion("Explain Spring transactions.", "Spring"));
     UUID oldRequest = UUID.randomUUID();
-    Future<AnswerProcessingResult> old = executor.submit(() -> submitService.submit(
+    Future<AnswerProcessingResult> old = executor.submit(() -> submitService.submit(LEGACY_USER,
         sessionId, new SubmitAnswerRequest(oldRequest, "Old answer")));
     assertThat(evaluatorEntered.await(10, TimeUnit.SECONDS)).isTrue();
 
@@ -281,7 +285,7 @@ class SubmitAnswerConcurrencyIT {
     turn.setProcessingError("AI_PROCESSING_FAILED");
     turns.saveAndFlush(turn);
     UUID newRequest = UUID.randomUUID();
-    InterviewTurnClaim newOwner = claimer.claim(sessionId, newRequest, "New answer");
+    InterviewTurnClaim newOwner = claimer.claim(LEGACY_USER, sessionId, newRequest, "New answer");
     assertThat(newOwner.owner()).isTrue();
 
     releaseEvaluator.countDown();
@@ -302,7 +306,7 @@ class SubmitAnswerConcurrencyIT {
     when(answerEvaluator.evaluate(any())).thenThrow(new IllegalStateException("secret model detail"));
     UUID failedRequest = UUID.randomUUID();
 
-    org.assertj.core.api.Assertions.assertThatThrownBy(() -> submitService.submit(
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> submitService.submit(LEGACY_USER,
             sessionId, new SubmitAnswerRequest(failedRequest, "First answer")))
         .isInstanceOf(BusinessException.class)
         .hasMessage("Answer processing failed; submit again with a new requestId");
@@ -315,7 +319,7 @@ class SubmitAnswerConcurrencyIT {
     reset(answerEvaluator, questionGenerator);
     stubSuccessfulEvaluation();
     UUID retryRequest = UUID.randomUUID();
-    AnswerProcessingResult retried = submitService.submit(
+    AnswerProcessingResult retried = submitService.submit(LEGACY_USER,
         sessionId, new SubmitAnswerRequest(retryRequest, "Corrected answer"));
 
     assertThat(retried.requestId()).isEqualTo(retryRequest);
@@ -341,7 +345,7 @@ class SubmitAnswerConcurrencyIT {
     when(answerEvaluator.evaluate(any())).thenReturn(new AnswerEvaluation(
         90, "Strong answer", List.of("version check"), List.of(), finishSuggestion));
 
-    AnswerProcessingResult result = submitService.submit(
+    AnswerProcessingResult result = submitService.submit(LEGACY_USER,
         sessionId, new SubmitAnswerRequest(UUID.randomUUID(), "Use optimistic versions"));
 
     assertThat(result.decision().nextStep()).isEqualTo(NextStep.FINISH);
@@ -380,7 +384,7 @@ class SubmitAnswerConcurrencyIT {
     when(answerEvaluator.evaluate(any())).thenReturn(new AnswerEvaluation(
         80, "Enough", List.of("Evidence"), List.of("Depth"), continueSuggestion));
 
-    AnswerProcessingResult result = submitService.submit(
+    AnswerProcessingResult result = submitService.submit(LEGACY_USER,
         sessionId, new SubmitAnswerRequest(UUID.randomUUID(), "Final answer"));
 
     assertThat(result.sessionStatus()).isEqualTo(SessionStatus.EVALUATING);
@@ -402,7 +406,7 @@ class SubmitAnswerConcurrencyIT {
         """);
     resumes.saveAndFlush(resume);
 
-    org.assertj.core.api.Assertions.assertThatThrownBy(() -> submitService.submit(
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> submitService.submit(LEGACY_USER,
             sessionId, new SubmitAnswerRequest(UUID.randomUUID(), "answer")))
         .isInstanceOf(BusinessException.class)
         .hasMessage("Answer processing failed; submit again with a new requestId")
@@ -414,7 +418,7 @@ class SubmitAnswerConcurrencyIT {
       CountDownLatch start, UUID requestId, String answer) {
     return executor.submit(() -> {
       start.await(10, TimeUnit.SECONDS);
-      return claimer.claim(sessionId, requestId, answer);
+      return claimer.claim(LEGACY_USER, sessionId, requestId, answer);
     });
   }
 
@@ -422,7 +426,7 @@ class SubmitAnswerConcurrencyIT {
       CountDownLatch start, UUID requestId, String answer) {
     return executor.submit(() -> {
       start.await(10, TimeUnit.SECONDS);
-      return submitService.submit(sessionId, new SubmitAnswerRequest(requestId, answer));
+      return submitService.submit(LEGACY_USER,sessionId, new SubmitAnswerRequest(requestId, answer));
     });
   }
 

@@ -3,6 +3,7 @@ package interview.pilot.auth.api;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -18,6 +19,7 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.redisson.api.RBucket;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -25,9 +27,6 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.MvcResult;
-import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
-import org.springframework.mock.web.MockHttpSession;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import interview.pilot.ai.provider.AiProviderService;
@@ -37,6 +36,7 @@ import interview.pilot.auth.domain.UserStatus;
 import interview.pilot.auth.infrastructure.UserAccountEntity;
 import interview.pilot.auth.infrastructure.UserAccountRepository;
 import interview.pilot.interview.infrastructure.AnswerAttemptRepository;
+import interview.pilot.interview.infrastructure.InterviewKnowledgeBaseRepository;
 import interview.pilot.interview.infrastructure.InterviewReportRepository;
 import interview.pilot.interview.infrastructure.InterviewSessionRepository;
 import interview.pilot.interview.infrastructure.InterviewTurnRepository;
@@ -45,7 +45,6 @@ import interview.pilot.common.ratelimit.RateLimiter;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeBaseJpaRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentJpaRepository;
-import interview.pilot.interview.infrastructure.InterviewKnowledgeBaseRepository;
 
 @SpringBootTest(properties = {
     "spring.flyway.enabled=false",
@@ -77,34 +76,34 @@ class AuthControllerTest {
   @Autowired MockMvc mvc;
   @Autowired PasswordEncoder passwordEncoder;
 
+  @SuppressWarnings("unchecked")
   @BeforeEach
   void resetRepositoryDefaults() {
     when(accounts.findByEmail(anyString())).thenReturn(Optional.empty());
     when(rateLimiter.allowFixedWindow(anyString(), anyInt(), any(Duration.class))).thenReturn(true);
+    when(redissonClient.getBucket(anyString())).thenReturn(mock(RBucket.class));
   }
 
   @Test
-  void registerCreatesSessionAndMeReturnsTheUser() throws Exception {
+  void registerReturnsTokenPairAndRefreshCookie() throws Exception {
     UserAccountEntity account = account(41L, "user@example.com", "小白", UserStatus.ACTIVE,
         "correct horse battery staple");
     when(accounts.save(any(UserAccountEntity.class))).thenReturn(account);
     when(accounts.findByEmail("user@example.com"))
-        .thenReturn(Optional.empty())
+        .thenReturn(Optional.empty())   // email check: not taken
         .thenReturn(Optional.of(account));
 
-    MvcResult result = mvc.perform(csrfPost("/api/auth/register")
+    mvc.perform(post("/api/auth/register")
             .contentType("application/json")
             .content("""
                 {"email":"User@Example.com","password":"correct horse battery staple",
                  "displayName":"小白"}
                 """))
         .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.accessToken").isNotEmpty())
         .andExpect(jsonPath("$.email").value("user@example.com"))
-        .andReturn();
-
-    mvc.perform(get("/api/auth/me").session((MockHttpSession) result.getRequest().getSession()))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.displayName").value("小白"));
+        .andExpect(jsonPath("$.displayName").value("小白"))
+        .andExpect(cookie().exists("refresh_token"));
   }
 
   @Test
@@ -112,7 +111,7 @@ class AuthControllerTest {
     when(accounts.findByEmail("user@example.com")).thenReturn(Optional.of(
         account(42L, "user@example.com", "Existing", UserStatus.ACTIVE, "password")));
 
-    mvc.perform(csrfPost("/api/auth/register").contentType("application/json")
+    mvc.perform(post("/api/auth/register").contentType("application/json")
             .content("{\"email\":\"User@Example.com\",\"password\":\"password\",\"displayName\":\"New\"}"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("EMAIL_ALREADY_EXISTS"));
@@ -123,7 +122,7 @@ class AuthControllerTest {
     when(accounts.findByEmail("user@example.com")).thenReturn(Optional.of(
         account(43L, "user@example.com", "小白", UserStatus.ACTIVE, "correct-password")));
 
-    mvc.perform(csrfPost("/api/auth/login").contentType("application/json")
+    mvc.perform(post("/api/auth/login").contentType("application/json")
             .content("{\"email\":\"User@Example.com\",\"password\":\"wrong-password\"}"))
         .andExpect(status().isUnauthorized())
         .andExpect(jsonPath("$.code").value("AUTHENTICATION_FAILED"));
@@ -134,80 +133,38 @@ class AuthControllerTest {
     when(accounts.findByEmail("disabled@example.com")).thenReturn(Optional.of(
         account(44L, "disabled@example.com", "Disabled", UserStatus.DISABLED, "password")));
 
-    mvc.perform(csrfPost("/api/auth/login").contentType("application/json")
+    mvc.perform(post("/api/auth/login").contentType("application/json")
             .content("{\"email\":\"disabled@example.com\",\"password\":\"password\"}"))
         .andExpect(status().isUnauthorized())
         .andExpect(jsonPath("$.code").value("AUTHENTICATION_FAILED"));
   }
 
   @Test
-  void anonymousMeRequestIsUnauthorizedAndMaterializesCsrfCookie() throws Exception {
-    mvc.perform(get("/api/auth/me"))
-        .andExpect(status().isUnauthorized())
-        .andExpect(cookie().exists("XSRF-TOKEN"));
-  }
-
-  @Test
-  void anonymousResumeRequestIsUnauthorized() throws Exception {
+  void anonymousRequestIsUnauthorized() throws Exception {
     mvc.perform(get("/api/resumes"))
         .andExpect(status().isUnauthorized());
   }
 
   @Test
-  void registerRotatesAnExistingAnonymousSessionBeforeSavingAuthentication() throws Exception {
-    UserAccountEntity account = account(45L, "register@example.com", "Register", UserStatus.ACTIVE,
-        "correct horse battery staple");
-    when(accounts.save(any(UserAccountEntity.class))).thenReturn(account);
-    when(accounts.findByEmail("register@example.com"))
-        .thenReturn(Optional.empty())
-        .thenReturn(Optional.of(account));
-    MockHttpSession anonymousSession = new MockHttpSession();
-    String previousSessionId = anonymousSession.getId();
-
-    mvc.perform(csrfPost("/api/auth/register", anonymousSession)
-            .contentType("application/json")
-            .content("""
-                {"email":"Register@Example.com","password":"correct horse battery staple",
-                 "displayName":"Register"}
-                """))
-        .andExpect(status().isCreated());
-
-    assertThat(anonymousSession.getId()).isNotEqualTo(previousSessionId);
-    mvc.perform(get("/api/auth/me").session(anonymousSession))
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.email").value("register@example.com"));
-  }
-
-  @Test
-  void loginRotatesAnExistingAnonymousSessionBeforeSavingAuthentication() throws Exception {
+  void loginReturnsTokensAndRefreshCookie() throws Exception {
     UserAccountEntity account = account(46L, "login@example.com", "Login", UserStatus.ACTIVE,
         "correct-password");
     when(accounts.findByEmail("login@example.com")).thenReturn(Optional.of(account));
-    MockHttpSession anonymousSession = new MockHttpSession();
-    String previousSessionId = anonymousSession.getId();
 
-    mvc.perform(csrfPost("/api/auth/login", anonymousSession)
+    mvc.perform(post("/api/auth/login")
             .contentType("application/json")
             .content("{\"email\":\"Login@Example.com\",\"password\":\"correct-password\"}"))
-        .andExpect(status().isOk());
-
-    assertThat(anonymousSession.getId()).isNotEqualTo(previousSessionId);
-    mvc.perform(get("/api/auth/me").session(anonymousSession))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.email").value("login@example.com"));
+        .andExpect(jsonPath("$.accessToken").isNotEmpty())
+        .andExpect(jsonPath("$.email").value("login@example.com"))
+        .andExpect(cookie().exists("refresh_token"));
   }
 
-  private MockHttpServletRequestBuilder csrfPost(String path) throws Exception {
-    return csrfPost(path, new MockHttpSession());
-  }
-
-  private MockHttpServletRequestBuilder csrfPost(String path, MockHttpSession session) throws Exception {
-    MvcResult csrfResult = mvc.perform(get("/api/auth/me").session(session))
-        .andExpect(status().isUnauthorized())
-        .andExpect(cookie().exists("XSRF-TOKEN"))
-        .andReturn();
-    var token = csrfResult.getResponse().getCookie("XSRF-TOKEN");
-    return post(path).session(session).cookie(token).header("X-XSRF-TOKEN", token.getValue());
+  @Test
+  void logoutClearsRefreshCookie() throws Exception {
+    mvc.perform(post("/api/auth/logout"))
+        .andExpect(status().isNoContent())
+        .andExpect(cookie().maxAge("refresh_token", 0));
   }
 
   private UserAccountEntity account(

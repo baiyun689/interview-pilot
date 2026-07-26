@@ -15,6 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
+import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.async.domain.AsyncTaskStatus;
 import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
@@ -41,6 +42,9 @@ class InterviewQueryServiceTest {
   private InterviewReportRepository reports;
   private AsyncTaskRepository tasks;
   private StoredInterviewReportCodec codec;
+  private static final CurrentUser LEGACY_USER = new CurrentUser(
+      1L, new UUID(0L, 1L), "legacy-demo@invalid.local", "Legacy Demo");
+
   private InterviewQueryService service;
 
   @BeforeEach
@@ -67,7 +71,7 @@ class InterviewQueryServiceTest {
         AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + sessionId, 1L))
         .thenReturn(Optional.of(task));
 
-    var result = service.report(sessionId);
+    var result = service.report(LEGACY_USER, sessionId);
 
     assertThat(result.status()).isEqualTo(HttpStatus.ACCEPTED);
     assertThat(result.body()).isInstanceOfSatisfying(
@@ -97,7 +101,7 @@ class InterviewQueryServiceTest {
         .thenReturn(Optional.of(task));
     when(reports.findBySessionId(10L)).thenReturn(Optional.of(entity));
 
-    var result = service.report(sessionId);
+    var result = service.report(LEGACY_USER, sessionId);
 
     assertThat(result.status()).isEqualTo(HttpStatus.OK);
     assertThat(result.body()).isInstanceOfSatisfying(
@@ -121,7 +125,7 @@ class InterviewQueryServiceTest {
         .thenReturn(Optional.of(task));
     when(reports.findBySessionId(10L)).thenReturn(Optional.of(entity));
 
-    assertThatThrownBy(() -> service.report(sessionId))
+    assertThatThrownBy(() -> service.report(LEGACY_USER, sessionId))
         .isInstanceOf(BusinessException.class)
         .hasMessage("Interview report state is inconsistent");
   }
@@ -145,7 +149,7 @@ class InterviewQueryServiceTest {
     for (String invalid : List.of(
         "", "not-json", codec.write(UUID.randomUUID(), valid))) {
       when(entity.getReportSnapshot()).thenReturn(invalid.isEmpty() ? null : invalid);
-      assertThatThrownBy(() -> service.report(sessionId))
+      assertThatThrownBy(() -> service.report(LEGACY_USER, sessionId))
           .isInstanceOf(BusinessException.class)
           .hasMessage("Interview report state is inconsistent");
     }
@@ -171,7 +175,7 @@ class InterviewQueryServiceTest {
     when(jobs.findById(20L)).thenReturn(Optional.of(newestJob));
     when(jobs.findById(21L)).thenReturn(Optional.of(oldestJob));
 
-    assertThat(service.list()).extracting("jobTitle")
+    assertThat(service.list(LEGACY_USER)).extracting("jobTitle")
         .containsExactly("Newest", "Oldest");
   }
 

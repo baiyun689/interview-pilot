@@ -125,11 +125,6 @@ public class SubmitAnswerService {
     return processClaim(user, sessionId, request, claim);
   }
 
-  @Deprecated(forRemoval = true)
-  public AnswerProcessingResult submit(UUID sessionId, SubmitAnswerRequest request) {
-    return submit(legacyUser(), sessionId, request);
-  }
-
   public InterviewTurnClaim claim(CurrentUser user, UUID sessionId, SubmitAnswerRequest request) {
     try {
       InterviewTurnClaim claim = claimer.claim(user, sessionId, request.requestId(), request.answer());
@@ -142,11 +137,6 @@ public class SubmitAnswerService {
       }
       throw exception;
     }
-  }
-
-  @Deprecated(forRemoval = true)
-  public InterviewTurnClaim claim(UUID sessionId, SubmitAnswerRequest request) {
-    return claim(legacyUser(), sessionId, request);
   }
 
   public AnswerProcessingResult processClaim(
@@ -243,12 +233,6 @@ public class SubmitAnswerService {
       }
       throw retryableFailure();
     }
-  }
-
-  @Deprecated(forRemoval = true)
-  public AnswerProcessingResult processClaim(
-      UUID sessionId, SubmitAnswerRequest request, InterviewTurnClaim claim) {
-    return processClaim(legacyUser(), sessionId, request, claim);
   }
 
   private AnswerProcessingResult awaitPersistedResult(
@@ -510,10 +494,6 @@ public class SubmitAnswerService {
         && turn != null
         && claim.sessionDatabaseId().equals(session.getId())
         && claim.sessionDatabaseId().equals(turn.getSessionId());
-  }
-
-  private static CurrentUser legacyUser() {
-    return new CurrentUser(1L, new UUID(0L, 1L), "legacy-demo@invalid.local", "Legacy Demo");
   }
 
   private RagContextSnapshot readRagSnapshot(InterviewTurnClaim claim) {

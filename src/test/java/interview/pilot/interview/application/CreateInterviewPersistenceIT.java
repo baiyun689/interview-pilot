@@ -25,6 +25,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import interview.pilot.ai.provider.AiProviderDescriptor;
 import interview.pilot.ai.provider.AiProviderService;
+import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.interview.api.CreateInterviewRequest;
 import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.domain.GeneratedQuestion;
@@ -46,6 +47,9 @@ import interview.pilot.resume.infrastructure.ResumeRepository;
 })
 @Testcontainers
 class CreateInterviewPersistenceIT {
+  private static final CurrentUser LEGACY_USER = new CurrentUser(
+      1L, new UUID(0L, 1L), "legacy-demo@invalid.local", "Legacy Demo");
+
   @Container
   private static final MySQLContainer MYSQL =
       new MySQLContainer(DockerImageName.parse("mysql:8.4"))
@@ -99,7 +103,7 @@ class CreateInterviewPersistenceIT {
   void aiRunsOutsideTransactionsThenOneShortTransactionPersistsExactlyOneAskedTurn() {
     stubSuccessfulAi("deepseek", "deepseek-chat");
 
-    var created = service.create(request("deepseek"));
+    var created = service.create(LEGACY_USER,request("deepseek"));
 
     var session = sessions.findBySessionId(created.sessionId()).orElseThrow();
     assertThat(session.getStatus()).isEqualTo(SessionStatus.INTERVIEWING);
@@ -120,11 +124,11 @@ class CreateInterviewPersistenceIT {
   @Test
   void providerDefaultChangeDoesNotChangeThePersistedSessionSnapshot() {
     stubSuccessfulAi("qwen", "qwen-plus");
-    var created = service.create(request(null));
+    var created = service.create(LEGACY_USER,request(null));
     when(providers.resolveEnabled(null)).thenReturn(
         new AiProviderDescriptor("deepseek", "DeepSeek", "deepseek-chat", true, true));
 
-    var loaded = queryService.get(created.sessionId());
+    var loaded = queryService.get(LEGACY_USER,created.sessionId());
 
     assertThat(loaded.providerId()).isEqualTo("qwen");
     assertThat(loaded.modelName()).isEqualTo("qwen-plus");
@@ -139,7 +143,7 @@ class CreateInterviewPersistenceIT {
         org.mockito.ArgumentMatchers.any()))
         .thenThrow(new IllegalStateException("provider failed"));
 
-    assertThatThrownBy(() -> service.create(request("deepseek")))
+    assertThatThrownBy(() -> service.create(LEGACY_USER,request("deepseek")))
         .isInstanceOf(IllegalStateException.class);
     assertThat(jobs.count()).isZero();
     assertThat(sessions.count()).isZero();
@@ -160,7 +164,7 @@ class CreateInterviewPersistenceIT {
       return new GeneratedQuestion("Explain optimistic locking.", "Java");
     });
 
-    assertThatThrownBy(() -> service.create(request("deepseek")))
+    assertThatThrownBy(() -> service.create(LEGACY_USER,request("deepseek")))
         .hasMessage("Resume analysis is not ready");
     assertThat(jobs.count()).isZero();
     assertThat(sessions.count()).isZero();
@@ -172,9 +176,9 @@ class CreateInterviewPersistenceIT {
     stubSuccessfulAi("deepseek", "deepseek-chat");
 
     CompletableFuture<UUID> first = CompletableFuture.supplyAsync(
-        () -> service.create(request("deepseek")).sessionId());
+        () -> service.create(LEGACY_USER,request("deepseek")).sessionId());
     CompletableFuture<UUID> second = CompletableFuture.supplyAsync(
-        () -> service.create(request("deepseek")).sessionId());
+        () -> service.create(LEGACY_USER,request("deepseek")).sessionId());
     UUID firstId = first.get(15, TimeUnit.SECONDS);
     UUID secondId = second.get(15, TimeUnit.SECONDS);
 

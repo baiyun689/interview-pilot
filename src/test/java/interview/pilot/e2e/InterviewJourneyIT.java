@@ -183,7 +183,7 @@ class InterviewJourneyIT {
     assertThat(tasks.findById(resumeTask.getId()).orElseThrow().getStatus())
         .isEqualTo(AsyncTaskStatus.COMPLETED);
 
-    var created = interviews.create(new CreateInterviewRequest(
+    var created = interviews.create(LEGACY_USER, new CreateInterviewRequest(
         uploaded.resumeId(), "Java AI Backend Engineer",
         "Build reliable Java services with Redis and observability.",
         Difficulty.EASY, 5, "journey"));
@@ -192,14 +192,14 @@ class InterviewJourneyIT {
     assertThat(created.modelName()).isEqualTo("journey-model");
 
     providers.switchDefault("alternate");
-    var orthogonalDecision = answers.submit(sessionId, new SubmitAnswerRequest(
+    var orthogonalDecision = answers.submit(LEGACY_USER, sessionId, new SubmitAnswerRequest(
         UUID.randomUUID(), "Use a unique request id and a database constraint."));
     assertThat(orthogonalDecision.decision().nextStep()).isEqualTo(NextStep.NEXT_TOPIC);
     assertThat(orthogonalDecision.decision().difficultyAdjustment())
         .isEqualTo(DifficultyAdjustment.INCREASE);
 
     for (int turn = 2; turn <= 5; turn++) {
-      answers.submit(sessionId, new SubmitAnswerRequest(
+      answers.submit(LEGACY_USER, sessionId, new SubmitAnswerRequest(
           UUID.randomUUID(), "Answer with concrete evidence for turn " + turn));
     }
 
@@ -220,7 +220,7 @@ class InterviewJourneyIT {
         .as("duplicate report delivery is idempotent")
         .isEqualTo(InterviewReportHandler.Outcome.TERMINAL);
 
-    var result = queries.report(sessionId);
+    var result = queries.report(LEGACY_USER, sessionId);
     assertThat(result.status().value()).isEqualTo(200);
     var response = (InterviewReportResponse) result.body();
     assertThat(response.report().competencyScores())
