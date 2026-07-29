@@ -6,6 +6,7 @@ import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -83,6 +84,16 @@ public class KnowledgeBaseController {
     var response = documentUploadService.reindex(
         currentUser.require(), knowledgeBaseId, documentId);
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
+  }
+
+  @DeleteMapping("/{knowledgeBaseId}/documents/{documentId}")
+  @RateLimit(scope = RateLimitScope.IP, capacity = 20)
+  @RateLimit(scope = RateLimitScope.USER, capacity = 20)
+  public ResponseEntity<Void> deleteDocument(
+      @PathVariable UUID knowledgeBaseId,
+      @PathVariable UUID documentId) {
+    documentUploadService.delete(currentUser.require(), knowledgeBaseId, documentId);
+    return ResponseEntity.noContent().build();
   }
 
   public record CreateKnowledgeBaseRequest(

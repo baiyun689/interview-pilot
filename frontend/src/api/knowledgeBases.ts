@@ -42,3 +42,14 @@ export function reindexDocument(
     { method: 'POST', signal },
   )
 }
+
+export function deleteDocument(
+  knowledgeBaseId: string,
+  documentId: string,
+  signal?: AbortSignal,
+): Promise<ApiResponse<void>> {
+  return requestWithMeta(
+    `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/documents/${encodeURIComponent(documentId)}`,
+    { method: 'DELETE', signal },
+  )
+}

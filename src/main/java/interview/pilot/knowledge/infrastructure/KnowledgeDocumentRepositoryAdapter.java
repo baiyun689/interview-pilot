@@ -34,6 +34,12 @@ class KnowledgeDocumentRepositoryAdapter implements KnowledgeDocumentRepository 
   }
 
   @Override
+  public List<KnowledgeDocumentEntity> findVisibleByKnowledgeBaseIdsAndUserAccountId(
+      Collection<UUID> knowledgeBaseIds, Long userAccountId) {
+    return delegate.findVisibleByKnowledgeBaseIdsAndUserAccountId(knowledgeBaseIds, userAccountId);
+  }
+
+  @Override
   public List<KnowledgeDocumentEntity> findReadyByKnowledgeBaseIdsAndUserAccountId(
       Collection<UUID> knowledgeBaseIds, Long userAccountId) {
     return delegate.findReadyByKnowledgeBaseIdsAndUserAccountId(knowledgeBaseIds, userAccountId);

@@ -386,6 +386,12 @@ a:focus-visible {
   border: 1px solid var(--slate-300);
 }
 
+.button-danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid #fecdca;
+}
+
 .success-notice,
 .error-notice {
   margin: 14px 0 0;

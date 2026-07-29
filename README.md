@@ -12,16 +12,18 @@ InterviewPilot 是一个基于 Spring Boot 的 AI 自适应技术面试系统。
 - 创建面试时固化 Skill、模型、岗位要求和面试计划快照，避免后续配置变化影响历史面试。
 - 使用 POST SSE 渐进返回接收状态、评分反馈、决策和下一题。
 - 模型只提出建议，Java 决策策略负责限制追问次数、能力覆盖、置信度、难度范围和总轮次。
+- 支持知识库上传、异步索引、Qdrant 向量召回和面试 RAG 上下文注入。
 - 面试结束后通过 RabbitMQ 可靠异步生成报告，支持重试、死信和人工恢复。
 - 提供面试历史、报告查询、模型切换、健康检查、指标和 Trace ID。
 
-当前未实现登录鉴权、多租户、计费、语音 ASR/TTS、在线 RAG 检索、知识库管理、面试预约、导出和 WebSocket。Skill 中保留了部分 RAG 元数据和参考资料映射，但运行时 RAG 仍处于关闭状态。
+当前未实现计费、语音 ASR/TTS、面试预约、导出和 WebSocket。知识库/RAG 需要显式开启 `KNOWLEDGE_ENABLED=true` 并配置 Embedding API Key。
 
 ## 技术栈
 
 - 后端：Java 21、Spring Boot 4、Spring MVC、Spring Data JPA、Hibernate、Flyway、Spring AI
 - 数据库：MySQL 8.4
 - 消息队列：RabbitMQ 4
+- 向量库：Qdrant
 - 缓存与并发协调：Redis 7.4、Redisson
 - 前端：React 18、TypeScript、Vite、Vitest
 - 网关：Nginx
@@ -69,7 +71,13 @@ Java 策略会校验模型建议，并根据置信度、必考能力覆盖、连
 
 ### RabbitMQ 可靠异步任务
 
-简历分析和面试报告通过数据库任务表与 RabbitMQ 协作处理。任务发布使用 Publisher Confirm，并配置分级延迟重试队列和 DLQ。由于数据库提交和消息发布无法形成一个本地原子事务，系统采用任务表扫描、周期重发和消费者幂等实现至少一次投递。
+简历分析、知识库索引和面试报告通过数据库任务表与 RabbitMQ 协作处理。任务发布使用 Publisher Confirm，并配置分级延迟重试队列和 DLQ。由于数据库提交和消息发布无法形成一个本地原子事务，系统采用任务表扫描、周期重发和消费者幂等实现至少一次投递。
+
+### 知识库与 RAG
+
+知识库文档上传后会先进入 `PROCESSING`，后台任务负责解析文件、切分文本、写入 Qdrant，并在成功后标记为 `READY`。文档列表会返回 `PENDING`、`PROCESSING`、`READY`、`FAILED`、`DELETING` 等可见状态，前端会对索引中的文档轮询刷新。
+
+创建面试时如果选择知识库，系统只会把当前 `READY` 文档纳入召回范围；每轮生成题目或评估答案前都会按用户、知识库、文档和索引版本过滤召回结果，避免跨用户、跨知识库或旧版本内容进入上下文。删除文档会清理文件和向量，并把旧索引消息视为终态，避免晚到消息反复重试。
 
 ### Redis 的职责
 
@@ -132,6 +140,12 @@ Copy-Item .env.example .env
 `LLM_LEASE` 必须大于最长 Provider 超时时间的两倍，因为一次结构化调用可能包含一次重试。其他数据库、Redis、RabbitMQ、端口、模型并发量和结构化输出重试配置见 [.env.example](.env.example)。
 
 Compose 使用非 `guest` RabbitMQ 用户 `interview_pilot`。RabbitMQ 默认限制 `guest` 只能从 localhost 登录，因此不能用于 App 容器与 RabbitMQ 容器之间的认证。
+
+启用知识库/RAG 时还需要：
+
+- `KNOWLEDGE_ENABLED=true`
+- `DASHSCOPE_EMBEDDING_API_KEY=你的 DashScope Key`
+- Qdrant 连接配置，Docker Compose 默认使用内置 `qdrant` 服务
 
 ## 使用 Docker Compose 启动
 
@@ -205,12 +219,13 @@ Vite 会将 `/api` 代理到 `localhost:8080`。Spring Boot 会读取项目根�
 
 1. 调用 `POST /api/resumes` 上传 TXT、PDF 或 DOCX 简历。响应包含持久化分析任务 ID；标准化内容相同的重复简历会返回已有简历和任务。
 2. 轮询 `GET /api/tasks/{taskId}`，或查询 `GET /api/resumes/{id}`，直到简历状态变为 `READY`。
-3. 调用 `GET /api/interview-skills` 获取固定面试方向。
-4. 调用 `POST /api/interviews` 创建面试，请求包含 `resumeId`、`skillId`、岗位名称、可选或必填 JD、难度、5～15 轮预算和可选 `providerId`。
-5. 固定 Skill 可以不填写 JD；选择 `custom` 时必须提供岗位名称和 JD。后端会固化 Skill、Provider、Model、岗位要求和面试计划快照，并生成首题。
-6. 调用 `POST /api/interviews/{sessionId}/answers/stream` 提交 `{requestId, answer}`，SSE 会依次发送 `ACCEPTED`、`FEEDBACK`、`DECISION`、可选的 `NEXT_QUESTION` 和 `COMPLETED`。
-7. 当 Java 策略或轮次预算结束面试后，会话进入 `EVALUATING`，同时创建持久化报告任务。
-8. 调用 `GET /api/interviews/{sessionId}/report` 查询最终报告。
+3. 可选：调用 `POST /api/knowledge-bases` 创建知识库，`POST /api/knowledge-bases/{id}/documents` 上传文档，再轮询 `GET /api/knowledge-bases/{id}/documents`，直到需要使用的文档变为 `READY`。
+4. 调用 `GET /api/interview-skills` 获取固定面试方向。
+5. 调用 `POST /api/interviews` 创建面试，请求包含 `resumeId`、`skillId`、岗位名称、可选或必填 JD、难度、5～15 轮预算、可选 `providerId` 和可选 `knowledgeBaseIds`。
+6. 固定 Skill 可以不填写 JD；选择 `custom` 时必须提供岗位名称和 JD。后端会固化 Skill、Provider、Model、岗位要求和面试计划快照，并生成首题。
+7. 调用 `POST /api/interviews/{sessionId}/answers/stream` 提交 `{requestId, answer}`，SSE 会依次发送 `ACCEPTED`、`FEEDBACK`、`DECISION`、可选的 `NEXT_QUESTION` 和 `COMPLETED`。
+8. 当 Java 策略或轮次预算结束面试后，会话进入 `EVALUATING`，同时创建持久化报告任务。
+9. 调用 `GET /api/interviews/{sessionId}/report` 查询最终报告。
 
 其他接口支持查询面试历史、查看 Provider、测试 Provider 连接、切换默认模型、查询异步任务以及重试失败或进入死信状态的任务。
 
@@ -219,6 +234,7 @@ Vite 会将 `/api` 代理到 `localhost:8080`。Spring Boot 会读取项目根�
 - [简历 API](src/main/java/interview/pilot/resume/api/ResumeController.java)
 - [面试 API](src/main/java/interview/pilot/interview/api/InterviewController.java)
 - [Skill API](src/main/java/interview/pilot/interview/api/InterviewSkillController.java)
+- [知识库 API](src/main/java/interview/pilot/knowledge/api/KnowledgeBaseController.java)
 - [异步任务 API](src/main/java/interview/pilot/async/api/AsyncTaskController.java)
 - [模型 Provider API](src/main/java/interview/pilot/ai/provider/AiProviderController.java)
 
@@ -227,11 +243,12 @@ Vite 会将 `/api` 代理到 `localhost:8080`。Spring Boot 会读取项目根�
 1. 打开 `/actuator/health`，展示 MySQL、Redis 和 RabbitMQ 健康状态。
 2. 进入模型设置页，展示可切换 Provider，并测试当前模型连接。
 3. 上传一份简短简历，说明分析任务如何通过 RabbitMQ 异步执行并最终进入 `READY`。
-4. 选择 Java 后端或 AI Agent Skill，展示固定方向可选 JD、自定义岗位必填 JD，以及创建后生成的 Skill/Model/Plan 快照。
-5. 回答两道题，展示 SSE 渐进反馈，以及互相独立的 `nextStep` 和 `difficultyAdjustment`。
-6. 说明模型只提出建议，Java 策略负责轮次预算、必考能力、置信度和追问上限。
-7. 完成面试后展示异步报告和面试历史。
-8. 使用准备好的 API 请求重复提交相同答案和 `requestId`，演示后端幂等；前端则采用 GET 恢复和显式新 ID 重试。
+4. 可选展示知识库上传、文档状态轮询和 READY 后进入面试创建页选择知识库。
+5. 选择 Java 后端或 AI Agent Skill，展示固定方向可选 JD、自定义岗位必填 JD，以及创建后生成的 Skill/Model/Plan 快照。
+6. 回答两道题，展示 SSE 渐进反馈，以及互相独立的 `nextStep` 和 `difficultyAdjustment`。
+7. 说明模型只提出建议，Java 策略负责轮次预算、必考能力、置信度和追问上限。
+8. 完成面试后展示异步报告和面试历史。
+9. 使用准备好的 API 请求重复提交相同答案和 `requestId`，演示后端幂等；前端则采用 GET 恢复和显式新 ID 重试。
 
 核心业务旅程测试使用 WireMock 支撑的测试 Gateway 替代真实模型，能够在没有 API Key 的情况下验证 Prompt 分类、服务编排、状态流转和持久化：
 
@@ -284,6 +301,7 @@ git diff --check
 
 - [回答并发与幂等](src/test/java/interview/pilot/interview/application/SubmitAnswerConcurrencyIT.java)
 - [RabbitMQ 重试与死信](src/test/java/interview/pilot/async/messaging/RabbitRetryIT.java)
+- [知识库上传、索引与召回](src/test/java/interview/pilot/knowledge/retrieval/QdrantKnowledgeRetrieverIT.java)
 - [简历分析 Listener](src/test/java/interview/pilot/async/resume/ResumeAnalysisListenerIT.java)
 - [报告 Listener](src/test/java/interview/pilot/async/report/InterviewReportListenerIT.java)
 - [Java 决策策略](src/test/java/interview/pilot/interview/domain/InterviewDecisionPolicyTest.java)

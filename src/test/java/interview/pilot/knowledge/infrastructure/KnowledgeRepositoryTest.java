@@ -23,13 +23,20 @@ class KnowledgeRepositoryTest {
         "findByKnowledgeBaseIdAndUserAccountId", UUID.class, Long.class);
     KnowledgeDocumentRepository.class.getMethod(
         "findReadyByKnowledgeBaseIdsAndUserAccountId", Collection.class, Long.class);
+    KnowledgeDocumentRepository.class.getMethod(
+        "findVisibleByKnowledgeBaseIdsAndUserAccountId", Collection.class, Long.class);
     Method readyDocuments = KnowledgeDocumentJpaRepository.class.getMethod(
         "findReadyByKnowledgeBaseIdsAndUserAccountId", Collection.class, Long.class);
+    Method visibleDocuments = KnowledgeDocumentJpaRepository.class.getMethod(
+        "findVisibleByKnowledgeBaseIdsAndUserAccountId", Collection.class, Long.class);
 
     assertThat(baseLookup.getReturnType().getSimpleName()).isEqualTo("Optional");
     assertThat(readyDocuments.getAnnotation(Query.class).value())
         .contains("knowledgeBase.userAccountId = :userAccountId")
         .contains("document.status = interview.pilot.knowledge.domain.KnowledgeDocumentStatus.READY");
+    assertThat(visibleDocuments.getAnnotation(Query.class).value())
+        .contains("knowledgeBase.userAccountId = :userAccountId")
+        .contains("document.status <> interview.pilot.knowledge.domain.KnowledgeDocumentStatus.DELETED");
   }
 
   @Test
@@ -68,6 +75,20 @@ class KnowledgeRepositoryTest {
     assertThat(adapter.findReadyByKnowledgeBaseIdsAndUserAccountId(knowledgeBaseIds, 42L)).isEmpty();
 
     verify(delegate).findReadyByKnowledgeBaseIdsAndUserAccountId(knowledgeBaseIds, 42L);
+  }
+
+  @Test
+  void documentAdapterDelegatesTheOwnerScopedVisibleQuery() {
+    var delegate = mock(KnowledgeDocumentJpaRepository.class);
+    var adapter = new KnowledgeDocumentRepositoryAdapter(delegate);
+    Collection<UUID> knowledgeBaseIds = List.of(UUID.randomUUID());
+
+    when(delegate.findVisibleByKnowledgeBaseIdsAndUserAccountId(knowledgeBaseIds, 42L))
+        .thenReturn(List.of());
+
+    assertThat(adapter.findVisibleByKnowledgeBaseIdsAndUserAccountId(knowledgeBaseIds, 42L)).isEmpty();
+
+    verify(delegate).findVisibleByKnowledgeBaseIdsAndUserAccountId(knowledgeBaseIds, 42L);
   }
 
   private List<String> methodNames(Class<?> type) {

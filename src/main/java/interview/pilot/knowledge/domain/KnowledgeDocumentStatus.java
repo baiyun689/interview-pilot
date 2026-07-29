@@ -5,5 +5,6 @@ public enum KnowledgeDocumentStatus {
   PROCESSING,
   READY,
   FAILED,
-  DELETING
+  DELETING,
+  DELETED
 }

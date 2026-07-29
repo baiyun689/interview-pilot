@@ -1,4 +1,4 @@
-export type KnowledgeDocumentStatus = 'PENDING' | 'PROCESSING' | 'READY' | 'FAILED' | 'DELETING'
+export type KnowledgeDocumentStatus = 'PENDING' | 'PROCESSING' | 'READY' | 'FAILED' | 'DELETING' | 'DELETED'
 
 export interface KnowledgeBase {
   knowledgeBaseId: string

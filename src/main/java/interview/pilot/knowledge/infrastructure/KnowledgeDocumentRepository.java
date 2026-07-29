@@ -15,6 +15,9 @@ public interface KnowledgeDocumentRepository {
   long countByKnowledgeBaseIdAndStatus(Long knowledgeBaseId,
       interview.pilot.knowledge.domain.KnowledgeDocumentStatus status);
 
+  List<KnowledgeDocumentEntity> findVisibleByKnowledgeBaseIdsAndUserAccountId(
+      Collection<UUID> knowledgeBaseIds, Long userAccountId);
+
   List<KnowledgeDocumentEntity> findReadyByKnowledgeBaseIdsAndUserAccountId(
       Collection<UUID> knowledgeBaseIds, Long userAccountId);
 }

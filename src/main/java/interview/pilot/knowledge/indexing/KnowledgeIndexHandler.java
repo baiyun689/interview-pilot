@@ -92,6 +92,10 @@ public class KnowledgeIndexHandler {
     if (message.executionEpoch() != task.getExecutionEpoch()) {
       throw new IllegalArgumentException("Knowledge index message epoch is invalid");
     }
+    if (deleting(document)) {
+      return new IndexTarget(
+          document.getDocumentId(), true, task.getAttemptCount(), task.getExecutionEpoch());
+    }
     boolean succeeded = task.getStatus() == AsyncTaskStatus.COMPLETED
         && document.getStatus() == KnowledgeDocumentStatus.READY;
     boolean stopped = task.getStatus() == AsyncTaskStatus.FAILED
@@ -127,6 +131,9 @@ public class KnowledgeIndexHandler {
 
   private IndexWork begin(AsyncTaskEntity task) {
     KnowledgeDocumentEntity document = requireDocument(task);
+    if (deleting(document)) {
+      return null;
+    }
     if (task.getStatus() == AsyncTaskStatus.COMPLETED
         && document.getStatus() == KnowledgeDocumentStatus.READY) {
       return null;
@@ -189,6 +196,11 @@ public class KnowledgeIndexHandler {
     return task.getStatus() == AsyncTaskStatus.PUBLISHED
         && task.getAttemptCount() == work.attemptGeneration()
         && document.getStatus() == KnowledgeDocumentStatus.PROCESSING;
+  }
+
+  private boolean deleting(KnowledgeDocumentEntity document) {
+    return document.getStatus() == KnowledgeDocumentStatus.DELETING
+        || document.getStatus() == KnowledgeDocumentStatus.DELETED;
   }
 
   private boolean markDead(

@@ -29,6 +29,18 @@ public interface KnowledgeDocumentJpaRepository extends JpaRepository<KnowledgeD
       join document.knowledgeBase knowledgeBase
       where knowledgeBase.knowledgeBaseId in :knowledgeBaseIds
         and knowledgeBase.userAccountId = :userAccountId
+        and document.status <> interview.pilot.knowledge.domain.KnowledgeDocumentStatus.DELETED
+      order by document.createdAt desc
+      """)
+  List<KnowledgeDocumentEntity> findVisibleByKnowledgeBaseIdsAndUserAccountId(
+      @Param("knowledgeBaseIds") Collection<UUID> knowledgeBaseIds,
+      @Param("userAccountId") Long userAccountId);
+
+  @Query("""
+      select document from KnowledgeDocumentEntity document
+      join document.knowledgeBase knowledgeBase
+      where knowledgeBase.knowledgeBaseId in :knowledgeBaseIds
+        and knowledgeBase.userAccountId = :userAccountId
         and document.status = interview.pilot.knowledge.domain.KnowledgeDocumentStatus.READY
       order by document.createdAt desc
       """)

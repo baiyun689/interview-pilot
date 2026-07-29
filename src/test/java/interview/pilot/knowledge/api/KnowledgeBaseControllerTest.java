@@ -2,6 +2,7 @@ package interview.pilot.knowledge.api;
 
 import static org.hamcrest.Matchers.matchesPattern;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -98,12 +99,18 @@ class KnowledgeBaseControllerTest {
 
   @Test
   void listsDocumentsInKnowledgeBase() throws Exception {
-    KnowledgeDocumentResponse doc = KnowledgeDocumentResponse.processing(documentId);
-    when(documentUploadService.listDocuments(user, baseId)).thenReturn(List.of(doc));
+    KnowledgeDocumentResponse processing = KnowledgeDocumentResponse.processing(documentId);
+    KnowledgeDocumentResponse failed = new KnowledgeDocumentResponse(
+        UUID.randomUUID(), "broken.md", KnowledgeDocumentStatus.FAILED.name(),
+        1, 0, "parse failed", Instant.now());
+    when(documentUploadService.listDocuments(user, baseId)).thenReturn(List.of(processing, failed));
 
     mockMvc.perform(get("/api/knowledge-bases/{id}/documents", baseId))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$[0].documentId").value(documentId.toString()));
+        .andExpect(jsonPath("$[0].documentId").value(documentId.toString()))
+        .andExpect(jsonPath("$[0].status").value("PROCESSING"))
+        .andExpect(jsonPath("$[1].status").value("FAILED"))
+        .andExpect(jsonPath("$[1].failureReason").value("parse failed"));
   }
 
   @Test
@@ -115,6 +122,15 @@ class KnowledgeBaseControllerTest {
             baseId, documentId))
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.status").value("PROCESSING"));
+  }
+
+  @Test
+  void deleteDocumentReturnsNoContent() throws Exception {
+    mockMvc.perform(delete("/api/knowledge-bases/{baseId}/documents/{docId}",
+            baseId, documentId))
+        .andExpect(status().isNoContent());
+
+    verify(documentUploadService).delete(user, baseId, documentId);
   }
 
   @Test

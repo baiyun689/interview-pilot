@@ -7,8 +7,13 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.ai.vectorstore.VectorStore;
+import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -31,12 +36,15 @@ import interview.pilot.knowledge.storage.KnowledgeDocumentStore;
 
 @Service
 public class KnowledgeDocumentUploadService {
+  private static final Logger log = LoggerFactory.getLogger(KnowledgeDocumentUploadService.class);
+
   private final KnowledgeBaseRepository baseRepository;
   private final KnowledgeDocumentRepository documentRepository;
   private final AsyncTaskRepository taskRepository;
   private final KnowledgeDocumentStore store;
   private final TransactionTemplate transactionTemplate;
   private final boolean knowledgeEnabled;
+  private final VectorStore vectorStore;
 
   public KnowledgeDocumentUploadService(
       KnowledgeBaseRepository baseRepository,
@@ -44,12 +52,14 @@ public class KnowledgeDocumentUploadService {
       AsyncTaskRepository taskRepository,
       KnowledgeDocumentStore store,
       PlatformTransactionManager transactionManager,
-      KnowledgeProperties properties) {
+      KnowledgeProperties properties,
+      Optional<VectorStore> vectorStore) {
     this.baseRepository = baseRepository;
     this.documentRepository = documentRepository;
     this.taskRepository = taskRepository;
     this.store = store;
     this.knowledgeEnabled = properties.enabled();
+    this.vectorStore = vectorStore.orElse(null);
     this.transactionTemplate = new TransactionTemplate(transactionManager);
     this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
   }
@@ -98,7 +108,7 @@ public class KnowledgeDocumentUploadService {
     baseRepository.findByKnowledgeBaseIdAndUserAccountId(knowledgeBaseId, userAccountId)
         .orElseThrow(() -> new BusinessException(
             "KNOWLEDGE_BASE_NOT_FOUND", "Knowledge base not found", HttpStatus.NOT_FOUND));
-    var docs = documentRepository.findReadyByKnowledgeBaseIdsAndUserAccountId(
+    var docs = documentRepository.findVisibleByKnowledgeBaseIdsAndUserAccountId(
         List.of(knowledgeBaseId), userAccountId);
     List<KnowledgeDocumentResponse> responses = new ArrayList<>();
     for (var doc : docs) {
@@ -139,6 +149,39 @@ public class KnowledgeDocumentUploadService {
         document.getCreatedAt());
   }
 
+  public void delete(CurrentUser user, UUID knowledgeBaseId, UUID documentId) {
+    Long userAccountId = requireOwner(user);
+    DeleteTarget target = Objects.requireNonNull(transactionTemplate.execute(status -> {
+      baseRepository.findByKnowledgeBaseIdAndUserAccountId(knowledgeBaseId, userAccountId)
+          .orElseThrow(() -> new BusinessException(
+              "KNOWLEDGE_BASE_NOT_FOUND", "Knowledge base not found", HttpStatus.NOT_FOUND));
+      KnowledgeDocumentEntity document = documentRepository.findByDocumentIdWithKnowledgeBase(documentId)
+          .orElseThrow(() -> new BusinessException(
+              "DOCUMENT_NOT_FOUND", "Knowledge document not found", HttpStatus.NOT_FOUND));
+      if (!document.getKnowledgeBase().getKnowledgeBaseId().equals(knowledgeBaseId)
+          || !document.getKnowledgeBase().getUserAccountId().equals(userAccountId)) {
+        throw new BusinessException(
+            "DOCUMENT_NOT_FOUND", "Knowledge document not found", HttpStatus.NOT_FOUND);
+      }
+      document.beginDeletion();
+      document = documentRepository.save(document);
+      return new DeleteTarget(
+          document.getDocumentId(), document.getIndexRevision(), document.getStorageKey());
+    }));
+
+    deleteVectorsBestEffort(target.documentId());
+    deleteStoredFileBestEffort(target.storageKey());
+
+    transactionTemplate.executeWithoutResult(status -> {
+      documentRepository.findByDocumentId(target.documentId()).ifPresent(document -> {
+        if (document.getIndexRevision() == target.indexRevision()) {
+          document.markDeleted();
+          documentRepository.save(document);
+        }
+      });
+    });
+  }
+
   private void validateFile(MultipartFile file) {
     if (file == null || file.isEmpty()) {
       throw new BusinessException(
@@ -151,6 +194,28 @@ public class KnowledgeDocumentUploadService {
       throw new BusinessException(
           "KNOWLEDGE_DISABLED", "Knowledge base indexing is disabled",
           HttpStatus.SERVICE_UNAVAILABLE);
+    }
+  }
+
+  private void deleteVectorsBestEffort(UUID documentId) {
+    if (vectorStore == null) {
+      return;
+    }
+    try {
+      vectorStore.delete(new Filter.Expression(Filter.ExpressionType.EQ,
+          new Filter.Key("document_id"), new Filter.Value(documentId.toString())));
+    } catch (RuntimeException exception) {
+      log.warn("Failed to delete vectors for knowledge document {}: {}",
+          documentId, exception.getMessage());
+    }
+  }
+
+  private void deleteStoredFileBestEffort(String storageKey) {
+    try {
+      store.delete(storageKey);
+    } catch (RuntimeException exception) {
+      log.warn("Failed to delete stored knowledge document {}: {}",
+          storageKey, exception.getMessage());
     }
   }
 
@@ -168,4 +233,6 @@ public class KnowledgeDocumentUploadService {
       throw new IllegalStateException("Could not compute document hash", exception);
     }
   }
+
+  private record DeleteTarget(UUID documentId, int indexRevision, String storageKey) {}
 }

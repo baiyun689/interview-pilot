@@ -138,6 +138,16 @@ public class KnowledgeDocumentEntity {
     }
   }
 
+  public void markDeleted() {
+    if (status != KnowledgeDocumentStatus.DELETED) {
+      status = KnowledgeDocumentStatus.DELETED;
+      failureReason = null;
+      chunkCount = 0;
+      parsedText = null;
+      embeddingSnapshot = null;
+    }
+  }
+
   private void requireProcessingRevision(int expectedRevision) {
     if (indexRevision != expectedRevision) {
       throw new IllegalStateException("Stale document index revision");
