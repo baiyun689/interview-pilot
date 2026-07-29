@@ -10,6 +10,8 @@ public interface KnowledgeDocumentRepository {
 
   Optional<KnowledgeDocumentEntity> findByDocumentId(UUID documentId);
 
+  Optional<KnowledgeDocumentEntity> findByDocumentIdWithKnowledgeBase(UUID documentId);
+
   long countByKnowledgeBaseIdAndStatus(Long knowledgeBaseId,
       interview.pilot.knowledge.domain.KnowledgeDocumentStatus status);
 

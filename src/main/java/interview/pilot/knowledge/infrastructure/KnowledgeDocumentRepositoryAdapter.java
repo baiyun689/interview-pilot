@@ -23,6 +23,11 @@ class KnowledgeDocumentRepositoryAdapter implements KnowledgeDocumentRepository 
   }
 
   @Override
+  public Optional<KnowledgeDocumentEntity> findByDocumentIdWithKnowledgeBase(UUID documentId) {
+    return delegate.findByDocumentIdWithKnowledgeBase(documentId);
+  }
+
+  @Override
   public long countByKnowledgeBaseIdAndStatus(Long knowledgeBaseId,
       interview.pilot.knowledge.domain.KnowledgeDocumentStatus status) {
     return delegate.countByKnowledgeBaseIdAndStatus(knowledgeBaseId, status);

@@ -22,6 +22,7 @@ import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.common.exception.BusinessException;
 import interview.pilot.knowledge.api.KnowledgeDocumentResponse;
+import interview.pilot.knowledge.config.KnowledgeProperties;
 import interview.pilot.knowledge.infrastructure.KnowledgeBaseEntity;
 import interview.pilot.knowledge.infrastructure.KnowledgeBaseRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentEntity;
@@ -35,23 +36,27 @@ public class KnowledgeDocumentUploadService {
   private final AsyncTaskRepository taskRepository;
   private final KnowledgeDocumentStore store;
   private final TransactionTemplate transactionTemplate;
+  private final boolean knowledgeEnabled;
 
   public KnowledgeDocumentUploadService(
       KnowledgeBaseRepository baseRepository,
       KnowledgeDocumentRepository documentRepository,
       AsyncTaskRepository taskRepository,
       KnowledgeDocumentStore store,
-      PlatformTransactionManager transactionManager) {
+      PlatformTransactionManager transactionManager,
+      KnowledgeProperties properties) {
     this.baseRepository = baseRepository;
     this.documentRepository = documentRepository;
     this.taskRepository = taskRepository;
     this.store = store;
+    this.knowledgeEnabled = properties.enabled();
     this.transactionTemplate = new TransactionTemplate(transactionManager);
     this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
   }
 
   public KnowledgeDocumentResponse upload(
       CurrentUser user, UUID knowledgeBaseId, MultipartFile file) {
+    ensureKnowledgeEnabled();
     Long userAccountId = requireOwner(user);
     baseRepository.findByKnowledgeBaseIdAndUserAccountId(knowledgeBaseId, userAccountId)
         .orElseThrow(() -> new BusinessException(
@@ -107,6 +112,7 @@ public class KnowledgeDocumentUploadService {
 
   public KnowledgeDocumentResponse reindex(
       CurrentUser user, UUID knowledgeBaseId, UUID documentId) {
+    ensureKnowledgeEnabled();
     Long userAccountId = requireOwner(user);
     baseRepository.findByKnowledgeBaseIdAndUserAccountId(knowledgeBaseId, userAccountId)
         .orElseThrow(() -> new BusinessException(
@@ -137,6 +143,14 @@ public class KnowledgeDocumentUploadService {
     if (file == null || file.isEmpty()) {
       throw new BusinessException(
           "FILE_REQUIRED", "Knowledge document file is required", HttpStatus.BAD_REQUEST);
+    }
+  }
+
+  private void ensureKnowledgeEnabled() {
+    if (!knowledgeEnabled) {
+      throw new BusinessException(
+          "KNOWLEDGE_DISABLED", "Knowledge base indexing is disabled",
+          HttpStatus.SERVICE_UNAVAILABLE);
     }
   }
 

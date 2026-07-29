@@ -19,6 +19,13 @@ public interface KnowledgeDocumentJpaRepository extends JpaRepository<KnowledgeD
 
   @Query("""
       select document from KnowledgeDocumentEntity document
+      join fetch document.knowledgeBase
+      where document.documentId = :documentId
+      """)
+  Optional<KnowledgeDocumentEntity> findByDocumentIdWithKnowledgeBase(@Param("documentId") UUID documentId);
+
+  @Query("""
+      select document from KnowledgeDocumentEntity document
       join document.knowledgeBase knowledgeBase
       where knowledgeBase.knowledgeBaseId in :knowledgeBaseIds
         and knowledgeBase.userAccountId = :userAccountId
