@@ -2,7 +2,7 @@
 
 InterviewPilot 是一个基于 Spring Boot 的 AI 自适应技术面试系统。它能够分析候选人简历，根据固定面试方向或自定义岗位生成面试计划，在多轮问答中动态决定追问、换题、难度调整和结束时机，并在面试完成后异步生成评估报告。
 
-## 核心能力
+## 功能特性
 
 - 支持 TXT、PDF、DOCX 简历上传、文本提取和结构化分析。
 - 内置 Java 后端、Python 后端、前端、AI Agent、测试开发、算法、系统设计和自定义岗位 8 个面试 Skill。
@@ -27,7 +27,6 @@ InterviewPilot 是一个基于 Spring Boot 的 AI 自适应技术面试系统。
 - 网关：Nginx
 - 测试：JUnit 5、Testcontainers、WireMock、Testing Library
 - 部署：Docker、Docker Compose
-
 
 ## 架构与后端设计
 
@@ -87,7 +86,9 @@ Redis 只承担三类短期协调职责：
 
 Redis 不保存面试业务事实。即使锁或标记因异常丢失，MySQL 中的任务状态、尝试次数和版本字段仍是最终判断依据。
 
-## 环境要求
+## 快速开始
+
+### 环境要求
 
 推荐使用 Docker Compose 一键启动，需要：
 
@@ -103,7 +104,75 @@ Redis 不保存面试业务事实。即使锁或标记因异常丢失，MySQL �
 
 项目已经包含 Gradle Wrapper，不需要全局安装 Gradle。
 
-## 配置
+### 使用 Docker Compose 启动
+
+```bash
+docker compose up -d --build
+```
+
+启动完成后：
+
+- 前端页面：`http://localhost:3000`
+- 健康检查：`http://localhost:3000/actuator/health`
+- RabbitMQ 管理页面：`http://localhost:15672`
+- MySQL：`localhost:3306`
+- Redis：`localhost:6379`
+
+Nginx 是 Compose 中唯一公开的应用入口，同时代理前端、`/api` 和 Actuator。Spring Boot 的 8080 端口只在 Docker 内部网络开放，避免外部客户端伪造限流所依赖的转发地址。Nginx 会覆盖 `X-Forwarded-For`，Spring 再通过 Framework Forward Headers 解析可信来源地址。
+
+查看容器状态和日志：
+
+```bash
+docker compose ps
+docker compose logs -f app frontend mysql redis rabbitmq
+```
+
+停止服务：
+
+```bash
+docker compose down
+```
+
+只有明确需要删除 MySQL、Redis 和 RabbitMQ 数据卷时才使用：
+
+```bash
+docker compose down -v
+```
+
+可以在 `.env` 中修改公开端口，避免与本机已有服务冲突。
+
+### 本地开发
+
+只通过 Docker 启动基础设施：
+
+```bash
+docker compose up -d mysql redis rabbitmq
+```
+
+启动后端：
+
+```bash
+./gradlew bootRun
+```
+
+Windows PowerShell：
+
+```powershell
+.\gradlew.bat bootRun
+```
+
+启动前端：
+
+```bash
+cd frontend
+corepack enable
+pnpm install --frozen-lockfile
+pnpm dev
+```
+
+Vite 会将 `/api` 代理到 `localhost:8080`。Spring Boot 会读取项目根目录中可选的 `.env` 文件。
+
+## 配置说明
 
 复制环境变量示例：
 
@@ -145,74 +214,6 @@ Compose 使用非 `guest` RabbitMQ 用户 `interview_pilot`。RabbitMQ 默认限
 - `DASHSCOPE_EMBEDDING_API_KEY=你的 DashScope Key`
 - Qdrant 连接配置，Docker Compose 默认使用内置 `qdrant` 服务
 
-## 使用 Docker Compose 启动
-
-```bash
-docker compose up -d --build
-```
-
-启动完成后：
-
-- 前端页面：`http://localhost:3000`
-- 健康检查：`http://localhost:3000/actuator/health`
-- RabbitMQ 管理页面：`http://localhost:15672`
-- MySQL：`localhost:3306`
-- Redis：`localhost:6379`
-
-Nginx 是 Compose 中唯一公开的应用入口，同时代理前端、`/api` 和 Actuator。Spring Boot 的 8080 端口只在 Docker 内部网络开放，避免外部客户端伪造限流所依赖的转发地址。Nginx 会覆盖 `X-Forwarded-For`，Spring 再通过 Framework Forward Headers 解析可信来源地址。
-
-查看容器状态和日志：
-
-```bash
-docker compose ps
-docker compose logs -f app frontend mysql redis rabbitmq
-```
-
-停止服务：
-
-```bash
-docker compose down
-```
-
-只有明确需要删除 MySQL、Redis 和 RabbitMQ 数据卷时才使用：
-
-```bash
-docker compose down -v
-```
-
-可以在 `.env` 中修改公开端口，避免与本机已有服务冲突。
-
-## 本地开发
-
-只通过 Docker 启动基础设施：
-
-```bash
-docker compose up -d mysql redis rabbitmq
-```
-
-启动后端：
-
-```bash
-./gradlew bootRun
-```
-
-Windows PowerShell：
-
-```powershell
-.\gradlew.bat bootRun
-```
-
-启动前端：
-
-```bash
-cd frontend
-corepack enable
-pnpm install --frozen-lockfile
-pnpm dev
-```
-
-Vite 会将 `/api` 代理到 `localhost:8080`。Spring Boot 会读取项目根目录中可选的 `.env` 文件。
-
 ## 使用与 API 流程
 
 1. 调用 `POST /api/resumes` 上传 TXT、PDF 或 DOCX 简历。响应包含持久化分析任务 ID；标准化内容相同的重复简历会返回已有简历和任务。
@@ -235,24 +236,6 @@ Vite 会将 `/api` 代理到 `localhost:8080`。Spring Boot 会读取项目根�
 - [知识库 API](src/main/java/interview/pilot/knowledge/api/KnowledgeBaseController.java)
 - [异步任务 API](src/main/java/interview/pilot/async/api/AsyncTaskController.java)
 - [模型 Provider API](src/main/java/interview/pilot/ai/provider/AiProviderController.java)
-
-## 五分钟演示
-
-1. 打开 `/actuator/health`，展示 MySQL、Redis 和 RabbitMQ 健康状态。
-2. 进入模型设置页，展示可切换 Provider，并测试当前模型连接。
-3. 上传一份简短简历，说明分析任务如何通过 RabbitMQ 异步执行并最终进入 `READY`。
-4. 可选展示知识库上传、文档状态轮询和 READY 后进入面试创建页选择知识库。
-5. 选择 Java 后端或 AI Agent Skill，展示固定方向可选 JD、自定义岗位必填 JD，以及创建后生成的 Skill/Model/Plan 快照。
-6. 回答两道题，展示 SSE 渐进反馈，以及互相独立的 `nextStep` 和 `difficultyAdjustment`。
-7. 说明模型只提出建议，Java 策略负责轮次预算、必考能力、置信度和追问上限。
-8. 完成面试后展示异步报告和面试历史。
-9. 使用准备好的 API 请求重复提交相同答案和 `requestId`，演示后端幂等；前端则采用 GET 恢复和显式新 ID 重试。
-
-核心业务旅程测试使用 WireMock 支撑的测试 Gateway 替代真实模型，能够在没有 API Key 的情况下验证 Prompt 分类、服务编排、状态流转和持久化：
-
-[InterviewJourneyIT](src/test/java/interview/pilot/e2e/InterviewJourneyIT.java)
-
-该测试不覆盖 HTTP Controller、SSE 传输、RabbitMQ Listener/Dispatcher 和真实 `SpringAiGateway`，这些边界由独立测试覆盖。
 
 ## 测试与验证
 
@@ -292,6 +275,12 @@ git diff --check
 - Skill Catalog、中文 Prompt、面试创建和 AI Gateway 等相关单元测试通过。
 - 基于 Testcontainers 的面试创建持久化、并发答题和 RabbitMQ 报告处理集成测试通过。
 - `bootJar` 构建、`docker compose config` 和 `git diff --check` 通过。
+
+核心业务旅程测试使用 WireMock 支撑的测试 Gateway 替代真实模型，能够在没有 API Key 的情况下验证 Prompt 分类、服务编排、状态流转和持久化：
+
+[InterviewJourneyIT](src/test/java/interview/pilot/e2e/InterviewJourneyIT.java)
+
+该测试不覆盖 HTTP Controller、SSE 传输、RabbitMQ Listener/Dispatcher 和真实 `SpringAiGateway`，这些边界由独立测试覆盖。
 
 项目不对 QPS、延迟、用户量、成本节省或生产使用情况作未经测量的声明。
 
