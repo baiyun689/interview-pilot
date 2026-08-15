@@ -17,6 +17,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import interview.pilot.auth.application.CurrentUser;
+import interview.pilot.auth.domain.UserStatus;
+import interview.pilot.auth.infrastructure.UserAccountEntity;
+import interview.pilot.auth.infrastructure.UserAccountRepository;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
@@ -37,21 +40,25 @@ public class JwtTokenServiceImpl implements JwtTokenService {
   private final SecretKey hmacKey;
   private final ObjectMapper objectMapper;
   private final Clock clock;
+  private final UserAccountRepository accountRepository;
 
   // 生产环境构造函数 (由 Spring @Component 调用)
   @Autowired
   public JwtTokenServiceImpl(RedissonClient redisson, JwtProperties properties,
-                              ObjectMapper objectMapper) {
-    this(redisson, properties, objectMapper, Clock.systemUTC());
+                              ObjectMapper objectMapper,
+                              UserAccountRepository accountRepository) {
+    this(redisson, properties, objectMapper, Clock.systemUTC(), accountRepository);
   }
 
   // Test constructor
   JwtTokenServiceImpl(RedissonClient redisson, JwtProperties properties,
-                       ObjectMapper objectMapper, Clock clock) {
+                       ObjectMapper objectMapper, Clock clock,
+                       UserAccountRepository accountRepository) {
     this.redisson = redisson;
     this.properties = properties;
     this.objectMapper = objectMapper;
     this.clock = clock;
+    this.accountRepository = accountRepository;
     this.hmacKey = Keys.hmacShaKeyFor(properties.hmacSecret().getBytes(StandardCharsets.UTF_8));
   }
 
@@ -119,8 +126,13 @@ public class JwtTokenServiceImpl implements JwtTokenService {
     }
     usedBucket.set(rawToken, REPLAY_WINDOW);
 
-    CurrentUser user = new CurrentUser(null, stored.userId(),
-        stored.email(), stored.displayName());
+    UserAccountEntity account = accountRepository.findByUserId(stored.userId())
+        .filter(acc -> acc.getStatus() == UserStatus.ACTIVE)
+        .orElseThrow(() -> new JwtException(
+            "User account not found or disabled; refresh rejected"));
+
+    CurrentUser user = new CurrentUser(account.getId(), account.getUserId(),
+        account.getEmail(), account.getDisplayName());
     String accessToken = issueAccessToken(user);
     RefreshToken newRefresh = RefreshToken.create(user, stored.tokenFamily(),
         properties.refreshTokenTtl().toSeconds());
