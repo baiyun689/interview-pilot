@@ -20,4 +20,8 @@ public interface KnowledgeDocumentRepository {
 
   List<KnowledgeDocumentEntity> findReadyByKnowledgeBaseIdsAndUserAccountId(
       Collection<UUID> knowledgeBaseIds, Long userAccountId);
+
+  List<KnowledgeDocumentEntity> findAllByKnowledgeBase(KnowledgeBaseEntity knowledgeBase);
+
+  void deleteByKnowledgeBaseId(Long knowledgeBaseId);
 }

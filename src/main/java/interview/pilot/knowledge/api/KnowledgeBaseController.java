@@ -96,6 +96,14 @@ public class KnowledgeBaseController {
     return ResponseEntity.noContent().build();
   }
 
+  @DeleteMapping("/{knowledgeBaseId}")
+  @RateLimit(scope = RateLimitScope.IP, capacity = 20)
+  @RateLimit(scope = RateLimitScope.USER, capacity = 20)
+  public ResponseEntity<Void> delete(@PathVariable UUID knowledgeBaseId) {
+    baseService.delete(currentUser.require(), knowledgeBaseId);
+    return ResponseEntity.noContent().build();
+  }
+
   public record CreateKnowledgeBaseRequest(
       @NotBlank @Size(max = 255) String name) {}
 }

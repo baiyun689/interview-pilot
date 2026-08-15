@@ -11,4 +11,6 @@ public interface KnowledgeBaseRepository {
       UUID knowledgeBaseId, Long userAccountId);
 
   List<KnowledgeBaseEntity> findAllByUserAccountIdOrderByCreatedAtDesc(Long userAccountId);
+
+  void deleteByKnowledgeBaseIdAndUserAccountId(UUID knowledgeBaseId, Long userAccountId);
 }

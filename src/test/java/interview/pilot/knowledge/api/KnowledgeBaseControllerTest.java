@@ -134,6 +134,14 @@ class KnowledgeBaseControllerTest {
   }
 
   @Test
+  void deleteKnowledgeBaseReturnsNoContent() throws Exception {
+    mockMvc.perform(delete("/api/knowledge-bases/{baseId}", baseId))
+        .andExpect(status().isNoContent());
+
+    verify(baseService).delete(user, baseId);
+  }
+
+  @Test
   void knowledgeBaseNotFoundReturns404() throws Exception {
     when(baseService.list(user)).thenThrow(
         new BusinessException("KNOWLEDGE_BASE_NOT_FOUND", "Knowledge base not found",

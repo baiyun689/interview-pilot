@@ -44,4 +44,14 @@ class KnowledgeDocumentRepositoryAdapter implements KnowledgeDocumentRepository 
       Collection<UUID> knowledgeBaseIds, Long userAccountId) {
     return delegate.findReadyByKnowledgeBaseIdsAndUserAccountId(knowledgeBaseIds, userAccountId);
   }
+
+  @Override
+  public List<KnowledgeDocumentEntity> findAllByKnowledgeBase(KnowledgeBaseEntity knowledgeBase) {
+    return delegate.findAllByKnowledgeBase(knowledgeBase);
+  }
+
+  @Override
+  public void deleteByKnowledgeBaseId(Long knowledgeBaseId) {
+    delegate.deleteByKnowledgeBaseId(knowledgeBaseId);
+  }
 }

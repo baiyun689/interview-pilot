@@ -26,4 +26,9 @@ class KnowledgeBaseRepositoryAdapter implements KnowledgeBaseRepository {
   public List<KnowledgeBaseEntity> findAllByUserAccountIdOrderByCreatedAtDesc(Long userAccountId) {
     return delegate.findAllByUserAccountIdOrderByCreatedAtDesc(userAccountId);
   }
+
+  @Override
+  public void deleteByKnowledgeBaseIdAndUserAccountId(UUID knowledgeBaseId, Long userAccountId) {
+    delegate.deleteByKnowledgeBaseIdAndUserAccountId(knowledgeBaseId, userAccountId);
+  }
 }
