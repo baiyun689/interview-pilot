@@ -86,7 +86,6 @@ class ResumeOwnershipIT {
   @Test
   void userCannotReadAnotherUsersResumeOrSeeItInTheirList() throws Exception {
     Long resumeId = readyResume(userA.getId());
-
     mvc.perform(get("/api/resumes/{id}", resumeId).with(authentication(principal(userB))))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("RESUME_NOT_FOUND"));
