@@ -25,6 +25,9 @@ public interface AsyncTaskRepository extends JpaRepository<AsyncTaskEntity, Long
   Optional<AsyncTaskEntity> findByTaskTypeAndBizKeyAndUserAccountId(
       AsyncTaskType type, String bizKey, Long userAccountId);
 
+  void deleteByTaskTypeAndBizKeyAndUserAccountId(
+      AsyncTaskType type, String bizKey, Long userAccountId);
+
   @Query("""
       select task from AsyncTaskEntity task
       where task.status = :status

@@ -2,7 +2,9 @@ package interview.pilot.resume.api;
 
 import static org.hamcrest.Matchers.matchesPattern;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -26,6 +28,7 @@ import interview.pilot.common.exception.BusinessException;
 import interview.pilot.common.exception.GlobalExceptionHandler;
 import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.auth.application.CurrentUserProvider;
+import interview.pilot.resume.application.ResumeDeleteService;
 import interview.pilot.resume.application.ResumeQueryService;
 import interview.pilot.resume.application.ResumeUploadService;
 import interview.pilot.resume.application.ResumeUploadService.UploadResumeResult;
@@ -34,6 +37,7 @@ import interview.pilot.resume.domain.ResumeStatus;
 class ResumeControllerTest {
   private ResumeUploadService uploadService;
   private ResumeQueryService queryService;
+  private ResumeDeleteService deleteService;
   private CurrentUserProvider currentUser;
   private MockMvc mockMvc;
   private final CurrentUser user = new CurrentUser(1L, UUID.randomUUID(), "user@example.com", "User");
@@ -42,10 +46,11 @@ class ResumeControllerTest {
   void setUp() {
     uploadService = mock(ResumeUploadService.class);
     queryService = mock(ResumeQueryService.class);
+    deleteService = mock(ResumeDeleteService.class);
     currentUser = mock(CurrentUserProvider.class);
     when(currentUser.require()).thenReturn(user);
     mockMvc = MockMvcBuilders
-        .standaloneSetup(new ResumeController(uploadService, queryService, currentUser))
+        .standaloneSetup(new ResumeController(uploadService, queryService, deleteService, currentUser))
         .setControllerAdvice(new GlobalExceptionHandler())
         .build();
   }
@@ -127,6 +132,14 @@ class ResumeControllerTest {
     mockMvc.perform(get("/api/resumes/{id}", resumeId))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("RESUME_NOT_FOUND"));
+  }
+
+  @Test
+  void deleteResumeReturnsNoContent() throws Exception {
+    long resumeId = 105L;
+    mockMvc.perform(delete("/api/resumes/{id}", resumeId))
+        .andExpect(status().isNoContent());
+    verify(deleteService).delete(user, resumeId);
   }
 
   @Test

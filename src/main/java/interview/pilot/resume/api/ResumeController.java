@@ -5,6 +5,7 @@ import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import interview.pilot.resume.application.ResumeDeleteService;
 import interview.pilot.resume.application.ResumeQueryService;
 import interview.pilot.resume.application.ResumeUploadService;
 import interview.pilot.resume.application.ResumeUploadService.UploadResumeResult;
@@ -25,14 +27,17 @@ import interview.pilot.common.ratelimit.RateLimitScope;
 public class ResumeController {
   private final ResumeUploadService uploadService;
   private final ResumeQueryService queryService;
+  private final ResumeDeleteService deleteService;
   private final CurrentUserProvider currentUser;
 
   public ResumeController(
       ResumeUploadService uploadService,
       ResumeQueryService queryService,
+      ResumeDeleteService deleteService,
       CurrentUserProvider currentUser) {
     this.uploadService = uploadService;
     this.queryService = queryService;
+    this.deleteService = deleteService;
     this.currentUser = currentUser;
   }
 
@@ -55,5 +60,13 @@ public class ResumeController {
   @RateLimit(scope = RateLimitScope.IP, capacity = 120)
   public ResumeResponse get(@PathVariable("id") Long resumeId) {
     return queryService.get(currentUser.require(), resumeId);
+  }
+
+  @DeleteMapping("/{id}")
+  @RateLimit(scope = RateLimitScope.IP, capacity = 20)
+  @RateLimit(scope = RateLimitScope.USER, capacity = 20)
+  public ResponseEntity<Void> delete(@PathVariable("id") Long resumeId) {
+    deleteService.delete(currentUser.require(), resumeId);
+    return ResponseEntity.noContent().build();
   }
 }
