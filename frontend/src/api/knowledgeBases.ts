@@ -5,6 +5,10 @@ export function listKnowledgeBases(signal?: AbortSignal): Promise<KnowledgeBase[
   return request('/api/knowledge-bases', { signal })
 }
 
+export function deleteKnowledgeBase(knowledgeBaseId: string, signal?: AbortSignal): Promise<void> {
+  return request(`/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}`, { method: 'DELETE', signal })
+}
+
 export function createKnowledgeBase(name: string, signal?: AbortSignal): Promise<KnowledgeBase> {
   return request('/api/knowledge-bases', {
     method: 'POST',

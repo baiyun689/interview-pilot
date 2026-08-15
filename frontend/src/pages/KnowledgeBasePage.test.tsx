@@ -73,4 +73,31 @@ describe('知识库页面', () => {
     ))
     expect(screen.queryByText('ready.md')).not.toBeInTheDocument()
   })
+
+  it('删除知识库需确认，成功后从列表移除', async () => {
+    const fetchMock = vi.fn((path: string, init?: RequestInit) => {
+      if (path === '/api/knowledge-bases' && init?.method !== 'DELETE') {
+        return Promise.resolve(json([base]))
+      }
+      if (path === '/api/knowledge-bases/kb-1' && init?.method === 'DELETE') {
+        return Promise.resolve(new Response(null, { status: 204 }))
+      }
+      return Promise.resolve(json({ message: 'not found' }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+
+    render(<KnowledgeBasePage pollIntervalMs={50} />)
+    expect(await screen.findByText('Backend KB')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '删除' }))
+
+    expect(confirmSpy).toHaveBeenCalled()
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/knowledge-bases/kb-1',
+      expect.objectContaining({ method: 'DELETE' }),
+    ))
+    await waitFor(() => expect(screen.queryByText('Backend KB')).not.toBeInTheDocument())
+  })
 })

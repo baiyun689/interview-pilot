@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BookOpen, FileText, RefreshCw, Upload, ChevronDown, ChevronRight, Trash2 } from 'lucide-react'
-import { createKnowledgeBase, deleteDocument, listDocuments, listKnowledgeBases, reindexDocument, uploadDocument } from '../api/knowledgeBases'
+import { createKnowledgeBase, deleteDocument, deleteKnowledgeBase, listDocuments, listKnowledgeBases, reindexDocument, uploadDocument } from '../api/knowledgeBases'
 import { ErrorNotice } from '../components/InterviewUi'
 import type { KnowledgeBase, KnowledgeDocument } from '../types/knowledge'
 
@@ -24,6 +24,7 @@ export function KnowledgeBasePage({ pollIntervalMs = 3000 }: KnowledgeBasePagePr
   const [uploading, setUploading] = useState<Set<string>>(new Set())
   const [uploadError, setUploadError] = useState<Record<string, unknown>>({})
   const [deleting, setDeleting] = useState<Set<string>>(new Set())
+  const [deletingBases, setDeletingBases] = useState<Set<string>>(new Set())
 
   useEffect(() => () => { mounted.current = false }, [])
 
@@ -176,6 +177,25 @@ export function KnowledgeBasePage({ pollIntervalMs = 3000 }: KnowledgeBasePagePr
     }
   }
 
+  async function removeBase(base: KnowledgeBase) {
+    if (deletingBases.has(base.knowledgeBaseId)
+        || !window.confirm(`删除知识库「${base.name}」及其全部 ${base.readyDocumentCount} 个就绪文档？已创建的面试记录会保留。`)) {
+      return
+    }
+    setDeletingBases((prev) => new Set(prev).add(base.knowledgeBaseId))
+    try {
+      await deleteKnowledgeBase(base.knowledgeBaseId)
+      if (!mounted.current) return
+      setBases((prev) => prev.filter((item) => item.knowledgeBaseId !== base.knowledgeBaseId))
+      setExpanded((prev) => { const next = new Set(prev); next.delete(base.knowledgeBaseId); return next })
+      setDocs((prev) => { const next = { ...prev }; delete next[base.knowledgeBaseId]; return next })
+    } catch (error) {
+      if (mounted.current) setLoadError(error)
+    } finally {
+      if (mounted.current) setDeletingBases((prev) => { const next = new Set(prev); next.delete(base.knowledgeBaseId); return next })
+    }
+  }
+
   function statusLabel(status: string): string {
     switch (status) {
       case 'PENDING': return '待处理'
@@ -246,6 +266,14 @@ export function KnowledgeBasePage({ pollIntervalMs = 3000 }: KnowledgeBasePagePr
                     <h3>{base.name}</h3>
                     <span className="kb-meta">{base.readyDocumentCount} 个就绪文档 · 创建于 {new Date(base.createdAt).toLocaleDateString('zh-CN')}</span>
                   </div>
+                  <button
+                    className="button button-danger"
+                    disabled={deletingBases.has(base.knowledgeBaseId)}
+                    onClick={(e) => { e.stopPropagation(); void removeBase(base) }}
+                    type="button"
+                  >
+                    <Trash2 size={14} /> {deletingBases.has(base.knowledgeBaseId) ? '删除中' : '删除'}
+                  </button>
                 </div>
 
                 {isExpanded && (

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { FileUp, UploadCloud } from 'lucide-react'
+import { FileUp, Trash2, UploadCloud } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { listResumes, uploadResume } from '../api/resumes'
+import { deleteResume, listResumes, uploadResume } from '../api/resumes'
 import { ApiClientError } from '../api/request'
 import { ResumeStatusBadge } from '../components/ResumeStatusBadge'
 import type { ResumeDetail } from '../types/resume'
@@ -35,6 +35,7 @@ export function ResumeListPage() {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<{ message: string; traceId: string | null } | null>(null)
   const [notice, setNotice] = useState<{ message: string; resumeId: number } | null>(null)
+  const [deleting, setDeleting] = useState<Set<number>>(new Set())
   const inputRef = useRef<HTMLInputElement>(null)
   const loadGeneration = useRef(0)
   const lifecycleGeneration = useRef(0)
@@ -85,6 +86,25 @@ export function ResumeListPage() {
     }
     setError(null)
     setSelectedFile(file)
+  }
+
+  async function remove(resume: ResumeDetail) {
+    if (deleting.has(resume.id) || !window.confirm(`删除简历「${resume.originalFilename}」？已创建的面试记录会保留。`)) return
+    const lifecycle = lifecycleGeneration.current
+    setDeleting((prev) => new Set(prev).add(resume.id))
+    setError(null)
+    try {
+      await deleteResume(resume.id)
+      if (!mounted.current || lifecycleGeneration.current !== lifecycle) return
+      setResumes((prev) => prev.filter((item) => item.id !== resume.id))
+    } catch (deleteError) {
+      if (!mounted.current || lifecycleGeneration.current !== lifecycle) return
+      setError(traceMessage(deleteError))
+    } finally {
+      if (mounted.current && lifecycleGeneration.current === lifecycle) {
+        setDeleting((prev) => { const next = new Set(prev); next.delete(resume.id); return next })
+      }
+    }
   }
 
   async function submit() {
@@ -170,6 +190,13 @@ export function ResumeListPage() {
               <div><h3>{resume.originalFilename}</h3><time dateTime={resume.createdAt}>{new Date(resume.createdAt).toLocaleString('zh-CN')}</time></div>
               <ResumeStatusBadge status={resume.status} />
               <Link className="detail-link" to={`/resumes/${resume.id}`}>查看详情</Link>
+              <button
+                className="button button-ghost"
+                disabled={deleting.has(resume.id)}
+                onClick={() => void remove(resume)}
+              >
+                <Trash2 size={16} aria-hidden />{deleting.has(resume.id) ? '删除中' : '删除'}
+              </button>
             </article>
           ))}
         </div>

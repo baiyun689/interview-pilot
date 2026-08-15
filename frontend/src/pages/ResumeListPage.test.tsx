@@ -227,4 +227,43 @@ describe('简历列表与上传', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
+
+  it('删除简历需确认，成功后从列表移除', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json([{ ...baseResume, id: 1, originalFilename: 'ready.txt', status: 'READY' }]))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+    renderPage()
+    expect(await screen.findByText('ready.txt')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /删除/ }))
+
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/resumes/1',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+    expect(await screen.findByText('还没有简历')).toBeInTheDocument()
+  })
+
+  it('删除简历失败时展示错误并保留条目', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json([{ ...baseResume, id: 1, originalFilename: 'ready.txt', status: 'READY' }]))
+      .mockResolvedValueOnce(json(
+        { code: 'RESUME_ANALYSIS_IN_PROGRESS', message: 'Resume analysis is still in progress' },
+        409,
+      ))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+    renderPage()
+    expect(await screen.findByText('ready.txt')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /删除/ }))
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    expect(screen.getByText('ready.txt')).toBeInTheDocument()
+  })
 })

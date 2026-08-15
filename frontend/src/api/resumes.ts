@@ -18,3 +18,7 @@ export function uploadResume(file: File, signal?: AbortSignal): Promise<ApiRespo
 export function retryResumeAnalysis(taskId: string): Promise<unknown> {
   return request(`/api/tasks/${encodeURIComponent(taskId)}/retry`, { method: 'POST' })
 }
+
+export function deleteResume(id: number, signal?: AbortSignal): Promise<void> {
+  return request(`/api/resumes/${id}`, { method: 'DELETE', signal })
+}
