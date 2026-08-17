@@ -33,6 +33,7 @@ public final class AnswerEvidenceValidator {
 
   private boolean grounded(String evidence, String answer) {
     String normalizedEvidence = normalize(evidence);
+    if (normalizedEvidence.length() >= 4 && answer.contains(normalizedEvidence)) return true;
     String[] clauses = normalizedEvidence.split("(?:并且|以及|同时|并|且|\\band\\b)");
     if (clauses.length > 1) {
       return java.util.Arrays.stream(clauses)

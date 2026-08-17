@@ -86,11 +86,14 @@ class DefaultInterviewStrategyTest {
         Difficulty.MEDIUM, "Java", List.of(), plan.competencies(), 0, 1, 5, 0.55), assessment);
     StrategyOutcome moveOn = strategy.nextTurn(plan, new DecisionContext(
         Difficulty.MEDIUM, "Java", List.of("Java"), plan.competencies(), 1, 2, 5, 0.55), assessment);
+    StrategyOutcome exhaustedWithoutEvidence = strategy.nextTurn(plan, new DecisionContext(
+        Difficulty.MEDIUM, "Java", List.of(), plan.competencies(), 1, 2, 5, 0.55), assessment);
 
     assertThat(followUp.nextDirective().probeFocus())
         .contains("故障处置")
         .contains("boundary");
     assertThat(moveOn.decision().nextStep()).isEqualTo(NextStep.NEXT_TOPIC);
     assertThat(moveOn.nextDirective().competency()).isEqualTo("MySQL");
+    assertThat(exhaustedWithoutEvidence.decision().targetCompetency()).isEqualTo("MySQL");
   }
 }

@@ -28,6 +28,11 @@ public final class DefaultInterviewStrategy implements InterviewStrategy {
     InterviewPlanItem currentItem = plan.itemFor(context.currentCompetency());
     InterviewDecision decision = decisionPolicy.apply(
         suggestion, context, currentItem.followUpLimit());
+    if (decision.nextStep() == NextStep.NEXT_TOPIC
+        && same(decision.targetCompetency(), context.currentCompetency())
+        && context.followUpCount() >= currentItem.followUpLimit()) {
+      decision = nextAfterExhaustedItem(plan, context, decision);
+    }
     if (decision.nextStep() == NextStep.FINISH) {
       return new StrategyOutcome(decision, null);
     }
@@ -49,6 +54,21 @@ public final class DefaultInterviewStrategy implements InterviewStrategy {
     return new TurnDirective(
         item.stageId(), item.competency(), difficulty, item.evidenceTargets(),
         mode, item.ragEnabled(), probeFocus, reason, item.resumeEntryPoint());
+  }
+
+  private InterviewDecision nextAfterExhaustedItem(
+      InterviewPlan plan, DecisionContext context, InterviewDecision previous) {
+    return plan.competencies().stream()
+        .filter(candidate -> !same(candidate, context.currentCompetency()))
+        .filter(candidate -> context.coveredCompetencies().stream()
+            .noneMatch(covered -> same(candidate, covered)))
+        .findFirst()
+        .map(target -> new InterviewDecision(
+            NextStep.NEXT_TOPIC, previous.difficultyAdjustment(), target, "",
+            "CURRENT_ITEM_BUDGET_EXHAUSTED", previous.confidence()))
+        .orElseGet(() -> new InterviewDecision(
+            NextStep.FINISH, DifficultyAdjustment.KEEP, "", "",
+            "ALL_ITEM_BUDGETS_EXHAUSTED", previous.confidence()));
   }
 
   private String evidenceGap(

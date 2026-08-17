@@ -40,4 +40,15 @@ class AnswerEvidenceValidatorTest {
 
     assertThat(validated.evidence()).isEmpty();
   }
+
+  @Test
+  void exactClaimsContainingConcurrencyWordsAreNotSplitAsConjunctions() {
+    AnswerEvaluation evaluation = new AnswerEvaluation(
+        75, "ok", List.of("采用并发处理"), List.of(),
+        new InterviewDecision(NextStep.FOLLOW_UP, DifficultyAdjustment.KEEP,
+            "Java", "并发", "继续", 0.8));
+
+    assertThat(validator.validate("该任务采用并发处理。", evaluation).evidence())
+        .containsExactly("采用并发处理");
+  }
 }

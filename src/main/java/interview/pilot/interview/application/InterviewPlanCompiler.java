@@ -54,19 +54,19 @@ public final class InterviewPlanCompiler {
 
     Map<String, Candidate> selected = new LinkedHashMap<>();
     Set<String> requiredKeys = new LinkedHashSet<>();
+    List<String> resumeTerms = resumeTerms(resume);
     for (String required : job.competencies()) {
       requiredKeys.add(key(required));
       CompetencySpec spec = bestSpec(required, skill.competencySpecs());
       PlanProposal.Item proposed = proposal == null ? null : proposal.itemFor(required);
       add(selected, candidate(required, spec, PlanPriority.REQUIRED,
           10_000, "JD 明确要求的必考能力",
-          proposed == null ? "" : proposed.resumeEntryPoint()));
+          validatedEntryPoint(proposed, resumeTerms)));
     }
 
     int targetCount = Math.max(requiredKeys.size(), Math.max(2, totalTurnBudget / 2));
     targetCount = Math.min(totalTurnBudget, targetCount);
 
-    List<String> resumeTerms = resumeTerms(resume);
     List<String> proposalOrder = proposal == null ? List.of() : proposal.competencies();
     List<Candidate> optional = new ArrayList<>();
     for (int index = 0; index < skill.competencySpecs().size(); index++) {
@@ -88,7 +88,7 @@ public final class InterviewPlanCompiler {
               : proposed != null ? proposed.rationale() : "Skill 基线能力补充";
       optional.add(candidate(
           spec.name(), spec, priority, score, rationale,
-          proposed == null ? "" : proposed.resumeEntryPoint()));
+          validatedEntryPoint(proposed, resumeTerms)));
     }
     optional.sort(Comparator.comparingInt(Candidate::score).reversed());
 
@@ -175,6 +175,12 @@ public final class InterviewPlanCompiler {
       if (related(spec.name(), proposal.get(index))) return proposal.size() - index;
     }
     return 0;
+  }
+
+  private String validatedEntryPoint(PlanProposal.Item proposed, List<String> resumeTerms) {
+    if (proposed == null || proposed.resumeEntryPoint().isBlank()) return "";
+    return resumeTerms.stream().anyMatch(term -> related(proposed.resumeEntryPoint(), term))
+        ? proposed.resumeEntryPoint() : "";
   }
 
   private List<String> resumeTerms(ResumeProfile resume) {
