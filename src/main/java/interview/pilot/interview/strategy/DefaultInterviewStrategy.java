@@ -53,11 +53,25 @@ public final class DefaultInterviewStrategy implements InterviewStrategy {
 
   private String evidenceGap(
       InterviewPlanItem item, AnswerEvaluation assessment, int followUpCount) {
-    if (!assessment.missingPoints().isEmpty()) return assessment.missingPoints().getFirst();
-    if (!item.followUpAxes().isEmpty()) {
-      return item.followUpAxes().get(Math.min(followUpCount, item.followUpAxes().size() - 1));
+    for (String target : item.evidenceTargets()) {
+      if (assessment.missingPoints().stream()
+          .anyMatch(missing -> CompetencyMatcher.related(target, missing))) {
+        return withAxis(target, item, followUpCount);
+      }
     }
-    return item.evidenceTargets().get(Math.min(followUpCount, item.evidenceTargets().size() - 1));
+    if (!item.evidenceTargets().isEmpty()) {
+      String target = item.evidenceTargets().get(
+          Math.min(followUpCount, item.evidenceTargets().size() - 1));
+      return withAxis(target, item, followUpCount);
+    }
+    return "补充可核验的工程证据";
+  }
+
+  private String withAxis(String target, InterviewPlanItem item, int followUpCount) {
+    if (item.followUpAxes().isEmpty()) return target;
+    String axis = item.followUpAxes().get(
+        Math.min(followUpCount, item.followUpAxes().size() - 1));
+    return target + "；追问角度：" + axis;
   }
 
   private InterviewDecision trustedSuggestion(InterviewDecision suggestion, InterviewPlan plan) {

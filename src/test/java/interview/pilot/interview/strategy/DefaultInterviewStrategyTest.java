@@ -87,7 +87,9 @@ class DefaultInterviewStrategyTest {
     StrategyOutcome moveOn = strategy.nextTurn(plan, new DecisionContext(
         Difficulty.MEDIUM, "Java", List.of("Java"), plan.competencies(), 1, 2, 5, 0.55), assessment);
 
-    assertThat(followUp.nextDirective().probeFocus()).isEqualTo("故障处置");
+    assertThat(followUp.nextDirective().probeFocus())
+        .contains("故障处置")
+        .contains("boundary");
     assertThat(moveOn.decision().nextStep()).isEqualTo(NextStep.NEXT_TOPIC);
     assertThat(moveOn.nextDirective().competency()).isEqualTo("MySQL");
   }
