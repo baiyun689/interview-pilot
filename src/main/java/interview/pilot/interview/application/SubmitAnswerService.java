@@ -65,6 +65,7 @@ public class SubmitAnswerService {
   private final AnswerEvaluator evaluator;
   private final QuestionGenerator questionGenerator;
   private final InterviewStrategy strategy = new DefaultInterviewStrategy();
+  private final AnswerEvidenceValidator evidenceValidator = new AnswerEvidenceValidator();
   private final InterviewDecisionContextFactory decisionContexts =
       new InterviewDecisionContextFactory();
   private final InterviewSessionRepository sessions;
@@ -176,6 +177,7 @@ public class SubmitAnswerService {
       if (evaluation == null) {
         throw new IllegalStateException("Answer evaluator returned no result");
       }
+      evaluation = evidenceValidator.validate(request.answer(), evaluation);
       log.info("interview session={} turn={} step=evaluate provider={} model={} score={} latency_ms={}",
           sid, claim.turnNo(), context.providerId(), context.modelName(),
           evaluation.score(), evalMs);
@@ -196,7 +198,7 @@ public class SubmitAnswerService {
           nextDifficulty, decision.confidence());
 
       // Retrieve next RAG snapshot after Java decision
-      RagContextSnapshot nextRag = finish
+      RagContextSnapshot nextRag = finish || !nextDirective.ragEnabled()
           ? RagContextSnapshot.notConfigured()
           : retrieveNextRag(user, sessionId, claim.turnNo(), context, decision, nextDifficulty);
 
@@ -220,7 +222,7 @@ public class SubmitAnswerService {
       AnswerProcessingResult result = new AnswerProcessingResult(
           sessionId, request.requestId(), claim.turnNo(), evaluation, decision, nextQuestion,
           nextDifficulty, finish ? SessionStatus.EVALUATING : SessionStatus.INTERVIEWING, false,
-          nextRag, finish ? null : nextDirective);
+          nextRag, finish ? null : nextDirective, context.currentDirective());
       String snapshot = resultCodec.write(result);
       Long ownerId = requireOwner(user);
       Boolean finalized = requiresNew.execute(

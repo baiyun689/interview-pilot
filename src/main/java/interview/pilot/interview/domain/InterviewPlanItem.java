@@ -13,7 +13,9 @@ public record InterviewPlanItem(
     List<String> evidenceTargets,
     List<InterviewQuestionMode> questionModes,
     String rationale,
-    boolean ragEnabled) {
+    boolean ragEnabled,
+    List<String> followUpAxes,
+    int followUpLimit) {
 
   public InterviewPlanItem {
     stageId = required(stageId, "stageId", 64);
@@ -24,10 +26,25 @@ public record InterviewPlanItem(
       throw new IllegalArgumentException("turnBudget must be between 0 and 15");
     }
     evidenceTargets = evidenceTargets == null ? List.of() : List.copyOf(evidenceTargets);
+    if (evidenceTargets.isEmpty()) {
+      throw new IllegalArgumentException("evidenceTargets must not be empty");
+    }
     questionModes = questionModes == null || questionModes.isEmpty()
         ? List.of(InterviewQuestionMode.PROJECT, InterviewQuestionMode.MECHANISM)
         : List.copyOf(questionModes);
     rationale = rationale == null ? "" : rationale.trim();
+    followUpAxes = followUpAxes == null ? List.of() : List.copyOf(followUpAxes);
+    if (followUpLimit < 0 || followUpLimit > 5) {
+      throw new IllegalArgumentException("followUpLimit must be between 0 and 5");
+    }
+  }
+
+  public InterviewPlanItem(
+      String stageId, String competencyId, String competency, PlanPriority priority,
+      int turnBudget, List<String> evidenceTargets, List<InterviewQuestionMode> questionModes,
+      String rationale, boolean ragEnabled) {
+    this(stageId, competencyId, competency, priority, turnBudget, evidenceTargets,
+        questionModes, rationale, ragEnabled, List.of(), Math.min(2, Math.max(0, turnBudget - 1)));
   }
 
   public static InterviewPlanItem legacy(String competency, int turnBudget, int index) {
@@ -37,7 +54,9 @@ public record InterviewPlanItem(
         List.of("实际经验", "机制理解", "边界与取舍"),
         List.of(InterviewQuestionMode.PROJECT, InterviewQuestionMode.MECHANISM,
             InterviewQuestionMode.FAILURE),
-        "历史能力计划兼容项", false);
+        "历史能力计划兼容项", false,
+        List.of("experience", "mechanism", "failure"),
+        Math.min(2, Math.max(0, turnBudget - 1)));
   }
 
   private static String required(String value, String field, int max) {

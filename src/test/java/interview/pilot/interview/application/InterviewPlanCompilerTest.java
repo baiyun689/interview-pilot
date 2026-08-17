@@ -36,6 +36,7 @@ class InterviewPlanCompilerTest {
     });
     assertThat(plan.items().stream().mapToInt(item -> item.turnBudget()).sum()).isEqualTo(8);
     assertThat(plan.omittedCompetencies()).isNotEmpty();
+    assertThat(plan.omissions()).allSatisfy(omission -> assertThat(omission.reason()).isNotBlank());
   }
 
   @Test

@@ -8,6 +8,7 @@ public record AnswerEvaluation(
     String feedback,
     List<String> evidence,
     List<String> missingPoints,
+    List<String> redFlags,
     InterviewDecision suggestedDecision) {
 
   public AnswerEvaluation {
@@ -17,7 +18,14 @@ public record AnswerEvaluation(
     feedback = normalize(feedback);
     evidence = normalizedItems(evidence, "evidence");
     missingPoints = normalizedItems(missingPoints, "missingPoints");
+    redFlags = redFlags == null ? List.of() : normalizedItems(redFlags, "redFlags");
     suggestedDecision = Objects.requireNonNull(suggestedDecision, "suggestedDecision must not be null");
+  }
+
+  public AnswerEvaluation(
+      double score, String feedback, List<String> evidence, List<String> missingPoints,
+      InterviewDecision suggestedDecision) {
+    this(score, feedback, evidence, missingPoints, List.of(), suggestedDecision);
   }
 
   private static List<String> normalizedItems(List<String> values, String name) {

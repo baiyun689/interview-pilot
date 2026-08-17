@@ -22,14 +22,15 @@ public record AnswerProcessingResult(
     SessionStatus sessionStatus,
     boolean replayed,
     RagContextSnapshot nextRagSnapshot,
-    TurnDirective nextDirective) {
+    TurnDirective nextDirective,
+    TurnDirective currentDirective) {
 
   public AnswerProcessingResult(
       UUID sessionId, UUID requestId, int turnNo, AnswerEvaluation evaluation,
       InterviewDecision decision, GeneratedQuestion nextQuestion,
       Difficulty nextDifficulty, SessionStatus sessionStatus, boolean replayed) {
     this(sessionId, requestId, turnNo, evaluation, decision, nextQuestion,
-        nextDifficulty, sessionStatus, replayed, RagContextSnapshot.notConfigured(), null);
+        nextDifficulty, sessionStatus, replayed, RagContextSnapshot.notConfigured(), null, null);
   }
 
   public AnswerProcessingResult(
@@ -38,7 +39,16 @@ public record AnswerProcessingResult(
       Difficulty nextDifficulty, SessionStatus sessionStatus, boolean replayed,
       RagContextSnapshot nextRagSnapshot) {
     this(sessionId, requestId, turnNo, evaluation, decision, nextQuestion,
-        nextDifficulty, sessionStatus, replayed, nextRagSnapshot, null);
+        nextDifficulty, sessionStatus, replayed, nextRagSnapshot, null, null);
+  }
+
+  public AnswerProcessingResult(
+      UUID sessionId, UUID requestId, int turnNo, AnswerEvaluation evaluation,
+      InterviewDecision decision, GeneratedQuestion nextQuestion,
+      Difficulty nextDifficulty, SessionStatus sessionStatus, boolean replayed,
+      RagContextSnapshot nextRagSnapshot, TurnDirective nextDirective) {
+    this(sessionId, requestId, turnNo, evaluation, decision, nextQuestion,
+        nextDifficulty, sessionStatus, replayed, nextRagSnapshot, nextDirective, null);
   }
 
   public AnswerProcessingResult {
@@ -61,6 +71,6 @@ public record AnswerProcessingResult(
   public AnswerProcessingResult asReplay() {
     return new AnswerProcessingResult(
         sessionId, requestId, turnNo, evaluation, decision, nextQuestion,
-        nextDifficulty, sessionStatus, true, nextRagSnapshot, nextDirective);
+        nextDifficulty, sessionStatus, true, nextRagSnapshot, nextDirective, currentDirective);
   }
 }

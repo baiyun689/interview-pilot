@@ -193,14 +193,14 @@ class InterviewJourneyIT {
 
     providers.switchDefault("alternate");
     var orthogonalDecision = answers.submit(LEGACY_USER, sessionId, new SubmitAnswerRequest(
-        UUID.randomUUID(), "Use a unique request id and a database constraint."));
+        UUID.randomUUID(), "Concrete mechanism: use a unique request id and a database constraint."));
     assertThat(orthogonalDecision.decision().nextStep()).isEqualTo(NextStep.NEXT_TOPIC);
     assertThat(orthogonalDecision.decision().difficultyAdjustment())
         .isEqualTo(DifficultyAdjustment.INCREASE);
 
-    for (int turn = 2; turn <= 5; turn++) {
+    for (int turn = 2; turn <= 3; turn++) {
       answers.submit(LEGACY_USER, sessionId, new SubmitAnswerRequest(
-          UUID.randomUUID(), "Answer with concrete evidence for turn " + turn));
+          UUID.randomUUID(), "Concrete mechanism with evidence for turn " + turn));
     }
 
     var evaluating = sessions.findBySessionId(sessionId).orElseThrow();
@@ -208,7 +208,7 @@ class InterviewJourneyIT {
     assertThat(evaluating.getProviderId()).isEqualTo("journey");
     assertThat(evaluating.getModelName()).isEqualTo("journey-model");
     assertThat(turns.findAllBySessionIdOrderByTurnNo(evaluating.getId()))
-        .hasSize(5)
+        .hasSize(3)
         .allSatisfy(turn -> assertThat(turn.getRequestId()).isNotNull())
         .extracting(turn -> turn.getRequestId()).doesNotHaveDuplicates();
 
@@ -235,8 +235,8 @@ class InterviewJourneyIT {
     verifyPromptContract(ResumeProfile.class, "严谨的中文简历分析师", 1);
     verifyPromptContract(JobRequirements.class, "资深招聘需求分析师", 1);
     verifyPromptContract(InterviewPlan.class, "资深技术面试负责人", 1);
-    verifyPromptContract(GeneratedQuestion.class, "中文技术面试官", 5);
-    verifyPromptContract(AnswerEvaluation.class, "中文技术面试评审官", 5);
+    verifyPromptContract(GeneratedQuestion.class, "中文技术面试官", 3);
+    verifyPromptContract(AnswerEvaluation.class, "中文技术面试评审官", 3);
     verifyPromptContract(InterviewReport.class, "资深面试委员会评审", 1);
   }
 
@@ -260,14 +260,6 @@ class InterviewJourneyIT {
             question("How would you observe AI failures?", "Observability")),
         new Fixture(AnswerEvaluation.class, "中文技术面试评审官",
             evaluation("FOLLOW_UP", "DECREASE", "Observability")),
-        new Fixture(GeneratedQuestion.class, "中文技术面试官",
-            question("Which metrics and traces would you retain?", "Observability")),
-        new Fixture(AnswerEvaluation.class, "中文技术面试评审官",
-            evaluation("FOLLOW_UP", "KEEP", "Observability")),
-        new Fixture(GeneratedQuestion.class, "中文技术面试官",
-            question("How do retries affect those signals?", "Observability")),
-        new Fixture(AnswerEvaluation.class, "中文技术面试评审官",
-            evaluation("FINISH", "KEEP", "Observability")),
         new Fixture(InterviewReport.class, "资深面试委员会评审",
             "{\"overallScore\":86,\"competencyScores\":{\"Java\":88,\"System Design\":84,\"Observability\":86},\"strengths\":[\"Concrete idempotency evidence\"],\"improvements\":[\"Quantify trade-offs\"],\"summary\":\"Strong backend reasoning grounded in the completed turns.\"}"));
     String state = com.github.tomakehurst.wiremock.stubbing.Scenario.STARTED;

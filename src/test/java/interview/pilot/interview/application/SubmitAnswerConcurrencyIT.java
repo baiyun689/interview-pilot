@@ -221,6 +221,9 @@ class SubmitAnswerConcurrencyIT {
     assertThat(List.of(firstResult.replayed(), secondResult.replayed()))
         .containsExactlyInAnyOrder(false, true);
     assertThat(firstResult.evaluation()).isEqualTo(secondResult.evaluation());
+    assertThat(firstResult.currentDirective()).isNotNull();
+    assertThat(secondResult.currentDirective()).isEqualTo(firstResult.currentDirective());
+    assertThat(secondResult.nextDirective()).isEqualTo(firstResult.nextDirective());
     var persisted = sessions.findBySessionId(sessionId).orElseThrow();
     assertThat(turns.findAllBySessionIdOrderByTurnNo(persisted.getId())).hasSize(2);
     assertThat(turns.findAllBySessionIdOrderByTurnNo(persisted.getId()).get(1).getRequestId()).isNull();
@@ -228,7 +231,7 @@ class SubmitAnswerConcurrencyIT {
     assertThat(reconnected.answer()).isEqualTo("Use a version column.");
     assertThat(reconnected.feedback()).isEqualTo("Good concurrency explanation");
     assertThat(reconnected.score()).isEqualTo(82);
-    assertThat(reconnected.evidence()).containsExactly("Uses a version column");
+    assertThat(reconnected.evidence()).containsExactly("Use a version column.");
     assertThat(reconnected.decision().targetCompetency()).isEqualTo("Spring");
     assertThat(reconnected.nextDifficulty()).isEqualTo(Difficulty.MEDIUM);
     assertThat(reconnected.answeredAt()).isNotNull();
@@ -240,7 +243,7 @@ class SubmitAnswerConcurrencyIT {
     when(answerEvaluator.evaluate(any())).thenAnswer(invocation -> {
       entered.countDown();
       Thread.sleep(5_300);
-      return successfulEvaluation();
+      return successfulEvaluation(invocation.<AnswerEvaluationRequest>getArgument(0).answer());
     });
     when(questionGenerator.nextQuestion(
         org.mockito.ArgumentMatchers.eq("deepseek"),
@@ -268,7 +271,7 @@ class SubmitAnswerConcurrencyIT {
     when(answerEvaluator.evaluate(any())).thenAnswer(invocation -> {
       evaluatorEntered.countDown();
       releaseEvaluator.await(10, TimeUnit.SECONDS);
-      return successfulEvaluation();
+      return successfulEvaluation(invocation.<AnswerEvaluationRequest>getArgument(0).answer());
     });
     when(questionGenerator.nextQuestion(
         org.mockito.ArgumentMatchers.eq("deepseek"),
@@ -425,7 +428,7 @@ class SubmitAnswerConcurrencyIT {
       AnswerEvaluationRequest request = invocation.getArgument(0);
       assertThat(request.providerId()).isEqualTo("deepseek");
       assertThat(request.modelName()).isEqualTo("deepseek-chat");
-      return successfulEvaluation();
+      return successfulEvaluation(request.answer());
     });
     when(questionGenerator.nextQuestion(
         org.mockito.ArgumentMatchers.eq("deepseek"),
@@ -435,9 +438,9 @@ class SubmitAnswerConcurrencyIT {
         });
   }
 
-  private AnswerEvaluation successfulEvaluation() {
+  private AnswerEvaluation successfulEvaluation(String answerEvidence) {
     return new AnswerEvaluation(
-        82, "Good concurrency explanation", List.of("Uses a version column"), List.of(),
+        82, "Good concurrency explanation", List.of(answerEvidence), List.of(),
         new InterviewDecision(
             NextStep.NEXT_TOPIC, DifficultyAdjustment.KEEP, "Kotlin", "out of plan",
             "model suggests an untrusted target", 0.9));

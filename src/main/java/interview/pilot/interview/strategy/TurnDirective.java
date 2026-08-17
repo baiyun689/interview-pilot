@@ -12,6 +12,7 @@ public record TurnDirective(
     List<String> evidenceTargets,
     InterviewQuestionMode questionMode,
     boolean ragEnabled,
+    String probeFocus,
     String reason) {
 
   public TurnDirective {
@@ -20,7 +21,14 @@ public record TurnDirective(
     if (difficulty == null) throw new IllegalArgumentException("difficulty is required");
     evidenceTargets = evidenceTargets == null ? List.of() : List.copyOf(evidenceTargets);
     questionMode = questionMode == null ? InterviewQuestionMode.PROJECT : questionMode;
+    probeFocus = probeFocus == null ? "" : probeFocus.trim();
     reason = reason == null ? "" : reason.trim();
+  }
+
+  public TurnDirective(
+      String stageId, String competency, Difficulty difficulty, List<String> evidenceTargets,
+      InterviewQuestionMode questionMode, boolean ragEnabled, String reason) {
+    this(stageId, competency, difficulty, evidenceTargets, questionMode, ragEnabled, "", reason);
   }
 
   private static String required(String value, String field, int max) {

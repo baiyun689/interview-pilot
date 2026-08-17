@@ -14,7 +14,15 @@ public final class InterviewDecisionPolicy {
   private static final int MAX_FOLLOW_UPS = 2;
 
   public InterviewDecision apply(InterviewDecision suggestion, DecisionContext context) {
+    return apply(suggestion, context, MAX_FOLLOW_UPS);
+  }
+
+  public InterviewDecision apply(
+      InterviewDecision suggestion, DecisionContext context, int maxFollowUps) {
     Objects.requireNonNull(context, "context must not be null");
+    if (maxFollowUps < 0 || maxFollowUps > 5) {
+      throw new IllegalArgumentException("maxFollowUps must be between 0 and 5");
+    }
 
     if (context.currentTurn() >= context.totalTurnBudget()) {
       return finish("TURN_BUDGET_EXHAUSTED", confidenceOf(suggestion));
@@ -26,7 +34,7 @@ public final class InterviewDecisionPolicy {
 
     return switch (suggestion.nextStep()) {
       case FINISH -> normalizeFinish(suggestion, context);
-      case FOLLOW_UP -> normalizeFollowUp(suggestion, context);
+      case FOLLOW_UP -> normalizeFollowUp(suggestion, context, maxFollowUps);
       case NEXT_TOPIC -> normalizeNextTopic(suggestion, context);
     };
   }
@@ -44,8 +52,9 @@ public final class InterviewDecisionPolicy {
     return finish("MODEL_FINISH_ACCEPTED", suggestion.confidence());
   }
 
-  private InterviewDecision normalizeFollowUp(InterviewDecision suggestion, DecisionContext context) {
-    if (context.followUpCount() >= MAX_FOLLOW_UPS) {
+  private InterviewDecision normalizeFollowUp(
+      InterviewDecision suggestion, DecisionContext context, int maxFollowUps) {
+    if (context.followUpCount() >= maxFollowUps) {
       return firstUncoveredRequired(context)
           .map(target -> nextTopic(
               target,

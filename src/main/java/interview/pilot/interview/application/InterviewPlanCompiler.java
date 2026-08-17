@@ -5,17 +5,18 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
 import org.springframework.stereotype.Component;
 
 import interview.pilot.interview.domain.Difficulty;
+import interview.pilot.interview.domain.CompetencyMatcher;
 import interview.pilot.interview.domain.InterviewPlan;
 import interview.pilot.interview.domain.InterviewPlanItem;
 import interview.pilot.interview.domain.JobRequirements;
 import interview.pilot.interview.domain.PlanPriority;
+import interview.pilot.interview.domain.PlanOmission;
 import interview.pilot.interview.skill.CompetencySpec;
 import interview.pilot.interview.skill.InterviewQuestionMode;
 import interview.pilot.interview.skill.SkillSnapshot;
@@ -103,12 +104,14 @@ public final class InterviewPlanCompiler {
           stageFor(candidate.spec(), skill), candidate.spec().id(), candidate.name(),
           candidate.priority(), budgets[index], candidate.spec().requiredEvidence(),
           modesFor(candidate.spec(), difficulty), candidate.rationale(),
-          candidate.spec().retrievalPolicy().enabled()));
+          candidate.spec().retrievalPolicy().enabled(), candidate.spec().followUpAxes(),
+          Math.min(candidate.spec().followUpLimit(), Math.max(0, budgets[index] - 1))));
     }
 
-    List<String> omitted = skill.competencySpecs().stream()
+    List<PlanOmission> omitted = skill.competencySpecs().stream()
         .map(CompetencySpec::name)
         .filter(name -> items.stream().noneMatch(item -> same(item.competency(), name)))
+        .map(name -> new PlanOmission(name, "轮次预算优先保留 JD 必考、简历相关和高优先级能力"))
         .toList();
     return InterviewPlan.execution(items, totalTurnBudget, omitted);
   }
@@ -204,24 +207,15 @@ public final class InterviewPlanCompiler {
   }
 
   private boolean related(String left, String right) {
-    String a = key(left);
-    String b = key(right);
-    if (a.isEmpty() || b.isEmpty()) return false;
-    return a.contains(b) || b.contains(a) || tokens(a).stream().anyMatch(b::contains);
-  }
-
-  private List<String> tokens(String value) {
-    return java.util.Arrays.stream(value.split("[^\\p{L}\\p{N}+#]+"))
-        .filter(token -> token.length() >= 2)
-        .toList();
+    return CompetencyMatcher.related(left, right);
   }
 
   private boolean same(String left, String right) {
-    return key(left).equals(key(right));
+    return CompetencyMatcher.same(left, right);
   }
 
   private String key(String value) {
-    return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    return CompetencyMatcher.key(value);
   }
 
   private record Candidate(

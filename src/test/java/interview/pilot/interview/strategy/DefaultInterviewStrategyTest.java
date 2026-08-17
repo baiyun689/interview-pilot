@@ -11,7 +11,10 @@ import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.domain.DifficultyAdjustment;
 import interview.pilot.interview.domain.InterviewDecision;
 import interview.pilot.interview.domain.InterviewPlan;
+import interview.pilot.interview.domain.InterviewPlanItem;
 import interview.pilot.interview.domain.NextStep;
+import interview.pilot.interview.domain.PlanPriority;
+import interview.pilot.interview.skill.InterviewQuestionMode;
 
 class DefaultInterviewStrategyTest {
   private final DefaultInterviewStrategy strategy = new DefaultInterviewStrategy();
@@ -60,5 +63,32 @@ class DefaultInterviewStrategyTest {
     assertThat(outcome.decision().targetCompetency()).isEqualTo("Spring");
     assertThat(outcome.nextDirective().difficulty()).isEqualTo(Difficulty.MEDIUM);
     assertThat(outcome.nextDirective().reason()).isEqualTo("INVALID_OR_LOW_CONFIDENCE");
+  }
+
+  @Test
+  void itemBudgetAndMissingEvidenceControlTheFollowUp() {
+    var first = new InterviewPlanItem(
+        "depth", "java", "Java", PlanPriority.REQUIRED, 2,
+        List.of("并发边界", "故障处置"),
+        List.of(InterviewQuestionMode.MECHANISM, InterviewQuestionMode.FAILURE),
+        "JD 必考", false, List.of("boundary", "failure"), 1);
+    var second = new InterviewPlanItem(
+        "depth", "mysql", "MySQL", PlanPriority.REQUIRED, 3,
+        List.of("索引依据"), List.of(InterviewQuestionMode.MECHANISM),
+        "JD 必考", false, List.of("index"), 2);
+    InterviewPlan plan = InterviewPlan.execution(List.of(first, second), 5, List.of());
+    AnswerEvaluation assessment = new AnswerEvaluation(
+        65, "partial", List.of("机制"), List.of("故障处置"),
+        new InterviewDecision(NextStep.FOLLOW_UP, DifficultyAdjustment.KEEP,
+            "Java", "随意焦点", "继续", 0.9));
+
+    StrategyOutcome followUp = strategy.nextTurn(plan, new DecisionContext(
+        Difficulty.MEDIUM, "Java", List.of(), plan.competencies(), 0, 1, 5, 0.55), assessment);
+    StrategyOutcome moveOn = strategy.nextTurn(plan, new DecisionContext(
+        Difficulty.MEDIUM, "Java", List.of("Java"), plan.competencies(), 1, 2, 5, 0.55), assessment);
+
+    assertThat(followUp.nextDirective().probeFocus()).isEqualTo("故障处置");
+    assertThat(moveOn.decision().nextStep()).isEqualTo(NextStep.NEXT_TOPIC);
+    assertThat(moveOn.nextDirective().competency()).isEqualTo("MySQL");
   }
 }

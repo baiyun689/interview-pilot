@@ -12,7 +12,8 @@ public record InterviewPlan(
     int totalTurnBudget,
     Integer schemaVersion,
     List<InterviewPlanItem> items,
-    List<String> omittedCompetencies) {
+    List<String> omittedCompetencies,
+    List<PlanOmission> omissions) {
 
   public InterviewPlan {
     Objects.requireNonNull(competencies, "competencies must not be null");
@@ -55,17 +56,25 @@ public record InterviewPlan(
             .map(String::trim)
             .distinct()
             .toList();
+    omissions = omissions == null || omissions.isEmpty()
+        ? omittedCompetencies.stream()
+            .map(value -> new PlanOmission(value, "旧计划未记录舍弃理由"))
+            .toList()
+        : List.copyOf(omissions);
+    if (omittedCompetencies.isEmpty() && !omissions.isEmpty()) {
+      omittedCompetencies = omissions.stream().map(PlanOmission::competency).toList();
+    }
   }
 
   public InterviewPlan(List<String> competencies, int totalTurnBudget) {
-    this(competencies, totalTurnBudget, 1, null, List.of());
+    this(competencies, totalTurnBudget, 1, null, List.of(), List.of());
   }
 
   public static InterviewPlan execution(
-      List<InterviewPlanItem> items, int totalTurnBudget, List<String> omittedCompetencies) {
+      List<InterviewPlanItem> items, int totalTurnBudget, List<PlanOmission> omissions) {
     return new InterviewPlan(
         items.stream().map(InterviewPlanItem::competency).toList(),
-        totalTurnBudget, 2, items, omittedCompetencies);
+        totalTurnBudget, 2, items, List.of(), omissions);
   }
 
   public InterviewPlanItem itemFor(String competency) {

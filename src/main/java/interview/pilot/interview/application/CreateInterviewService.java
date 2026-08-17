@@ -147,6 +147,8 @@ public class CreateInterviewService {
 
     if (!request.knowledgeBaseIds().isEmpty()) {
       scope = scopeResolver.resolveForCreation(user, request.knowledgeBaseIds());
+    }
+    if (scope != null && firstDirective.ragEnabled()) {
       var intent = new RetrievalIntent(
           buildQuery(plan, profile, requirements, request.difficulty()),
           firstDirective.competency(), request.difficulty().name(),
