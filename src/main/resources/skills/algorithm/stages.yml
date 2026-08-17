@@ -1,0 +1,7 @@
+stages:
+  - id: problem_modeling
+    purpose: 澄清输入输出、约束和问题模型
+  - id: solution_design
+    purpose: 验证数据结构、算法正确性和复杂度取舍
+  - id: coding_readiness
+    purpose: 验证边界完整、表达清晰且可执行的实现

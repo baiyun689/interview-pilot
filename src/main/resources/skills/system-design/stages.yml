@@ -1,0 +1,7 @@
+stages:
+  - id: requirement_clarification
+    purpose: 澄清功能范围、访问模式、规模目标和核心约束
+  - id: architecture_design
+    purpose: 验证模块、数据、接口和关键链路的设计取舍
+  - id: failure_analysis
+    purpose: 验证瓶颈、故障恢复、可观测性和系统演进

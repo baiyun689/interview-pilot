@@ -139,6 +139,22 @@ class InterviewPlanCompilerTest {
   }
 
   @Test
+  void compilesAMigratedFrontendSkillIntoAnExecutableRagPlan() {
+    var frontend = new ClasspathInterviewSkillCatalog().require("frontend").snapshot();
+
+    InterviewPlan plan = compiler.compile(
+        new InterviewPlan(frontend.defaultCompetencies(), 5),
+        ResumeProfile.empty(),
+        new JobRequirements(List.of("JavaScript"), List.of("浏览器机制")),
+        Difficulty.MEDIUM, 5, frontend);
+
+    assertThat(plan.itemFor("JavaScript").stageId()).isEqualTo("technical_depth");
+    assertThat(plan.itemFor("JavaScript").retrievalPolicy().scopes())
+        .containsExactly("javascript", "browser");
+    assertThat(plan.items()).noneMatch(item -> item.stageId().equals("project_deep_dive"));
+  }
+
+  @Test
   void discardsAResumeEntryPointThatIsNotSupportedByTheResume() {
     PlanProposal proposal = new PlanProposal(List.of(
         new PlanProposal.Item("Java 基础与并发", 95, "不存在的证券交易项目", "模型建议")));

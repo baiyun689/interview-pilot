@@ -25,7 +25,7 @@ class InterviewSkillControllerTest {
         .andExpect(jsonPath("$[0].id").value("ai-agent-dev"))
         .andExpect(jsonPath("$[0].displayName").value("AI Agent 开发"))
         .andExpect(jsonPath("$[0].group").value("JOB"))
-        .andExpect(jsonPath("$[0].defaultCompetencies", hasSize(6)))
+        .andExpect(jsonPath("$[0].defaultCompetencies", hasSize(7)))
         .andExpect(jsonPath("$[0].persona").doesNotExist())
         .andExpect(jsonPath("$[0].rubric").doesNotExist())
         .andExpect(jsonPath("$[0].references").doesNotExist())

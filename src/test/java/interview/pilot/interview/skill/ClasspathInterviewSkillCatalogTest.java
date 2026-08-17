@@ -7,6 +7,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 class ClasspathInterviewSkillCatalogTest {
   @Test
@@ -66,27 +69,20 @@ class ClasspathInterviewSkillCatalogTest {
   }
 
   @Test
-  void loadsTheConciseJavaPersonaWithoutChangingLegacySkillMetadata()
-      throws Exception {
+  void loadsTheConciseJavaPersonaWithoutInternalRagEnums() {
     InterviewSkill java = new ClasspathInterviewSkillCatalog().require("java-backend");
     assertThat(java.persona())
         .contains("## 决策原则")
         .contains("## RAG 资料使用规则")
         .doesNotContain("GENERATE_SCENARIO", "VERIFY_FACT", "competencies.yml", "stages.yml");
+  }
 
-    String metadata = new ClassPathResource("skills/ai-agent-dev/skill.meta.yml")
-        .getContentAsString(StandardCharsets.UTF_8);
-    assertThat(metadata)
-        .contains("defaultStages:")
-        .contains("references:")
-        .contains("retrievalScopes:")
-        .contains("ragKeywords:")
-        .contains("  - rag.search")
-        .contains("ragEnabled: false")
-        .contains("toolsEnabled: false")
-        .contains("allowedTools:")
-        .doesNotContain("depthSignalKeywords:")
-        .doesNotContain("concreteEvidenceKeywords:");
+  @Test
+  void keepsTheCustomSkillOnTheLegacyContract() {
+    InterviewSkill custom = new ClasspathInterviewSkillCatalog().require("custom");
+
+    assertThat(custom.schemaVersion()).isEqualTo(1);
+    assertThat(custom.defaultCompetencies()).contains("岗位需求理解", "技术正确性", "方案权衡");
   }
 
   @Test
@@ -122,6 +118,52 @@ class ClasspathInterviewSkillCatalogTest {
         .containsExactlyElementsOf(java.competencySpecs().stream().map(CompetencySpec::name).toList());
     assertThat(java.retrievalPolicy().enabled()).isFalse();
     assertThat(java.snapshot().schemaVersion()).isEqualTo(4);
+  }
+
+  @Test
+  void everyCuratedInterviewDirectionUsesTheConciseV4Contract() {
+    InterviewSkillCatalog catalog = new ClasspathInterviewSkillCatalog();
+    List<String> migrated = catalog.list().stream()
+        .filter(skill -> skill.schemaVersion() == 4)
+        .map(InterviewSkill::id)
+        .toList();
+    assertThat(migrated).hasSize(7).doesNotContain("custom");
+    Map<String, Set<String>> allowedScopes = Map.of(
+        "ai-agent-dev", Set.of("ai-agent", "tool-use", "rag", "mcp", "system-design"),
+        "algorithm", Set.of("algorithm-data-structures", "complexity", "edge-cases"),
+        "frontend", Set.of("javascript", "react-vue", "browser", "css", "frontend-performance"),
+        "java-backend", Set.of("java", "concurrency", "spring", "transaction", "mysql",
+            "database", "redis", "cache", "distributed", "high-availability", "mq"),
+        "python-backend", Set.of("python", "django-flask", "database", "distributed"),
+        "system-design", Set.of(
+            "system-design-scenarios", "distributed", "high-availability", "database", "mq"),
+        "test-development", Set.of("test-development", "automation", "quality", "ci"));
+
+    for (String id : migrated) {
+      InterviewSkill skill = catalog.require(id);
+      Set<String> stageIds = skill.stages().stream().map(SkillStageSpec::id).collect(
+          java.util.stream.Collectors.toSet());
+
+      assertThat(skill.schemaVersion()).as(id).isEqualTo(4);
+      assertThat(skill.references()).as(id).isEmpty();
+      assertThat(skill.defaultCompetencies()).as(id)
+          .containsExactlyElementsOf(skill.competencySpecs().stream().map(CompetencySpec::name).toList());
+      assertThat(skill.competencySpecs()).as(id).allSatisfy(spec -> {
+        assertThat(spec.stageId()).isIn(stageIds);
+        assertThat(spec.requiredEvidence()).isNotEmpty();
+        assertThat(spec.questionModes()).isNotEmpty();
+        assertThat(spec.followUpAxes()).isNotEmpty();
+        assertThat(spec.retrievalPolicy().scopes()).isSubsetOf(allowedScopes.get(id));
+      });
+    }
+
+    assertThat(catalog.require("algorithm").competencySpecs())
+        .filteredOn(spec -> spec.id().equals("complexity_analysis"))
+        .singleElement().satisfies(spec -> assertThat(spec.retrievalPolicy().scopes())
+            .containsExactly("algorithm-data-structures", "complexity"));
+    assertThat(catalog.require("frontend").competencySpecs())
+        .filteredOn(spec -> spec.id().equals("project_ownership"))
+        .singleElement().satisfies(spec -> assertThat(spec.retrievalPolicy().enabled()).isFalse());
   }
 
   private String resource(String filename) throws Exception {

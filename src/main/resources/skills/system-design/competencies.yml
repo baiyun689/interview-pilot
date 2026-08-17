@@ -1,0 +1,49 @@
+competencies:
+  - id: requirements_clarification
+    name: 需求澄清
+    stage: requirement_clarification
+    objective: 验证功能范围、访问模式、质量目标和约束识别
+    evidence: [核心用例, 范围边界, 访问模式, SLO 与约束]
+    modes: [ARCHITECTURE, TRADEOFF]
+    probes: [use-case, scope, access, slo]
+    ragScopes: [system-design-scenarios]
+  - id: scale_estimation
+    name: 规模估算
+    stage: requirement_clarification
+    objective: 验证流量、数据量、带宽、存储和容量假设
+    evidence: [流量估算, 数据规模, 峰值假设, 容量推导]
+    modes: [ARCHITECTURE, METRICS, TRADEOFF]
+    probes: [traffic, data, peak, capacity]
+    ragScopes: [system-design-scenarios, high-availability]
+  - id: architecture_decomposition
+    name: 架构分解
+    stage: architecture_design
+    objective: 验证模块边界、接口、数据流和关键链路设计
+    evidence: [模块职责, 接口边界, 主数据流, 选型依据]
+    modes: [ARCHITECTURE, FAILURE, TRADEOFF]
+    probes: [component, interface, flow, rationale]
+    ragScopes: [system-design-scenarios, distributed]
+  - id: data_consistency
+    name: 数据与一致性
+    stage: architecture_design
+    objective: 验证数据模型、分区复制、一致性和消息语义取舍
+    evidence: [数据模型, 分区与复制, 一致性选择, 重复与顺序处理]
+    modes: [MECHANISM, ARCHITECTURE, FAILURE, TRADEOFF]
+    probes: [model, partition, consistency, messaging]
+    ragScopes: [database, distributed, mq]
+  - id: availability_recovery
+    name: 可用性与恢复
+    stage: failure_analysis
+    objective: 验证故障检测、隔离、降级、恢复和事故响应
+    evidence: [故障模型, 检测与隔离, 降级恢复, SLO 与演练]
+    modes: [ARCHITECTURE, FAILURE, METRICS, TRADEOFF]
+    probes: [failure, detection, degradation, recovery]
+    ragScopes: [high-availability, distributed]
+  - id: architecture_evolution
+    name: 方案演进
+    stage: failure_analysis
+    objective: 验证瓶颈治理、迁移发布、成本和持续演进
+    evidence: [瓶颈识别, 演进路径, 迁移回滚, 成本取舍]
+    modes: [ARCHITECTURE, FAILURE, METRICS, TRADEOFF]
+    probes: [bottleneck, evolution, migration, cost]
+    ragScopes: [system-design-scenarios, high-availability]

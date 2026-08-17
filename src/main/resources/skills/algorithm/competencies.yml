@@ -1,0 +1,48 @@
+competencies:
+  - id: problem_modeling
+    name: 问题建模
+    stage: problem_modeling
+    objective: 验证输入输出、约束、目标和隐含假设的澄清能力
+    evidence: [输入输出定义, 规模约束, 特殊条件, 可行解方向]
+    modes: [CONCEPT, CODING, TRADEOFF]
+    probes: [input, constraint, assumption, decomposition]
+    ragScopes: [algorithm-data-structures]
+  - id: data_structure_choice
+    name: 数据结构选择
+    stage: solution_design
+    objective: 验证数据结构选型及其操作复杂度依据
+    evidence: [访问模式, 数据结构特性, 选型依据, 替代方案]
+    modes: [CONCEPT, MECHANISM, CODING, TRADEOFF]
+    probes: [operation, structure, rationale, alternative]
+    ragScopes: [algorithm-data-structures, complexity]
+  - id: algorithm_correctness
+    name: 算法正确性
+    stage: solution_design
+    objective: 验证算法思路、不变量和正确性说明
+    evidence: [核心步骤, 不变量或证明, 终止条件, 反例检查]
+    modes: [MECHANISM, CODING, FAILURE]
+    probes: [invariant, proof, termination, counterexample]
+    ragScopes: [algorithm-data-structures]
+  - id: complexity_analysis
+    name: 复杂度分析
+    stage: solution_design
+    objective: 验证时间空间复杂度分析和优化依据
+    evidence: [时间复杂度, 空间复杂度, 瓶颈来源, 优化代价]
+    modes: [CONCEPT, MECHANISM, CODING, TRADEOFF]
+    probes: [time, space, bottleneck, optimization]
+    ragScopes: [algorithm-data-structures, complexity]
+  - id: boundary_conditions
+    name: 边界条件
+    stage: coding_readiness
+    objective: 验证空输入、极值、重复、溢出和非法状态处理
+    evidence: [边界枚举, 非法输入, 极值与溢出, 对应测试]
+    modes: [CODING, FAILURE]
+    probes: [empty, extreme, duplicate, overflow]
+    ragScopes: [algorithm-data-structures, edge-cases]
+  - id: coding_expression
+    name: 编码表达
+    stage: coding_readiness
+    objective: 验证实现清晰度、可运行性和验证方法
+    evidence: [清晰实现, 命名与结构, 测试样例, 错误修正]
+    modes: [CODING, FAILURE]
+    probes: [implementation, readability, test, correction]

@@ -1,0 +1,56 @@
+competencies:
+  - id: project_ownership
+    name: 项目深挖
+    stage: project_deep_dive
+    objective: 验证个人贡献、业务约束、效果指标和失败处理
+    evidence: [个人贡献边界, 业务约束, 质量指标, 失败与改进]
+    modes: [PROJECT, FAILURE, METRICS, TRADEOFF]
+    probes: [ownership, constraint, metric, incident]
+  - id: agent_architecture
+    name: Agent 架构
+    stage: architecture
+    objective: 验证任务循环、状态、记忆、终止条件和失败恢复
+    evidence: [状态模型, 控制循环, 记忆边界, 终止与恢复]
+    modes: [PROJECT, ARCHITECTURE, FAILURE, TRADEOFF]
+    probes: [state, control, memory, recovery]
+    ragScopes: [ai-agent, system-design]
+  - id: prompt_engineering
+    name: Prompt 工程
+    stage: architecture
+    objective: 验证结构化输出、边界控制、防注入和回归能力
+    evidence: [提示边界, 结构化输出, 注入防护, 回归评估]
+    modes: [PROJECT, MECHANISM, FAILURE, METRICS]
+    probes: [boundary, structure, security, evaluation]
+    ragScopes: [ai-agent]
+  - id: rag_design
+    name: RAG 设计
+    stage: architecture
+    objective: 验证可评估、可溯源、可演进的检索增强设计
+    evidence: [切分依据, 召回与重排, 相关性评估, 溯源与新鲜度]
+    modes: [PROJECT, MECHANISM, ARCHITECTURE, FAILURE, METRICS, TRADEOFF]
+    probes: [chunking, retrieval, rerank, evaluation, provenance]
+    ragScopes: [rag]
+  - id: tool_orchestration
+    name: 工具调用
+    stage: architecture
+    objective: 验证工具和 MCP 的接口、权限、重试、沙箱与审计设计
+    evidence: [Schema 约束, 权限与沙箱, 重试幂等, 审计与注入防护]
+    modes: [PROJECT, ARCHITECTURE, FAILURE, TRADEOFF]
+    probes: [schema, permission, retry, audit]
+    ragScopes: [tool-use, mcp]
+  - id: evaluation_observability
+    name: 评估与可观测性
+    stage: reliability
+    objective: 验证离线评估、线上指标、追踪和质量防回归
+    evidence: [评测集, 线上质量指标, Trace 与归因, 回归门禁]
+    modes: [PROJECT, METRICS, FAILURE, TRADEOFF]
+    probes: [dataset, metric, tracing, regression]
+    ragScopes: [ai-agent]
+  - id: production_reliability
+    name: 生产可靠性
+    stage: reliability
+    objective: 验证模型错误、注入、依赖故障、延迟和成本控制
+    evidence: [超时重试, 降级兜底, 注入防护, 延迟成本监控]
+    modes: [PROJECT, ARCHITECTURE, FAILURE, METRICS, TRADEOFF]
+    probes: [failure, fallback, security, latency, cost]
+    ragScopes: [ai-agent, system-design]
