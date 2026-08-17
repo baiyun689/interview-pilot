@@ -20,10 +20,8 @@ import interview.pilot.interview.domain.AnswerEvaluation;
 import interview.pilot.interview.domain.AnswerAttemptStatus;
 import interview.pilot.interview.domain.DecisionContext;
 import interview.pilot.interview.domain.Difficulty;
-import interview.pilot.interview.domain.DifficultyAdjustment;
 import interview.pilot.interview.domain.GeneratedQuestion;
 import interview.pilot.interview.domain.InterviewDecision;
-import interview.pilot.interview.domain.InterviewDecisionPolicy;
 import interview.pilot.interview.domain.InterviewPlan;
 import interview.pilot.interview.domain.JobRequirements;
 import interview.pilot.interview.domain.NextStep;
@@ -45,6 +43,9 @@ import interview.pilot.knowledge.retrieval.KnowledgeScopeResolver;
 import interview.pilot.knowledge.retrieval.RetrievalIntent;
 import interview.pilot.knowledge.retrieval.ValidatedKnowledgeScope;
 import interview.pilot.resume.domain.ResumeProfile;
+import interview.pilot.interview.strategy.DefaultInterviewStrategy;
+import interview.pilot.interview.strategy.InterviewStrategy;
+import interview.pilot.interview.strategy.TurnDirective;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 import interview.pilot.common.observability.AiMetrics;
 import tools.jackson.core.JacksonException;
@@ -63,7 +64,7 @@ public class SubmitAnswerService {
   private final InterviewTurnClaimer claimer;
   private final AnswerEvaluator evaluator;
   private final QuestionGenerator questionGenerator;
-  private final InterviewDecisionPolicy decisionPolicy = new InterviewDecisionPolicy();
+  private final InterviewStrategy strategy = new DefaultInterviewStrategy();
   private final InterviewDecisionContextFactory decisionContexts =
       new InterviewDecisionContextFactory();
   private final InterviewSessionRepository sessions;
@@ -170,7 +171,7 @@ public class SubmitAnswerService {
           context.providerId(), context.modelName(), claim.turnNo(), context.currentDifficulty(),
           context.currentCompetency(), context.question(), context.answer(),
           context.requirements().competencies(), context.plan().competencies(),
-          context.priorEvidence(), context.skill(), currentRag));
+          context.priorEvidence(), context.skill(), currentRag, context.currentDirective()));
       long evalMs = (System.nanoTime() - evalStart) / 1_000_000;
       if (evaluation == null) {
         throw new IllegalStateException("Answer evaluator returned no result");
@@ -181,11 +182,13 @@ public class SubmitAnswerService {
 
       DecisionContext decisionContext = decisionContexts.create(
           context.currentDifficulty(), context.currentCompetency(),
-          context.requirements().competencies(), claim.turnNo(), context.plan().totalTurnBudget(),
+          context.plan().competencies(), claim.turnNo(), context.plan().totalTurnBudget(),
           MINIMUM_DECISION_CONFIDENCE, context.completedTurns(), evaluation);
-      InterviewDecision decision = decisionPolicy.apply(
-          trustedSuggestion(evaluation.suggestedDecision(), context.plan()), decisionContext);
-      Difficulty nextDifficulty = adjust(context.currentDifficulty(), decision.difficultyAdjustment());
+      var strategyOutcome = strategy.nextTurn(context.plan(), decisionContext, evaluation);
+      InterviewDecision decision = strategyOutcome.decision();
+      TurnDirective nextDirective = strategyOutcome.nextDirective();
+      Difficulty nextDifficulty = nextDirective == null
+          ? context.currentDifficulty() : nextDirective.difficulty();
       boolean finish = decision.nextStep() == NextStep.FINISH
           || claim.turnNo() >= context.plan().totalTurnBudget();
       log.info("interview session={} turn={} step=decision nextStep={} targetCompetency={} nextDifficulty={} confidence={}",
@@ -203,7 +206,7 @@ public class SubmitAnswerService {
           new QuestionContext(
               context.plan(), context.resume(), context.requirements(), nextDifficulty,
               context.question(), context.answer(), context.skill()).withRag(nextRag),
-          decision);
+          decision, nextDirective);
       long genMs = (System.nanoTime() - genStart) / 1_000_000;
       validateNextQuestion(nextQuestion, decision, context.plan(), finish);
       if (!finish) {
@@ -217,7 +220,7 @@ public class SubmitAnswerService {
       AnswerProcessingResult result = new AnswerProcessingResult(
           sessionId, request.requestId(), claim.turnNo(), evaluation, decision, nextQuestion,
           nextDifficulty, finish ? SessionStatus.EVALUATING : SessionStatus.INTERVIEWING, false,
-          nextRag);
+          nextRag, finish ? null : nextDirective);
       String snapshot = resultCodec.write(result);
       Long ownerId = requireOwner(user);
       Boolean finalized = requiresNew.execute(
@@ -300,10 +303,13 @@ public class SubmitAnswerService {
       throw new IllegalStateException("Stored interview target set is invalid");
     }
     List<InterviewTurnEntity> allTurns = turns.findAllBySessionIdOrderByTurnNo(session.getId());
+    TurnDirective currentDirective = readDirective(
+        session.getContextSnapshot(), plan, current.getTargetCompetency(), current.getDifficulty());
     return new WorkContext(
         session.getProviderId(), session.getModelName(), session.getDifficulty(),
         current.getTargetCompetency(), current.getQuestionText(), current.getAnswerText(),
-        plan, requirements, profile, skill, historicalEvidence(allTurns, publicSessionId),
+        plan, requirements, profile, skill, currentDirective,
+        historicalEvidence(allTurns, publicSessionId),
         completedTurns(allTurns, publicSessionId));
   }
 
@@ -382,6 +388,9 @@ public class SubmitAnswerService {
         nextTurn.setRagContextSnapshot(
             objectMapper.writeValueAsString(result.nextRagSnapshot()));
       }
+      if (result.nextDirective() != null) {
+        session.setContextSnapshot(objectMapper.writeValueAsString(result.nextDirective()));
+      }
       turns.save(nextTurn);
       session.advanceTo(nextTurnNo, result.nextDifficulty());
     }
@@ -430,26 +439,8 @@ public class SubmitAnswerService {
     }
   }
 
-  private Difficulty adjust(Difficulty current, DifficultyAdjustment adjustment) {
-    return switch (adjustment) {
-      case KEEP -> current;
-      case INCREASE -> current == Difficulty.EASY ? Difficulty.MEDIUM : Difficulty.HARD;
-      case DECREASE -> current == Difficulty.HARD ? Difficulty.MEDIUM : Difficulty.EASY;
-    };
-  }
-
   private boolean sameCompetency(String left, String right) {
     return key(left).equals(key(right));
-  }
-
-  private InterviewDecision trustedSuggestion(
-      InterviewDecision suggestion, InterviewPlan plan) {
-    if (suggestion != null && suggestion.nextStep() == NextStep.NEXT_TOPIC
-        && plan.competencies().stream().noneMatch(
-            allowed -> sameCompetency(allowed, suggestion.targetCompetency()))) {
-      return null;
-    }
-    return suggestion;
   }
 
   private boolean containsAllCompetencies(List<String> allowed, List<String> required) {
@@ -469,6 +460,24 @@ public class SubmitAnswerService {
     } catch (JacksonException | IllegalArgumentException exception) {
       throw new IllegalStateException("Stored interview snapshot is invalid");
     }
+  }
+
+  private TurnDirective readDirective(
+      String snapshot, InterviewPlan plan, String competency, Difficulty difficulty) {
+    if (snapshot != null && !snapshot.isBlank()) {
+      try {
+        TurnDirective directive = objectMapper.readValue(snapshot, TurnDirective.class);
+        if (directive != null && sameCompetency(directive.competency(), competency)) {
+          return directive;
+        }
+      } catch (JacksonException | IllegalArgumentException ignored) {
+        // Legacy sessions derive their directive from the immutable plan below.
+      }
+    }
+    var item = plan.itemFor(competency);
+    return new TurnDirective(
+        item.stageId(), item.competency(), difficulty, item.evidenceTargets(),
+        item.questionModes().getFirst(), item.ragEnabled(), "LEGACY_PLAN_DERIVED");
   }
 
   private BusinessException retryableFailure() {
@@ -573,6 +582,7 @@ public class SubmitAnswerService {
       JobRequirements requirements,
       ResumeProfile resume,
       SkillSnapshot skill,
+      TurnDirective currentDirective,
       List<String> priorEvidence,
       List<InterviewDecisionContextFactory.CompletedTurnEvidence> completedTurns) {
 

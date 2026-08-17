@@ -7,7 +7,12 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 
-public record InterviewPlan(List<String> competencies, int totalTurnBudget) {
+public record InterviewPlan(
+    List<String> competencies,
+    int totalTurnBudget,
+    Integer schemaVersion,
+    List<InterviewPlanItem> items,
+    List<String> omittedCompetencies) {
 
   public InterviewPlan {
     Objects.requireNonNull(competencies, "competencies must not be null");
@@ -29,5 +34,58 @@ public record InterviewPlan(List<String> competencies, int totalTurnBudget) {
     if (totalTurnBudget < 5 || totalTurnBudget > 15) {
       throw new IllegalArgumentException("totalTurnBudget must be between 5 and 15");
     }
+    if (schemaVersion == null || schemaVersion <= 0) schemaVersion = 1;
+    items = items == null || items.isEmpty()
+        ? legacyItems(competencies, totalTurnBudget)
+        : List.copyOf(items);
+    if (items.stream().mapToInt(InterviewPlanItem::turnBudget).sum() != totalTurnBudget) {
+      throw new IllegalArgumentException("plan item budgets must equal totalTurnBudget");
+    }
+    if (schemaVersion >= 2 && items.stream().anyMatch(item -> item.turnBudget() == 0)) {
+      throw new IllegalArgumentException("execution plan items must have a positive turn budget");
+    }
+    for (String competency : competencies) {
+      if (items.stream().noneMatch(item -> same(item.competency(), competency))) {
+        throw new IllegalArgumentException("every competency must have a plan item");
+      }
+    }
+    omittedCompetencies = omittedCompetencies == null ? List.of()
+        : omittedCompetencies.stream()
+            .filter(value -> value != null && !value.isBlank())
+            .map(String::trim)
+            .distinct()
+            .toList();
+  }
+
+  public InterviewPlan(List<String> competencies, int totalTurnBudget) {
+    this(competencies, totalTurnBudget, 1, null, List.of());
+  }
+
+  public static InterviewPlan execution(
+      List<InterviewPlanItem> items, int totalTurnBudget, List<String> omittedCompetencies) {
+    return new InterviewPlan(
+        items.stream().map(InterviewPlanItem::competency).toList(),
+        totalTurnBudget, 2, items, omittedCompetencies);
+  }
+
+  public InterviewPlanItem itemFor(String competency) {
+    return items.stream().filter(item -> same(item.competency(), competency)).findFirst()
+        .orElseThrow(() -> new IllegalArgumentException("competency is not in the plan"));
+  }
+
+  private static List<InterviewPlanItem> legacyItems(
+      List<String> competencies, int totalTurnBudget) {
+    List<InterviewPlanItem> result = new ArrayList<>();
+    int base = totalTurnBudget / competencies.size();
+    int remainder = totalTurnBudget % competencies.size();
+    for (int index = 0; index < competencies.size(); index++) {
+      result.add(InterviewPlanItem.legacy(
+          competencies.get(index), base + (index < remainder ? 1 : 0), index));
+    }
+    return List.copyOf(result);
+  }
+
+  private static boolean same(String left, String right) {
+    return left.trim().equalsIgnoreCase(right.trim());
   }
 }

@@ -23,6 +23,9 @@ import interview.pilot.interview.domain.InterviewDecision;
 import interview.pilot.interview.domain.NextStep;
 import interview.pilot.interview.domain.DifficultyAdjustment;
 import interview.pilot.resume.domain.ResumeProfile;
+import interview.pilot.interview.strategy.TurnDirective;
+import interview.pilot.interview.skill.InterviewQuestionMode;
+import interview.pilot.interview.rag.RagContextSnapshot;
 import tools.jackson.databind.ObjectMapper;
 
 class AiInterviewComponentsTest {
@@ -110,13 +113,22 @@ class AiInterviewComponentsTest {
         new ClassPathResource("prompts/next-question-user.st"));
 
     assertThat(planner.plan("qwen", resume, job, Difficulty.HARD, 8)).isSameAs(plan);
-    assertThat(generator.firstQuestion("qwen", plan, resume, job)).isSameAs(question);
+    var directive = new TurnDirective(
+        "technical_depth", "Java", Difficulty.HARD, List.of("机制理解"),
+        InterviewQuestionMode.MECHANISM, false, "PLAN_FIRST_TURN");
+    assertThat(generator.firstQuestion(
+        "qwen", plan, resume, job, null, RagContextSnapshot.notConfigured(), directive))
+        .isSameAs(question);
 
     ArgumentCaptor<AiRequest> requests = ArgumentCaptor.forClass(AiRequest.class);
     verify(invoker, org.mockito.Mockito.times(2)).invoke(requests.capture(), org.mockito.ArgumentMatchers.any());
     assertThat(requests.getAllValues().get(0).systemPrompt())
         .contains("\"competencies\"")
         .contains("\"totalTurnBudget\"");
+    assertThat(requests.getAllValues().get(1).userPrompt())
+        .contains("\"turnDirective\"")
+        .contains("\"evidenceTargets\":[\"机制理解\"]")
+        .contains("\"questionMode\":\"MECHANISM\"");
     assertThat(requests.getAllValues()).allSatisfy(request -> {
       assertThat(request.providerId()).isEqualTo("qwen");
       assertThat(request.systemPrompt())

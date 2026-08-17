@@ -9,6 +9,7 @@ import interview.pilot.interview.rag.RagContextSnapshot;
 import interview.pilot.knowledge.retrieval.RetrievedKnowledge;
 import interview.pilot.resume.domain.ResumeProfile;
 import interview.pilot.interview.skill.SkillSnapshot;
+import interview.pilot.interview.strategy.TurnDirective;
 
 public interface QuestionGenerator {
   GeneratedQuestion firstQuestion(
@@ -24,6 +25,13 @@ public interface QuestionGenerator {
       String providerId, InterviewPlan plan, ResumeProfile resume,
       JobRequirements job, SkillSnapshot skill, RagContextSnapshot ragSnapshot) {
     return firstQuestion(providerId, plan, resume, job, skill);
+  }
+
+  default GeneratedQuestion firstQuestion(
+      String providerId, InterviewPlan plan, ResumeProfile resume,
+      JobRequirements job, SkillSnapshot skill, RagContextSnapshot ragSnapshot,
+      TurnDirective directive) {
+    return firstQuestion(providerId, plan, resume, job, skill, ragSnapshot);
   }
 
   GeneratedQuestion nextQuestion(
@@ -42,7 +50,7 @@ public interface QuestionGenerator {
       String expectedModel,
       QuestionContext context,
       InterviewDecision decision,
-      RagContextSnapshot ragSnapshot) {
+      TurnDirective directive) {
     return nextQuestion(providerId, expectedModel, context, decision);
   }
 }

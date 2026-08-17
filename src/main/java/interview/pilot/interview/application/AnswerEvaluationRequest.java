@@ -6,6 +6,7 @@ import java.util.Objects;
 import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.rag.RagContextSnapshot;
 import interview.pilot.interview.skill.SkillSnapshot;
+import interview.pilot.interview.strategy.TurnDirective;
 
 public record AnswerEvaluationRequest(
     String providerId,
@@ -19,7 +20,8 @@ public record AnswerEvaluationRequest(
     List<String> allowedCompetencies,
     List<String> priorEvidence,
     SkillSnapshot skill,
-    RagContextSnapshot ragContext) {
+    RagContextSnapshot ragContext,
+    TurnDirective turnDirective) {
 
   public AnswerEvaluationRequest(
       String providerId, String modelName, int turnNo, Difficulty difficulty,
@@ -27,7 +29,16 @@ public record AnswerEvaluationRequest(
       List<String> allowedCompetencies, List<String> priorEvidence) {
     this(providerId, modelName, turnNo, difficulty, competency, question, answer,
         requiredCompetencies, allowedCompetencies, priorEvidence, null,
-        RagContextSnapshot.notConfigured());
+        RagContextSnapshot.notConfigured(), null);
+  }
+
+  public AnswerEvaluationRequest(
+      String providerId, String modelName, int turnNo, Difficulty difficulty,
+      String competency, String question, String answer, List<String> requiredCompetencies,
+      List<String> allowedCompetencies, List<String> priorEvidence,
+      SkillSnapshot skill, RagContextSnapshot ragContext) {
+    this(providerId, modelName, turnNo, difficulty, competency, question, answer,
+        requiredCompetencies, allowedCompetencies, priorEvidence, skill, ragContext, null);
   }
 
   public AnswerEvaluationRequest {

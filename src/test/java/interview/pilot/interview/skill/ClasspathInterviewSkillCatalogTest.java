@@ -30,6 +30,16 @@ class ClasspathInterviewSkillCatalogTest {
     assertThat(catalog.require("java-backend").rubric()).contains("评分标准");
     assertThat(catalog.require("java-backend").references()).contains("java.md", "mysql.md");
     assertThat(catalog.require("java-backend").version()).matches("[0-9a-f]{64}");
+    assertThat(catalog.require("java-backend").stages())
+        .extracting(SkillStageSpec::id)
+        .containsExactly("project_deep_dive", "technical_depth", "reliability");
+    assertThat(catalog.require("java-backend").competencySpecs())
+        .filteredOn(spec -> spec.id().equals("spring_transaction"))
+        .singleElement()
+        .satisfies(spec -> {
+          assertThat(spec.requiredEvidence()).contains("事务传播", "失败处理");
+          assertThat(spec.retrievalPolicy().enabled()).isTrue();
+        });
   }
 
   @Test

@@ -7,6 +7,7 @@ import interview.pilot.interview.domain.JobRequirements;
 import interview.pilot.interview.rag.RagContextSnapshot;
 import interview.pilot.interview.skill.SkillSnapshot;
 import interview.pilot.knowledge.retrieval.ValidatedKnowledgeScope;
+import interview.pilot.interview.strategy.TurnDirective;
 
 public record InterviewCreation(
     Long userAccountId,
@@ -22,7 +23,8 @@ public record InterviewCreation(
     InterviewPlan plan,
     GeneratedQuestion firstQuestion,
     ValidatedKnowledgeScope knowledgeScope,
-    RagContextSnapshot firstRagSnapshot) {
+    RagContextSnapshot firstRagSnapshot,
+    TurnDirective firstDirective) {
 
   public InterviewCreation(
       Long userAccountId, Long resumeId, String jobTitle, String jdText,
@@ -31,6 +33,6 @@ public record InterviewCreation(
       GeneratedQuestion firstQuestion) {
     this(userAccountId, resumeId, jobTitle, jdText, difficulty, totalTurnBudget,
         providerId, modelName, skillSnapshot, requirements, plan, firstQuestion,
-        null, RagContextSnapshot.notConfigured());
+        null, RagContextSnapshot.notConfigured(), null);
   }
 }

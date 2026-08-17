@@ -9,6 +9,7 @@ import interview.pilot.interview.domain.GeneratedQuestion;
 import interview.pilot.interview.domain.InterviewDecision;
 import interview.pilot.interview.domain.SessionStatus;
 import interview.pilot.interview.rag.RagContextSnapshot;
+import interview.pilot.interview.strategy.TurnDirective;
 
 public record AnswerProcessingResult(
     UUID sessionId,
@@ -20,14 +21,24 @@ public record AnswerProcessingResult(
     Difficulty nextDifficulty,
     SessionStatus sessionStatus,
     boolean replayed,
-    RagContextSnapshot nextRagSnapshot) {
+    RagContextSnapshot nextRagSnapshot,
+    TurnDirective nextDirective) {
 
   public AnswerProcessingResult(
       UUID sessionId, UUID requestId, int turnNo, AnswerEvaluation evaluation,
       InterviewDecision decision, GeneratedQuestion nextQuestion,
       Difficulty nextDifficulty, SessionStatus sessionStatus, boolean replayed) {
     this(sessionId, requestId, turnNo, evaluation, decision, nextQuestion,
-        nextDifficulty, sessionStatus, replayed, RagContextSnapshot.notConfigured());
+        nextDifficulty, sessionStatus, replayed, RagContextSnapshot.notConfigured(), null);
+  }
+
+  public AnswerProcessingResult(
+      UUID sessionId, UUID requestId, int turnNo, AnswerEvaluation evaluation,
+      InterviewDecision decision, GeneratedQuestion nextQuestion,
+      Difficulty nextDifficulty, SessionStatus sessionStatus, boolean replayed,
+      RagContextSnapshot nextRagSnapshot) {
+    this(sessionId, requestId, turnNo, evaluation, decision, nextQuestion,
+        nextDifficulty, sessionStatus, replayed, nextRagSnapshot, null);
   }
 
   public AnswerProcessingResult {
@@ -50,6 +61,6 @@ public record AnswerProcessingResult(
   public AnswerProcessingResult asReplay() {
     return new AnswerProcessingResult(
         sessionId, requestId, turnNo, evaluation, decision, nextQuestion,
-        nextDifficulty, sessionStatus, true, nextRagSnapshot);
+        nextDifficulty, sessionStatus, true, nextRagSnapshot, nextDirective);
   }
 }

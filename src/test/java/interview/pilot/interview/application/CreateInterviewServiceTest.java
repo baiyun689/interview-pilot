@@ -60,7 +60,7 @@ class CreateInterviewServiceTest {
     when(extractor.extract(eq("deepseek"), eq("Build reliable Java services"), any())).thenReturn(job);
     when(planner.plan(eq("deepseek"), eq(profile), eq(job), eq(Difficulty.MEDIUM), eq(8), any()))
         .thenReturn(plan);
-    when(questions.firstQuestion(eq("deepseek"), eq(plan), eq(profile), eq(job), any(), any()))
+    when(questions.firstQuestion(eq("deepseek"), eq(plan), eq(profile), eq(job), any(), any(), any()))
         .thenReturn(first);
     when(validator.validate(any(ResumeProfile.class))).thenReturn(Set.of());
     when(store.create(any())).thenReturn(response("deepseek", "deepseek-chat"));
@@ -81,7 +81,7 @@ class CreateInterviewServiceTest {
     verify(providers).resolveEnabled("deepseek");
     verify(extractor).extract(eq("deepseek"), eq("Build reliable Java services"), any());
     verify(planner).plan(eq("deepseek"), eq(profile), eq(job), eq(Difficulty.MEDIUM), eq(8), any());
-    verify(questions).firstQuestion(eq("deepseek"), eq(plan), eq(profile), eq(job), any(), any());
+    verify(questions).firstQuestion(eq("deepseek"), eq(plan), eq(profile), eq(job), any(), any(), any());
     verify(store).create(org.mockito.ArgumentMatchers.argThat(creation ->
         creation.skillSnapshot().id().equals("java-backend")
             && creation.skillSnapshot().rubric().contains("评分标准")));

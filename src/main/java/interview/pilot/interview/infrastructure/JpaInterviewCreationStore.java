@@ -74,6 +74,9 @@ public class JpaInterviewCreationStore implements InterviewCreationStore {
         session.setKnowledgeScopeSnapshot(
             objectMapper.writeValueAsString(creation.knowledgeScope()));
       }
+      if (creation.firstDirective() != null) {
+        session.setContextSnapshot(objectMapper.writeValueAsString(creation.firstDirective()));
+      }
       session.start();
       session = sessions.saveAndFlush(session);
 

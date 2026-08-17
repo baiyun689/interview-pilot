@@ -217,7 +217,7 @@ class SubmitAnswerConcurrencyIT {
     verify(answerEvaluator, times(1)).evaluate(any());
     verify(questionGenerator, times(1)).nextQuestion(
         org.mockito.ArgumentMatchers.eq("deepseek"),
-        org.mockito.ArgumentMatchers.eq("deepseek-chat"), any(), any());
+        org.mockito.ArgumentMatchers.eq("deepseek-chat"), any(), any(), any());
     assertThat(List.of(firstResult.replayed(), secondResult.replayed()))
         .containsExactlyInAnyOrder(false, true);
     assertThat(firstResult.evaluation()).isEqualTo(secondResult.evaluation());
@@ -244,7 +244,7 @@ class SubmitAnswerConcurrencyIT {
     });
     when(questionGenerator.nextQuestion(
         org.mockito.ArgumentMatchers.eq("deepseek"),
-        org.mockito.ArgumentMatchers.eq("deepseek-chat"), any(), any()))
+        org.mockito.ArgumentMatchers.eq("deepseek-chat"), any(), any(), any()))
         .thenReturn(new GeneratedQuestion("Explain Spring transactions.", "Spring"));
     UUID requestId = UUID.randomUUID();
     Future<AnswerProcessingResult> owner = executor.submit(() -> submitService.submit(LEGACY_USER,
@@ -272,7 +272,7 @@ class SubmitAnswerConcurrencyIT {
     });
     when(questionGenerator.nextQuestion(
         org.mockito.ArgumentMatchers.eq("deepseek"),
-        org.mockito.ArgumentMatchers.eq("deepseek-chat"), any(), any()))
+        org.mockito.ArgumentMatchers.eq("deepseek-chat"), any(), any(), any()))
         .thenReturn(new GeneratedQuestion("Explain Spring transactions.", "Spring"));
     UUID oldRequest = UUID.randomUUID();
     Future<AnswerProcessingResult> old = executor.submit(() -> submitService.submit(LEGACY_USER,
@@ -335,39 +335,28 @@ class SubmitAnswerConcurrencyIT {
   }
 
   @Test
-  void acceptedFinishMovesSessionToEvaluatingAndAtomicallyCreatesOneReportTask() {
+  void finishSuggestionCannotSkipACompetencyScheduledByThePlan() {
     var session = sessions.findBySessionId(sessionId).orElseThrow();
-    var job = jobs.findById(session.getJobProfileId()).orElseThrow();
-    job.setRequirementsSnapshot("{\"competencies\":[\"Java\"],\"preferredSkills\":[]}");
-    jobs.saveAndFlush(job);
     var finishSuggestion = new InterviewDecision(
         NextStep.FINISH, DifficultyAdjustment.INCREASE, "", "", "enough evidence", 0.9);
     when(answerEvaluator.evaluate(any())).thenReturn(new AnswerEvaluation(
         90, "Strong answer", List.of("version check"), List.of(), finishSuggestion));
+    when(questionGenerator.nextQuestion(
+        org.mockito.ArgumentMatchers.eq("deepseek"),
+        org.mockito.ArgumentMatchers.eq("deepseek-chat"), any(), any(), any()))
+        .thenReturn(new GeneratedQuestion("Explain Spring transactions.", "Spring"));
 
     AnswerProcessingResult result = submitService.submit(LEGACY_USER,
         sessionId, new SubmitAnswerRequest(UUID.randomUUID(), "Use optimistic versions"));
 
-    assertThat(result.decision().nextStep()).isEqualTo(NextStep.FINISH);
+    assertThat(result.decision().nextStep()).isEqualTo(NextStep.NEXT_TOPIC);
+    assertThat(result.decision().targetCompetency()).isEqualTo("Spring");
     assertThat(result.decision().difficultyAdjustment()).isEqualTo(DifficultyAdjustment.KEEP);
-    assertThat(result.nextQuestion()).isNull();
+    assertThat(result.nextQuestion()).isNotNull();
     assertThat(sessions.findBySessionId(sessionId).orElseThrow().getStatus())
-        .isEqualTo(SessionStatus.EVALUATING);
-    assertThat(turns.findAllBySessionIdOrderByTurnNo(session.getId())).hasSize(1);
-    assertThat(tasks.findByTaskTypeAndBizKey(
-            AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + sessionId))
-        .get()
-        .satisfies(task -> {
-          assertThat(task.getStatus()).isEqualTo(AsyncTaskStatus.PENDING);
-          try {
-            assertThat(objectMapper.readTree(task.getPayloadSnapshot()).get("sessionId").asText())
-                .isEqualTo(sessionId.toString());
-          } catch (tools.jackson.core.JacksonException exception) {
-            throw new AssertionError(exception);
-          }
-        });
-    assertThat(tasks.count()).isEqualTo(1);
-    verify(questionGenerator, times(0)).nextQuestion(any(), any(), any(), any());
+        .isEqualTo(SessionStatus.INTERVIEWING);
+    assertThat(turns.findAllBySessionIdOrderByTurnNo(session.getId())).hasSize(2);
+    assertThat(tasks.count()).isZero();
   }
 
   @Test
@@ -440,7 +429,7 @@ class SubmitAnswerConcurrencyIT {
     });
     when(questionGenerator.nextQuestion(
         org.mockito.ArgumentMatchers.eq("deepseek"),
-        org.mockito.ArgumentMatchers.eq("deepseek-chat"), any(), any())).thenAnswer(invocation -> {
+        org.mockito.ArgumentMatchers.eq("deepseek-chat"), any(), any(), any())).thenAnswer(invocation -> {
           assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
           return new GeneratedQuestion("Explain Spring transactions.", "Spring");
         });

@@ -83,6 +83,10 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
           ? (Map<String, Object>) map : Map.of();
       String icon = required(displayMap.get("icon"), id, "display.icon");
       List<String> competencies = strings(meta.get("defaultCompetencies"), id, true);
+      List<SkillStageSpec> stages = stages(meta, id);
+      List<CompetencySpec> competencySpecs = competencies(meta, id, competencies);
+      SkillRetrievalPolicy retrievalPolicy = retrievalPolicy(meta);
+      validateModel(id, competencies, stages, competencySpecs);
       List<String> references = strings(meta.get("references"), id, false);
       references.forEach(reference -> {
         if (!SAFE_REFERENCE.matcher(reference).matches()) {
@@ -93,10 +97,12 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
       String rubric = readRequired(id, "rubric.md");
       String version = sha256(String.join("\n",
           id, name, description, group.name(), icon,
-          String.join("|", competencies), persona, rubric, String.join("|", references)));
+          String.join("|", competencies), stages.toString(), competencySpecs.toString(),
+          retrievalPolicy.toString(), persona, rubric, String.join("|", references)));
       return new InterviewSkill(
           id, name, description, group, new InterviewSkill.Display(icon),
-          competencies, persona, rubric, references, version);
+          competencies, stages, competencySpecs, retrievalPolicy,
+          persona, rubric, references, version);
     } catch (IOException exception) {
       throw new IllegalStateException("无法读取面试 Skill 资源: " + metaResource, exception);
     }
@@ -123,6 +129,151 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
         .toList();
     if (required && values.isEmpty()) throw invalid("Skill 默认能力为空: " + id);
     return values;
+  }
+
+  @SuppressWarnings("unchecked")
+  private List<SkillStageSpec> stages(Map<String, Object> meta, String skillId) {
+    Object configured = meta.get("stages");
+    if (configured instanceof List<?> list && !list.isEmpty()) {
+      List<SkillStageSpec> result = new ArrayList<>();
+      for (Object item : list) {
+        if (!(item instanceof Map<?, ?> raw)) {
+          throw invalid("Skill stage 格式无效: " + skillId);
+        }
+        Map<String, Object> stage = (Map<String, Object>) raw;
+        result.add(new SkillStageSpec(
+            required(stage.get("id"), skillId, "stages.id"),
+            required(stage.get("purpose"), skillId, "stages.purpose")));
+      }
+      return List.copyOf(result);
+    }
+    List<String> legacy = strings(meta.get("defaultStages"), skillId, false);
+    if (legacy.isEmpty()) {
+      return List.of(new SkillStageSpec("technical_depth", "验证核心技术能力"));
+    }
+    return legacy.stream()
+        .map(stage -> new SkillStageSpec(stage, legacyStagePurpose(stage)))
+        .toList();
+  }
+
+  @SuppressWarnings("unchecked")
+  private List<CompetencySpec> competencies(
+      Map<String, Object> meta, String skillId, List<String> defaults) {
+    Object configured = meta.get("competencies");
+    if (!(configured instanceof List<?> list) || list.isEmpty()) {
+      List<CompetencySpec> result = new ArrayList<>();
+      for (int index = 0; index < defaults.size(); index++) {
+        result.add(CompetencySpec.legacy("legacy-" + (index + 1), defaults.get(index)));
+      }
+      return List.copyOf(result);
+    }
+
+    List<CompetencySpec> result = new ArrayList<>();
+    for (Object item : list) {
+      if (!(item instanceof Map<?, ?> raw)) {
+        throw invalid("Skill competency 格式无效: " + skillId);
+      }
+      Map<String, Object> competency = (Map<String, Object>) raw;
+      List<InterviewQuestionMode> modes = strings(
+          competency.get("questionModes"), skillId, false).stream()
+          .map(value -> parseQuestionMode(value, skillId))
+          .toList();
+      SkillRetrievalPolicy policy = competency.get("rag") instanceof Map<?, ?> rag
+          ? retrievalPolicy((Map<String, Object>) rag, List.of(), List.of())
+          : SkillRetrievalPolicy.disabled();
+      result.add(new CompetencySpec(
+          required(competency.get("id"), skillId, "competencies.id"),
+          required(competency.get("name"), skillId, "competencies.name"),
+          optional(competency.get("objective")),
+          strings(competency.get("requiredEvidence"), skillId, true),
+          modes,
+          strings(competency.get("followUpAxes"), skillId, false),
+          strings(competency.get("redFlags"), skillId, false),
+          integer(competency.get("followUpLimit"), 2, skillId, "followUpLimit"),
+          policy));
+    }
+    return List.copyOf(result);
+  }
+
+  @SuppressWarnings("unchecked")
+  private SkillRetrievalPolicy retrievalPolicy(Map<String, Object> meta) {
+    List<String> scopes = strings(meta.get("retrievalScopes"), "retrieval", false);
+    List<String> keywords = strings(meta.get("ragKeywords"), "retrieval", false);
+    if (meta.get("retrieval") instanceof Map<?, ?> retrieval) {
+      return retrievalPolicy((Map<String, Object>) retrieval, scopes, keywords);
+    }
+    boolean enabled = false;
+    if (meta.get("runtime") instanceof Map<?, ?> runtime) {
+      enabled = Boolean.TRUE.equals(((Map<String, Object>) runtime).get("ragEnabled"));
+    }
+    return new SkillRetrievalPolicy(
+        enabled, scopes, keywords,
+        enabled ? List.of("GENERATE_SCENARIO", "VERIFY_FACT") : List.of());
+  }
+
+  private SkillRetrievalPolicy retrievalPolicy(
+      Map<String, Object> configured, List<String> fallbackScopes,
+      List<String> fallbackKeywords) {
+    boolean enabled = Boolean.TRUE.equals(configured.get("enabled"));
+    List<String> scopes = strings(configured.get("scopes"), "retrieval", false);
+    if (scopes.isEmpty()) scopes = fallbackScopes;
+    List<String> keywords = strings(configured.get("triggerKeywords"), "retrieval", false);
+    if (keywords.isEmpty()) keywords = fallbackKeywords;
+    return new SkillRetrievalPolicy(
+        enabled, scopes, keywords,
+        strings(configured.get("allowedUses"), "retrieval", false));
+  }
+
+  private InterviewQuestionMode parseQuestionMode(String value, String skillId) {
+    try {
+      return InterviewQuestionMode.valueOf(value);
+    } catch (IllegalArgumentException exception) {
+      throw invalid("Skill question mode 无效: " + skillId + "/" + value);
+    }
+  }
+
+  private int integer(Object value, int fallback, String skillId, String field) {
+    if (value == null) return fallback;
+    if (value instanceof Number number) return number.intValue();
+    try {
+      return Integer.parseInt(value.toString());
+    } catch (NumberFormatException exception) {
+      throw invalid("Skill 数字字段无效: " + skillId + "/" + field);
+    }
+  }
+
+  private String optional(Object value) {
+    return value == null ? "" : value.toString().trim();
+  }
+
+  private String legacyStagePurpose(String stage) {
+    return switch (stage) {
+      case "project_deep_dive" -> "获取真实项目、个人贡献和结果证据";
+      case "architecture", "architecture_design", "agent_architecture" -> "验证架构设计和机制取舍";
+      case "failure_analysis", "reliability" -> "验证失败处理和生产可靠性";
+      case "requirement_clarification" -> "验证需求澄清和约束识别";
+      default -> "验证 " + stage + " 阶段的能力证据";
+    };
+  }
+
+  private void validateModel(
+      String skillId,
+      List<String> defaults,
+      List<SkillStageSpec> stages,
+      List<CompetencySpec> competencies) {
+    if (stages.stream().map(SkillStageSpec::id).map(String::toLowerCase).distinct().count()
+        != stages.size()) {
+      throw invalid("Skill stage ID 重复: " + skillId);
+    }
+    if (competencies.stream().map(CompetencySpec::id).map(String::toLowerCase).distinct().count()
+        != competencies.size()) {
+      throw invalid("Skill competency ID 重复: " + skillId);
+    }
+    for (String name : defaults) {
+      if (competencies.stream().noneMatch(spec -> spec.name().equalsIgnoreCase(name))) {
+        throw invalid("Skill 默认能力缺少结构化定义: " + skillId + "/" + name);
+      }
+    }
   }
 
   private String readRequired(String id, String filename) throws IOException {

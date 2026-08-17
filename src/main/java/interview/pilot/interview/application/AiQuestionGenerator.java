@@ -15,6 +15,7 @@ import interview.pilot.interview.rag.RagContextSnapshot;
 import interview.pilot.interview.rag.RagStatus;
 import interview.pilot.resume.domain.ResumeProfile;
 import interview.pilot.interview.skill.SkillSnapshot;
+import interview.pilot.interview.strategy.TurnDirective;
 
 @Component
 public class AiQuestionGenerator implements QuestionGenerator {
@@ -54,11 +55,20 @@ public class AiQuestionGenerator implements QuestionGenerator {
   public GeneratedQuestion firstQuestion(
       String providerId, InterviewPlan plan, ResumeProfile resume,
       JobRequirements job, SkillSnapshot skill, RagContextSnapshot ragSnapshot) {
+    return firstQuestion(providerId, plan, resume, job, skill, ragSnapshot, null);
+  }
+
+  @Override
+  public GeneratedQuestion firstQuestion(
+      String providerId, InterviewPlan plan, ResumeProfile resume,
+      JobRequirements job, SkillSnapshot skill, RagContextSnapshot ragSnapshot,
+      TurnDirective directive) {
     var ragMap = ragSnapshot.status() == interview.pilot.interview.rag.RagStatus.RETRIEVED
         ? ragSnapshot : java.util.Map.of("status", ragSnapshot.status().name());
     String data = "\n<untrusted_context_json>\n" + json.encode(java.util.Map.of(
         "plan", plan, "resume", resume, "job", job,
         "skill", skill == null ? java.util.Map.of() : skill,
+        "turnDirective", directive == null ? java.util.Map.of() : directive,
         "retrievedKnowledge", ragMap))
         + "\n</untrusted_context_json>";
     return output.invoke(new AiRequest(
@@ -78,10 +88,21 @@ public class AiQuestionGenerator implements QuestionGenerator {
       String expectedModel,
       QuestionContext context,
       InterviewDecision decision) {
+    return nextQuestion(providerId, expectedModel, context, decision, (TurnDirective) null);
+  }
+
+  @Override
+  public GeneratedQuestion nextQuestion(
+      String providerId,
+      String expectedModel,
+      QuestionContext context,
+      InterviewDecision decision,
+      TurnDirective directive) {
     var rag = context.ragSnapshot() != null ? context.ragSnapshot()
         : RagContextSnapshot.notConfigured();
     var data = "\n<untrusted_context_json>\n" + json.encode(java.util.Map.of(
         "context", context, "validatedDecision", decision,
+        "turnDirective", directive == null ? java.util.Map.of() : directive,
         "retrievedKnowledge", rag.status() == RagStatus.RETRIEVED ? rag
             : java.util.Map.of("status", rag.status().name())))
         + "\n</untrusted_context_json>";

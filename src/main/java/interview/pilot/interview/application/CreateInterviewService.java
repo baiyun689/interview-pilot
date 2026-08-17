@@ -26,6 +26,9 @@ import interview.pilot.resume.domain.ResumeProfile;
 import interview.pilot.resume.domain.ResumeStatus;
 import interview.pilot.resume.infrastructure.ResumeEntity;
 import interview.pilot.resume.infrastructure.ResumeRepository;
+import interview.pilot.interview.strategy.DefaultInterviewStrategy;
+import interview.pilot.interview.strategy.InterviewStrategy;
+import interview.pilot.interview.strategy.TurnDirective;
 import jakarta.validation.Validator;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
@@ -45,6 +48,7 @@ public class CreateInterviewService {
   private final InterviewSkillCatalog skills;
   private final KnowledgeScopeResolver scopeResolver;
   private final KnowledgeRetriever retriever;
+  private final InterviewStrategy strategy = new DefaultInterviewStrategy();
 
   public CreateInterviewService(
       ResumeRepository resumes,
@@ -139,12 +143,13 @@ public class CreateInterviewService {
 
     RagContextSnapshot firstRagSnapshot = RagContextSnapshot.notConfigured();
     ValidatedKnowledgeScope scope = null;
+    TurnDirective firstDirective = strategy.firstTurn(plan, request.difficulty());
 
     if (!request.knowledgeBaseIds().isEmpty()) {
       scope = scopeResolver.resolveForCreation(user, request.knowledgeBaseIds());
       var intent = new RetrievalIntent(
           buildQuery(plan, profile, requirements, request.difficulty()),
-          plan.competencies().getFirst(), request.difficulty().name(),
+          firstDirective.competency(), request.difficulty().name(),
           profile.technicalSkills(), List.of(), 5, 0.5);
       try {
         var result = retriever.retrieve(scope, intent);
@@ -164,14 +169,15 @@ public class CreateInterviewService {
     }
 
     GeneratedQuestion first = questions.firstQuestion(
-        providerId, plan, profile, requirements, skill.snapshot(), firstRagSnapshot);
+        providerId, plan, profile, requirements, skill.snapshot(), firstRagSnapshot,
+        firstDirective);
     if (first == null) {
       log.warn("createInterview failed: AI question generator returned null skill={}", request.skillId());
       throw invalidAiOutput();
     }
-    if (!plan.competencies().stream().anyMatch(first.targetCompetency()::equalsIgnoreCase)) {
-      log.warn("createInterview failed: AI first question competency '{}' not in plan {}",
-          first.targetCompetency(), plan.competencies());
+    if (!firstDirective.competency().equalsIgnoreCase(first.targetCompetency())) {
+      log.warn("createInterview failed: AI first question competency '{}' did not match directive '{}'",
+          first.targetCompetency(), firstDirective.competency());
       throw invalidAiOutput();
     }
     log.info("createInterview success firstQuestion competency={}", first.targetCompetency());
@@ -179,7 +185,7 @@ public class CreateInterviewService {
     return store.create(new InterviewCreation(
         ownerId, resumeId, title, jdText, request.difficulty(), request.totalTurnBudget(),
         providerId, provider.model(), skill.snapshot(), requirements, plan, first,
-        scope, firstRagSnapshot));
+        scope, firstRagSnapshot, firstDirective));
   }
 
   private BusinessException invalidAiOutput() {
