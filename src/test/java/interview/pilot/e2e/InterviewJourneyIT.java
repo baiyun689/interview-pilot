@@ -54,12 +54,12 @@ import interview.pilot.interview.api.SubmitAnswerRequest;
 import interview.pilot.interview.application.CreateInterviewService;
 import interview.pilot.interview.application.InterviewQueryService;
 import interview.pilot.interview.application.InterviewReportHandler;
+import interview.pilot.interview.application.PlanProposal;
 import interview.pilot.interview.application.SubmitAnswerService;
 import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.domain.DifficultyAdjustment;
 import interview.pilot.interview.domain.AnswerEvaluation;
 import interview.pilot.interview.domain.GeneratedQuestion;
-import interview.pilot.interview.domain.InterviewPlan;
 import interview.pilot.interview.domain.InterviewReport;
 import interview.pilot.interview.domain.JobRequirements;
 import interview.pilot.interview.domain.NextStep;
@@ -234,7 +234,7 @@ class InterviewJourneyIT {
 
     verifyPromptContract(ResumeProfile.class, "严谨的中文简历分析师", 1);
     verifyPromptContract(JobRequirements.class, "资深招聘需求分析师", 1);
-    verifyPromptContract(InterviewPlan.class, "资深技术面试负责人", 1);
+    verifyPromptContract(PlanProposal.class, "资深技术面试负责人", 1);
     verifyPromptContract(GeneratedQuestion.class, "中文技术面试官", 3);
     verifyPromptContract(AnswerEvaluation.class, "中文技术面试评审官", 3);
     verifyPromptContract(InterviewReport.class, "资深面试委员会评审", 1);
@@ -246,8 +246,8 @@ class InterviewJourneyIT {
             "{\"summary\":\"Java backend engineer\",\"technicalSkills\":[\"Java\",\"Spring Boot\",\"Redis\"],\"projects\":[{\"name\":\"InterviewPilot\",\"description\":\"Reliable adaptive interviews\",\"technologies\":[\"Spring Boot\"]}],\"strengths\":[\"Idempotency\"],\"risks\":[\"Scale not measured\"]}"),
         new Fixture(JobRequirements.class, "资深招聘需求分析师",
             "{\"competencies\":[\"Java\",\"System Design\",\"Observability\"],\"preferredSkills\":[\"Redis\"]}"),
-        new Fixture(InterviewPlan.class, "资深技术面试负责人",
-            "{\"competencies\":[\"Java\",\"System Design\",\"Observability\"],\"totalTurnBudget\":5}"),
+        new Fixture(PlanProposal.class, "资深技术面试负责人",
+            "{\"items\":[{\"competency\":\"Java\",\"priorityScore\":95,\"resumeEntryPoint\":\"InterviewPilot\",\"rationale\":\"JD required\"},{\"competency\":\"System Design\",\"priorityScore\":90,\"resumeEntryPoint\":\"Reliable adaptive interviews\",\"rationale\":\"JD required\"},{\"competency\":\"Observability\",\"priorityScore\":85,\"resumeEntryPoint\":\"\",\"rationale\":\"JD required\"}]}"),
         new Fixture(GeneratedQuestion.class, "中文技术面试官",
             question("How do you make answer submission idempotent?", "Java")),
         new Fixture(AnswerEvaluation.class, "中文技术面试评审官",

@@ -33,7 +33,20 @@ public final class InterviewPlanCompiler {
       Difficulty difficulty,
       int totalTurnBudget,
       SkillSnapshot skill) {
-    if (skill == null) return proposal;
+    PlanProposal adapted = new PlanProposal(proposal.competencies().stream()
+        .map(value -> new PlanProposal.Item(value, 50, "", "旧规划器建议"))
+        .toList());
+    return compile(adapted, resume, job, difficulty, totalTurnBudget, skill);
+  }
+
+  public InterviewPlan compile(
+      PlanProposal proposal,
+      ResumeProfile resume,
+      JobRequirements job,
+      Difficulty difficulty,
+      int totalTurnBudget,
+      SkillSnapshot skill) {
+    if (skill == null) return new InterviewPlan(proposal.competencies(), totalTurnBudget);
     if (job.competencies().size() > totalTurnBudget) {
       throw new IllegalArgumentException(
           "turn budget cannot cover every required competency");
@@ -61,13 +74,16 @@ public final class InterviewPlanCompiler {
       int resumeScore = relevance(spec, resumeTerms);
       int jobScore = relevance(spec, job.preferredSkills());
       int proposalScore = proposalPosition(spec, proposalOrder);
+      PlanProposal.Item proposed = proposal == null ? null : proposal.itemFor(spec.name());
       int score = resumeScore * 100 + jobScore * 50 + proposalScore * 10
+          + (proposed == null ? 0 : proposed.priorityScore())
           + (skill.competencySpecs().size() - index);
       PlanPriority priority = resumeScore > 0
           ? PlanPriority.RESUME_RELEVANT : PlanPriority.SKILL_BASELINE;
       String rationale = resumeScore > 0
           ? "候选人简历存在相关技术或项目证据"
-          : jobScore > 0 ? "JD 加分项与该能力相关" : "Skill 基线能力补充";
+          : jobScore > 0 ? "JD 加分项与该能力相关"
+              : proposed != null ? proposed.rationale() : "Skill 基线能力补充";
       optional.add(candidate(spec.name(), spec, priority, score, rationale));
     }
     optional.sort(Comparator.comparingInt(Candidate::score).reversed());

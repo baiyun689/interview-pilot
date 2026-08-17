@@ -96,8 +96,10 @@ class AiInterviewComponentsTest {
     ResumeProfile resume = profile();
     JobRequirements job = new JobRequirements(List.of("Java"), List.of("MySQL"));
     InterviewPlan plan = new InterviewPlan(List.of("Java"), 8);
+    PlanProposal proposal = new PlanProposal(List.of(
+        new PlanProposal.Item("Java", 90, "payments project", "JD required")));
     GeneratedQuestion question = new GeneratedQuestion("Explain your Java design.", "Java");
-    when(invoker.invoke(org.mockito.ArgumentMatchers.any(), eq(InterviewPlan.class))).thenReturn(plan);
+    when(invoker.invoke(org.mockito.ArgumentMatchers.any(), eq(PlanProposal.class))).thenReturn(proposal);
     when(invoker.invoke(org.mockito.ArgumentMatchers.any(), eq(GeneratedQuestion.class)))
         .thenReturn(question);
     var planner = new AiInterviewPlanner(
@@ -112,7 +114,7 @@ class AiInterviewComponentsTest {
         new ClassPathResource("prompts/first-question-user.st"),
         new ClassPathResource("prompts/next-question-user.st"));
 
-    assertThat(planner.plan("qwen", resume, job, Difficulty.HARD, 8)).isSameAs(plan);
+    assertThat(planner.plan("qwen", resume, job, Difficulty.HARD, 8)).isEqualTo(plan);
     var directive = new TurnDirective(
         "technical_depth", "Java", Difficulty.HARD, List.of("机制理解"),
         InterviewQuestionMode.MECHANISM, false, "PLAN_FIRST_TURN");
@@ -123,8 +125,9 @@ class AiInterviewComponentsTest {
     ArgumentCaptor<AiRequest> requests = ArgumentCaptor.forClass(AiRequest.class);
     verify(invoker, org.mockito.Mockito.times(2)).invoke(requests.capture(), org.mockito.ArgumentMatchers.any());
     assertThat(requests.getAllValues().get(0).systemPrompt())
-        .contains("\"competencies\"")
-        .contains("\"totalTurnBudget\"");
+        .contains("\"items\"")
+        .contains("\"priorityScore\"")
+        .contains("\"resumeEntryPoint\"");
     assertThat(requests.getAllValues().get(1).userPrompt())
         .contains("\"turnDirective\"")
         .contains("\"evidenceTargets\":[\"机制理解\"]")

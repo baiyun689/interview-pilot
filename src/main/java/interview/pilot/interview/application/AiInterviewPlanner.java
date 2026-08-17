@@ -61,8 +61,8 @@ public class AiInterviewPlanner implements InterviewPlanner {
         "resume", resume, "job", job, "difficulty", difficulty,
         "turnBudget", turns, "skill", skill == null ? java.util.Map.of() : skill))
         + "\n</untrusted_context_json>";
-    InterviewPlan proposal = output.invoke(new AiRequest(
-        providerId, systemPrompt, userPrompt + data, InterviewPlan.class), InterviewPlan.class);
+    PlanProposal proposal = output.invoke(new AiRequest(
+        providerId, systemPrompt, userPrompt + data, PlanProposal.class), PlanProposal.class);
     if (proposal == null) return null;
     return compiler.compile(proposal, resume, job, difficulty, turns, skill);
   }
