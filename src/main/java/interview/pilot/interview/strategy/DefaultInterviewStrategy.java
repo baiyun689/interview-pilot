@@ -48,7 +48,7 @@ public final class DefaultInterviewStrategy implements InterviewStrategy {
         Math.min(modeIndex, item.questionModes().size() - 1));
     return new TurnDirective(
         item.stageId(), item.competency(), difficulty, item.evidenceTargets(),
-        mode, item.ragEnabled(), probeFocus, reason);
+        mode, item.ragEnabled(), probeFocus, reason, item.resumeEntryPoint());
   }
 
   private String evidenceGap(
