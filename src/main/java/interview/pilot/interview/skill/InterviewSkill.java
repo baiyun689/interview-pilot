@@ -15,7 +15,8 @@ public record InterviewSkill(
     String persona,
     String rubric,
     List<String> references,
-    String version) {
+    String version,
+    int schemaVersion) {
 
   public InterviewSkill {
     defaultCompetencies = List.copyOf(defaultCompetencies);
@@ -30,7 +31,7 @@ public record InterviewSkill(
     return new SkillSnapshot(
         id, name, description, group, defaultCompetencies,
         persona, rubric, references, version,
-        2, stages, competencySpecs, retrievalPolicy);
+        schemaVersion, stages, competencySpecs, retrievalPolicy);
   }
 
   public record Display(String icon) {}

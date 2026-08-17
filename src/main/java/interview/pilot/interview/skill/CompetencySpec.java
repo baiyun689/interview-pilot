@@ -11,12 +11,13 @@ public record CompetencySpec(
     List<String> followUpAxes,
     List<String> redFlags,
     int followUpLimit,
-    SkillRetrievalPolicy retrievalPolicy) {
+    SkillRetrievalPolicy retrievalPolicy,
+    String stageId) {
 
   public CompetencySpec {
     id = required(id, "competency id", 64);
     name = required(name, "competency name", 100);
-    objective = optional(objective, 1_000);
+    objective = optional(objective, "objective", 1_000);
     requiredEvidence = immutable(requiredEvidence);
     questionModes = questionModes == null || questionModes.isEmpty()
         ? List.of(InterviewQuestionMode.PROJECT, InterviewQuestionMode.MECHANISM)
@@ -28,6 +29,15 @@ public record CompetencySpec(
     }
     retrievalPolicy = retrievalPolicy == null
         ? SkillRetrievalPolicy.disabled() : retrievalPolicy;
+    stageId = optional(stageId, "stageId", 64);
+  }
+
+  public CompetencySpec(
+      String id, String name, String objective, List<String> requiredEvidence,
+      List<InterviewQuestionMode> questionModes, List<String> followUpAxes,
+      List<String> redFlags, int followUpLimit, SkillRetrievalPolicy retrievalPolicy) {
+    this(id, name, objective, requiredEvidence, questionModes, followUpAxes,
+        redFlags, followUpLimit, retrievalPolicy, "");
   }
 
   public static CompetencySpec legacy(String id, String name) {
@@ -37,7 +47,7 @@ public record CompetencySpec(
         List.of(InterviewQuestionMode.PROJECT, InterviewQuestionMode.MECHANISM,
             InterviewQuestionMode.FAILURE),
         List.of("experience", "mechanism", "failure", "tradeoff"),
-        List.of(), 2, SkillRetrievalPolicy.disabled());
+        List.of(), 2, SkillRetrievalPolicy.disabled(), "");
   }
 
   private static List<String> immutable(List<String> values) {
@@ -56,9 +66,9 @@ public record CompetencySpec(
     return normalized;
   }
 
-  private static String optional(String value, int max) {
+  private static String optional(String value, String field, int max) {
     String normalized = value == null ? "" : value.trim();
-    if (normalized.length() > max) throw new IllegalArgumentException("objective is too long");
+    if (normalized.length() > max) throw new IllegalArgumentException(field + " is too long");
     return normalized;
   }
 }

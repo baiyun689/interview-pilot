@@ -1,0 +1,96 @@
+defaultCompetencies: [项目深挖, Java 基础与并发, Spring 与事务, MySQL, Redis, 分布式与高可用]
+competencies:
+  - id: project_ownership
+    stageId: project_deep_dive
+    name: 项目深挖
+    objective: 验证个人贡献、业务约束、关键指标和事故处理的真实性
+    requiredEvidence: [个人贡献边界, 关键约束, 核心指标, 真实问题与恢复]
+    questionModes: [PROJECT, FAILURE, METRICS, TRADEOFF]
+    followUpAxes: [ownership, constraint, metric, incident]
+    redFlags: [无法区分个人和团队成果, 无法给出可核验的项目事实]
+    followUpLimit: 2
+  - id: java_concurrency
+    stageId: technical_depth
+    name: Java 基础与并发
+    objective: 验证 Java 运行机制、并发语义、性能边界和工程决策
+    requiredEvidence: [核心机制, 并发安全, 性能边界, 实际使用依据]
+    questionModes: [PROJECT, CONCEPT, MECHANISM, FAILURE, CODING]
+    followUpAxes: [mechanism, concurrency, performance, boundary]
+    redFlags: [只背定义无法连接实现, 忽视竞态与资源上限]
+    followUpLimit: 2
+    rag:
+      enabled: true
+      scopes: [java, concurrency]
+      allowedUses: [GENERATE_SCENARIO, VERIFY_FACT]
+      topK: 4
+      candidateCount: 12
+      minimumScore: 0.75
+      contextCharacterBudget: 4000
+  - id: spring_transaction
+    stageId: technical_depth
+    name: Spring 与事务
+    objective: 验证 Spring 运行机制、代理边界、事务传播和异常处理
+    requiredEvidence: [代理与调用边界, 事务传播, 回滚条件, 失败处理]
+    questionModes: [PROJECT, MECHANISM, FAILURE, TRADEOFF]
+    followUpAxes: [proxy, boundary, propagation, rollback]
+    redFlags: [只知道注解用法, 无法解释事务失效条件]
+    followUpLimit: 2
+    rag:
+      enabled: true
+      scopes: [spring, distributed]
+      allowedUses: [GENERATE_SCENARIO, VERIFY_FACT]
+      topK: 4
+      candidateCount: 12
+      minimumScore: 0.75
+      contextCharacterBudget: 4000
+  - id: mysql
+    stageId: technical_depth
+    name: MySQL
+    objective: 验证数据建模、索引设计、事务锁和慢查询治理
+    requiredEvidence: [访问模式与建模, 索引依据, 事务与锁, 定位和优化指标]
+    questionModes: [PROJECT, MECHANISM, FAILURE, METRICS, TRADEOFF]
+    followUpAxes: [index, lock, transaction, diagnosis]
+    redFlags: [只会罗列索引规则, 优化结论缺少执行计划或指标]
+    followUpLimit: 2
+    rag:
+      enabled: true
+      scopes: [mysql, database]
+      allowedUses: [GENERATE_SCENARIO, VERIFY_FACT]
+      topK: 4
+      candidateCount: 12
+      minimumScore: 0.76
+      contextCharacterBudget: 4000
+  - id: redis
+    stageId: technical_depth
+    name: Redis
+    objective: 验证缓存设计、一致性、热点治理和故障恢复
+    requiredEvidence: [缓存适用性, 一致性策略, 热点与穿透防护, 故障降级]
+    questionModes: [PROJECT, ARCHITECTURE, FAILURE, METRICS, TRADEOFF]
+    followUpAxes: [consistency, hotspot, failure, metric]
+    redFlags: [默认把 Redis 当数据库, 忽视缓存失效和恢复路径]
+    followUpLimit: 2
+    rag:
+      enabled: true
+      scopes: [redis, cache]
+      allowedUses: [GENERATE_SCENARIO, VERIFY_FACT]
+      topK: 4
+      candidateCount: 12
+      minimumScore: 0.75
+      contextCharacterBudget: 4000
+  - id: distributed_reliability
+    stageId: reliability
+    name: 分布式与高可用
+    objective: 验证一致性、幂等、容量、降级、恢复和系统演进
+    requiredEvidence: [一致性与幂等, 容量和 SLO, 降级恢复, 可观测与演练]
+    questionModes: [ARCHITECTURE, FAILURE, METRICS, TRADEOFF]
+    followUpAxes: [consistency, capacity, recovery, evolution]
+    redFlags: [高可用停留在口号, 没有故障检测和恢复闭环]
+    followUpLimit: 2
+    rag:
+      enabled: true
+      scopes: [distributed, high-availability, mq]
+      allowedUses: [GENERATE_SCENARIO, VERIFY_FACT]
+      topK: 4
+      candidateCount: 16
+      minimumScore: 0.78
+      contextCharacterBudget: 5000

@@ -25,6 +25,7 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
       Pattern.compile(".*/skills/([^/]+)/skill\\.meta\\.yml$");
   private static final Pattern SAFE_ID = Pattern.compile("[a-z0-9]+(?:-[a-z0-9]+)*");
   private static final Pattern SAFE_REFERENCE = Pattern.compile("[a-zA-Z0-9._-]+\\.md");
+  private static final Pattern SAFE_RESOURCE = Pattern.compile("[a-zA-Z0-9._-]+\\.(?:md|yml)");
 
   private final List<InterviewSkill> skills;
   private final Map<String, InterviewSkill> byId;
@@ -76,25 +77,42 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
       String id = extractId(metaResource);
       Map<String, Object> meta = new Yaml().load(metaResource.getContentAsString(StandardCharsets.UTF_8));
       if (meta == null) throw invalid("Skill 元数据为空: " + id);
+      int schemaVersion = integer(meta.get("schemaVersion"), 1, id, "schemaVersion");
+      if (schemaVersion > 3) throw invalid("Skill schemaVersion 不受支持: " + id);
       String name = required(meta.get("displayName"), id, "displayName");
       String description = required(meta.get("description"), id, "description");
       SkillGroup group = parseGroup(required(meta.get("group"), id, "group"), id);
       Map<String, Object> displayMap = meta.get("display") instanceof Map<?, ?> map
           ? (Map<String, Object>) map : Map.of();
       String icon = required(displayMap.get("icon"), id, "display.icon");
-      List<String> competencies = strings(meta.get("defaultCompetencies"), id, true);
-      List<SkillStageSpec> stages = stages(meta, id);
-      List<CompetencySpec> competencySpecs = competencies(meta, id, competencies);
+      Map<String, Object> stageSource = meta;
+      Map<String, Object> competencySource = meta;
+      String personaFile = "SKILL.md";
+      String rubricFile = "rubric.md";
+      if (schemaVersion >= 3) {
+        Map<String, Object> resources = map(meta.get("resources"), id, "resources");
+        String stagesFile = resourceFile(resources, id, "stages", ".yml");
+        String competenciesFile = resourceFile(resources, id, "competencies", ".yml");
+        personaFile = resourceFile(resources, id, "persona", ".md");
+        rubricFile = resourceFile(resources, id, "rubric", ".md");
+        stageSource = readRequiredYaml(id, stagesFile);
+        competencySource = readRequiredYaml(id, competenciesFile);
+      }
+      List<String> competencies = strings(
+          competencySource.get("defaultCompetencies"), id, true);
+      List<SkillStageSpec> stages = stages(stageSource, id);
+      List<CompetencySpec> competencySpecs = competencies(
+          competencySource, id, competencies);
       SkillRetrievalPolicy retrievalPolicy = retrievalPolicy(meta);
-      validateModel(id, competencies, stages, competencySpecs);
+      validateModel(id, competencies, stages, competencySpecs, schemaVersion >= 3);
       List<String> references = strings(meta.get("references"), id, false);
       references.forEach(reference -> {
         if (!SAFE_REFERENCE.matcher(reference).matches()) {
           throw invalid("Skill reference 路径不安全: " + id + "/" + reference);
         }
       });
-      String persona = readRequired(id, "SKILL.md");
-      String rubric = readRequired(id, "rubric.md");
+      String persona = readRequired(id, personaFile);
+      String rubric = readRequired(id, rubricFile);
       String version = sha256(String.join("\n",
           id, name, description, group.name(), icon,
           String.join("|", competencies), stages.toString(), competencySpecs.toString(),
@@ -102,7 +120,7 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
       return new InterviewSkill(
           id, name, description, group, new InterviewSkill.Display(icon),
           competencies, stages, competencySpecs, retrievalPolicy,
-          persona, rubric, references, version);
+          persona, rubric, references, version, schemaVersion);
     } catch (IOException exception) {
       throw new IllegalStateException("无法读取面试 Skill 资源: " + metaResource, exception);
     }
@@ -143,7 +161,10 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
         Map<String, Object> stage = (Map<String, Object>) raw;
         result.add(new SkillStageSpec(
             required(stage.get("id"), skillId, "stages.id"),
-            required(stage.get("purpose"), skillId, "stages.purpose")));
+            required(stage.get("purpose"), skillId, "stages.purpose"),
+            integer(stage.get("order"), result.size() * 10, skillId, "stages.order"),
+            strings(stage.get("entryCriteria"), skillId, false),
+            strings(stage.get("exitCriteria"), skillId, false)));
       }
       return List.copyOf(result);
     }
@@ -190,7 +211,8 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
           strings(competency.get("followUpAxes"), skillId, false),
           strings(competency.get("redFlags"), skillId, false),
           integer(competency.get("followUpLimit"), 2, skillId, "followUpLimit"),
-          policy));
+          policy,
+          optional(competency.get("stageId"))));
     }
     return List.copyOf(result);
   }
@@ -288,10 +310,19 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
       String skillId,
       List<String> defaults,
       List<SkillStageSpec> stages,
-      List<CompetencySpec> competencies) {
+      List<CompetencySpec> competencies,
+      boolean requireStageReferences) {
     if (stages.stream().map(SkillStageSpec::id).map(String::toLowerCase).distinct().count()
         != stages.size()) {
       throw invalid("Skill stage ID 重复: " + skillId);
+    }
+    if (requireStageReferences
+        && stages.stream().map(SkillStageSpec::order).distinct().count() != stages.size()) {
+      throw invalid("Skill stage order 重复: " + skillId);
+    }
+    if (requireStageReferences && stages.stream().anyMatch(stage ->
+        stage.order() <= 0 || stage.entryCriteria().isEmpty() || stage.exitCriteria().isEmpty())) {
+      throw invalid("Skill stage 缺少顺序或流转条件: " + skillId);
     }
     if (competencies.stream().map(CompetencySpec::id).map(String::toLowerCase).distinct().count()
         != competencies.size()) {
@@ -302,6 +333,46 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
         throw invalid("Skill 默认能力缺少结构化定义: " + skillId + "/" + name);
       }
     }
+    java.util.Set<String> stageIds = stages.stream()
+        .map(SkillStageSpec::id)
+        .map(String::toLowerCase)
+        .collect(java.util.stream.Collectors.toSet());
+    for (CompetencySpec competency : competencies) {
+      if (requireStageReferences && competency.stageId().isBlank()) {
+        throw invalid("Skill competency 缺少 stageId: " + skillId + "/" + competency.id());
+      }
+      if (!competency.stageId().isBlank()
+          && !stageIds.contains(competency.stageId().toLowerCase())) {
+        throw invalid("Skill competency 引用了不存在的 stage: "
+            + skillId + "/" + competency.id() + "/" + competency.stageId());
+      }
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  private Map<String, Object> map(Object value, String id, String field) {
+    if (!(value instanceof Map<?, ?> raw)) {
+      throw invalid("Skill 缺少对象字段: " + id + "/" + field);
+    }
+    return (Map<String, Object>) raw;
+  }
+
+  private String resourceFile(
+      Map<String, Object> resources, String id, String key, String requiredSuffix) {
+    String filename = required(resources.get(key), id, "resources." + key);
+    if (!SAFE_RESOURCE.matcher(filename).matches() || !filename.endsWith(requiredSuffix)) {
+      throw invalid("Skill resource 路径不安全: " + id + "/" + filename);
+    }
+    return filename;
+  }
+
+  @SuppressWarnings("unchecked")
+  private Map<String, Object> readRequiredYaml(String id, String filename) throws IOException {
+    Object value = new Yaml().load(readRequired(id, filename));
+    if (!(value instanceof Map<?, ?> raw)) {
+      throw invalid("Skill YAML 格式无效: " + id + "/" + filename);
+    }
+    return (Map<String, Object>) raw;
   }
 
   private String readRequired(String id, String filename) throws IOException {

@@ -1,0 +1,16 @@
+stages:
+  - id: project_deep_dive
+    order: 10
+    purpose: 建立事实基线，确认候选人的个人贡献、业务约束、指标和事故经历
+    entryCriteria: [存在简历项目或需要建立经历事实基线]
+    exitCriteria: [个人贡献边界清晰, 至少一项结果可核验]
+  - id: technical_depth
+    order: 20
+    purpose: 依据 JD 和简历验证 Java 后端核心机制、实现边界与方案取舍
+    entryCriteria: [已确定必考能力与项目切入点]
+    exitCriteria: [核心机制有证据, 至少一个边界或取舍已验证]
+  - id: reliability
+    order: 30
+    purpose: 验证故障处理、可观测性、回滚恢复、容量治理与系统演进能力
+    entryCriteria: [已有技术方案或生产场景可供施加失败约束]
+    exitCriteria: [故障检测与恢复路径明确, 可观测和演进成本已讨论]

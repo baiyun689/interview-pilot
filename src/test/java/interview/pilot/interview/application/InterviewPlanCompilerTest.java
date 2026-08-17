@@ -100,6 +100,45 @@ class InterviewPlanCompilerTest {
   }
 
   @Test
+  void usesTheCompetencyStageDeclaredByTheSkillInsteadOfNameHeuristics() {
+    InterviewPlan plan = compiler.compile(
+        new PlanProposal(List.of(
+            new PlanProposal.Item("MySQL", 100, "", "JD required"),
+            new PlanProposal.Item("分布式与高可用", 90, "", "JD required"))),
+        ResumeProfile.empty(),
+        new JobRequirements(List.of("MySQL", "分布式与高可用"), List.of()),
+        Difficulty.HARD, 5, skill);
+
+    assertThat(plan.itemFor("MySQL").stageId()).isEqualTo("technical_depth");
+    assertThat(plan.itemFor("分布式与高可用").stageId()).isEqualTo("reliability");
+  }
+
+  @Test
+  void ordersSelectedCompetenciesByTheSkillStageStoryline() {
+    InterviewPlan plan = compiler.compile(
+        new PlanProposal(List.of(new PlanProposal.Item("MySQL", 100, "", "JD required"))),
+        profile("订单项目", "负责订单数据库治理", List.of("MySQL")),
+        new JobRequirements(List.of("MySQL"), List.of()),
+        Difficulty.MEDIUM, 5, skill);
+
+    assertThat(plan.items()).extracting(item -> item.stageId())
+        .startsWith("project_deep_dive", "technical_depth");
+  }
+
+  @Test
+  void preservesDeclaredStageOrderEvenWhenLaterStageIsRequiredByTheJob() {
+    InterviewPlan plan = compiler.compile(
+        new InterviewPlan(skill.defaultCompetencies(), 5),
+        ResumeProfile.empty(),
+        new JobRequirements(List.of("分布式与高可用"), List.of("MySQL")),
+        Difficulty.MEDIUM, 5, skill);
+
+    assertThat(plan.items()).extracting(item -> item.stageId())
+        .containsSubsequence("technical_depth", "reliability");
+    assertThat(plan.items()).noneMatch(item -> item.stageId().equals("project_deep_dive"));
+  }
+
+  @Test
   void discardsAResumeEntryPointThatIsNotSupportedByTheResume() {
     PlanProposal proposal = new PlanProposal(List.of(
         new PlanProposal.Item("Java 基础与并发", 95, "不存在的证券交易项目", "模型建议")));

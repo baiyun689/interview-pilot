@@ -98,9 +98,11 @@ public final class InterviewPlanCompiler {
           .filter(value -> value.spec().id().contains("project"))
           .findFirst()
           .ifPresent(value -> add(selected, value.withScore(9_000)
-              .withRationale("有简历项目时优先验证个人贡献和项目真实性")));
+              .withRationale("有简历项目时优先验证个人贡献和项目真实性")
+              .withResumeEntryPoint(resume.projects().getFirst().name())));
     }
     for (Candidate candidate : optional) {
+      if (!hasProjectEvidence && candidate.spec().id().contains("project")) continue;
       if (selected.size() >= targetCount) break;
       add(selected, candidate);
     }
@@ -111,10 +113,12 @@ public final class InterviewPlanCompiler {
           PlanPriority.SKILL_BASELINE, 1, "Skill 首要基线能力"));
     }
 
+    Comparator<Candidate> ordering =
+        Comparator.comparingInt((Candidate value) -> stageOrder(value.spec(), skill))
+            .thenComparingInt(value -> priorityOrder(value.priority()));
     List<Candidate> ordered = selected.values().stream()
-        .sorted(Comparator
-            .comparingInt((Candidate value) -> priorityOrder(value.priority()))
-            .thenComparing(Comparator.comparingInt(Candidate::score).reversed()))
+        .sorted(ordering.thenComparing(
+            Comparator.comparingInt(Candidate::score).reversed()))
         .toList();
     int[] budgets = allocateBudgets(ordered.size(), totalTurnBudget);
     List<InterviewPlanItem> items = new ArrayList<>();
@@ -205,6 +209,7 @@ public final class InterviewPlanCompiler {
   }
 
   private String stageFor(CompetencySpec spec, SkillSnapshot skill) {
+    if (!spec.stageId().isBlank()) return spec.stageId();
     String id = key(spec.id());
     if (id.contains("project")) return stage(skill, "project", 0);
     if (id.contains("reliab") || id.contains("observ") || id.contains("distributed")) {
@@ -241,6 +246,15 @@ public final class InterviewPlanCompiler {
     };
   }
 
+  private int stageOrder(CompetencySpec spec, SkillSnapshot skill) {
+    String stageId = stageFor(spec, skill);
+    return skill.stages().stream()
+        .filter(stage -> stage.id().equalsIgnoreCase(stageId))
+        .mapToInt(interview.pilot.interview.skill.SkillStageSpec::order)
+        .findFirst()
+        .orElse(Integer.MAX_VALUE);
+  }
+
   private boolean related(String left, String right) {
     return CompetencyMatcher.related(left, right);
   }
@@ -262,6 +276,10 @@ public final class InterviewPlanCompiler {
 
     Candidate withRationale(String value) {
       return new Candidate(name, spec, priority, score, value, resumeEntryPoint);
+    }
+
+    Candidate withResumeEntryPoint(String value) {
+      return new Candidate(name, spec, priority, score, rationale, value);
     }
   }
 }
