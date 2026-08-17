@@ -38,8 +38,10 @@ public final class DefaultInterviewStrategy implements InterviewStrategy {
     }
     Difficulty nextDifficulty = adjust(context.currentDifficulty(), decision.difficultyAdjustment());
     InterviewPlanItem item = plan.itemFor(decision.targetCompetency());
-    int modeIndex = decision.nextStep() == NextStep.FOLLOW_UP ? context.followUpCount() + 1 : 0;
-    String probeFocus = decision.nextStep() == NextStep.FOLLOW_UP
+    boolean continuingCurrent = same(decision.targetCompetency(), context.currentCompetency());
+    int modeIndex = decision.nextStep() == NextStep.FOLLOW_UP || continuingCurrent
+        ? context.followUpCount() + 1 : 0;
+    String probeFocus = decision.nextStep() == NextStep.FOLLOW_UP || continuingCurrent
         ? evidenceGap(item, assessment, context.followUpCount())
         : item.evidenceTargets().getFirst();
     return new StrategyOutcome(

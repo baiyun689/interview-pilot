@@ -93,10 +93,10 @@ class InterviewPlanCompilerTest {
         Difficulty.MEDIUM, 5, skill);
 
     assertThat(plan.itemFor("Java 基础与并发").resumeEntryPoint())
-        .isEqualTo("支付项目的并发扣款");
+        .isEqualTo("支付项目");
     assertThat(new interview.pilot.interview.strategy.DefaultInterviewStrategy()
         .firstTurn(plan, Difficulty.MEDIUM).resumeEntryPoint())
-        .isEqualTo("支付项目的并发扣款");
+        .isEqualTo("支付项目");
   }
 
   @Test
@@ -110,6 +110,19 @@ class InterviewPlanCompilerTest {
         Difficulty.MEDIUM, 5, skill);
 
     assertThat(plan.itemFor("Java 基础与并发").resumeEntryPoint()).isEmpty();
+  }
+
+  @Test
+  void keepsOnlyTheImmutableResumeFactFromAPartiallyGroundedEntryPoint() {
+    PlanProposal proposal = new PlanProposal(List.of(
+        new PlanProposal.Item("Java 基础与并发", 95, "Java 证券交易平台", "模型建议")));
+
+    InterviewPlan plan = compiler.compile(
+        proposal, profile("支付项目", "并发扣款", List.of("Java")),
+        new JobRequirements(List.of("Java 基础与并发"), List.of()),
+        Difficulty.MEDIUM, 5, skill);
+
+    assertThat(plan.itemFor("Java 基础与并发").resumeEntryPoint()).isEqualTo("Java");
   }
 
   private ResumeProfile profile(String name, String description, List<String> technologies) {

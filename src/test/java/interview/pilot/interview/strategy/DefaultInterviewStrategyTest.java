@@ -101,7 +101,8 @@ class DefaultInterviewStrategyTest {
   void lastUncoveredCompetencyContinuesUntilEvidenceOrTheHardTurnLimit() {
     var only = new InterviewPlanItem(
         "depth", "java", "Java", PlanPriority.REQUIRED, 5,
-        List.of("并发边界"), List.of(InterviewQuestionMode.MECHANISM),
+        List.of("并发边界"),
+        List.of(InterviewQuestionMode.MECHANISM, InterviewQuestionMode.FAILURE),
         "JD 必考", false, List.of("boundary"), 1);
     InterviewPlan plan = InterviewPlan.execution(List.of(only), 5, List.of());
     AnswerEvaluation assessment = new AnswerEvaluation(
@@ -116,6 +117,7 @@ class DefaultInterviewStrategyTest {
 
     assertThat(beforeLimit.decision().nextStep()).isEqualTo(NextStep.NEXT_TOPIC);
     assertThat(beforeLimit.decision().targetCompetency()).isEqualTo("Java");
+    assertThat(beforeLimit.nextDirective().questionMode()).isEqualTo(InterviewQuestionMode.FAILURE);
     assertThat(atLimit.decision().nextStep()).isEqualTo(NextStep.FINISH);
   }
 }

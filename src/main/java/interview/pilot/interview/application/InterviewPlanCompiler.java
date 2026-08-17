@@ -179,8 +179,10 @@ public final class InterviewPlanCompiler {
 
   private String validatedEntryPoint(PlanProposal.Item proposed, List<String> resumeTerms) {
     if (proposed == null || proposed.resumeEntryPoint().isBlank()) return "";
-    return resumeTerms.stream().anyMatch(term -> related(proposed.resumeEntryPoint(), term))
-        ? proposed.resumeEntryPoint() : "";
+    return resumeTerms.stream()
+        .filter(term -> related(proposed.resumeEntryPoint(), term))
+        .findFirst()
+        .orElse("");
   }
 
   private List<String> resumeTerms(ResumeProfile resume) {
