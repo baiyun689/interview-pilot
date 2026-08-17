@@ -1,21 +1,5 @@
-schemaVersion: 3
+schemaVersion: 4
 displayName: Java 后端
-description: 面向 Spring Boot、数据库、缓存、并发与分布式系统的证据驱动工程面试。
+description: 面向 Java 后端工程师的证据驱动技术面试。
 group: JOB
-display:
-  icon: code
-  gradient: from-blue-500 to-indigo-500
-  iconBg: bg-blue-100 dark:bg-blue-900/30
-  iconColor: text-blue-600 dark:text-blue-400
-resources:
-  competencies: competencies.yml
-  stages: stages.yml
-  persona: SKILL.md
-  rubric: rubric.md
-retrievalScopes: [java, spring, mysql, redis, system-design]
-ragKeywords: [原理, 机制, 一致性, 并发, 事务, 索引, 缓存, 限流, 降级, 重试, jvm, gc, 锁, 线程池, rollback, transaction, concurrent, index, cache, deadlock]
-allowedTools: [rag.search]
-references: [java.md, spring.md, mysql.md, redis.md, distributed.md, high-availability.md, mq.md]
-runtime:
-  ragEnabled: true
-  toolsEnabled: true
+icon: code

@@ -78,18 +78,20 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
       Map<String, Object> meta = new Yaml().load(metaResource.getContentAsString(StandardCharsets.UTF_8));
       if (meta == null) throw invalid("Skill 元数据为空: " + id);
       int schemaVersion = integer(meta.get("schemaVersion"), 1, id, "schemaVersion");
-      if (schemaVersion > 3) throw invalid("Skill schemaVersion 不受支持: " + id);
+      if (schemaVersion > 4) throw invalid("Skill schemaVersion 不受支持: " + id);
       String name = required(meta.get("displayName"), id, "displayName");
       String description = required(meta.get("description"), id, "description");
       SkillGroup group = parseGroup(required(meta.get("group"), id, "group"), id);
       Map<String, Object> displayMap = meta.get("display") instanceof Map<?, ?> map
           ? (Map<String, Object>) map : Map.of();
-      String icon = required(displayMap.get("icon"), id, "display.icon");
+      String icon = schemaVersion >= 4
+          ? required(meta.get("icon"), id, "icon")
+          : required(displayMap.get("icon"), id, "display.icon");
       Map<String, Object> stageSource = meta;
       Map<String, Object> competencySource = meta;
       String personaFile = "SKILL.md";
       String rubricFile = "rubric.md";
-      if (schemaVersion >= 3) {
+      if (schemaVersion == 3) {
         Map<String, Object> resources = map(meta.get("resources"), id, "resources");
         String stagesFile = resourceFile(resources, id, "stages", ".yml");
         String competenciesFile = resourceFile(resources, id, "competencies", ".yml");
@@ -97,15 +99,23 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
         rubricFile = resourceFile(resources, id, "rubric", ".md");
         stageSource = readRequiredYaml(id, stagesFile);
         competencySource = readRequiredYaml(id, competenciesFile);
+      } else if (schemaVersion >= 4) {
+        stageSource = readRequiredYaml(id, "stages.yml");
+        competencySource = readRequiredYaml(id, "competencies.yml");
       }
-      List<String> competencies = strings(
+      List<String> competencies = schemaVersion >= 4 ? List.of() : strings(
           competencySource.get("defaultCompetencies"), id, true);
       List<SkillStageSpec> stages = stages(stageSource, id);
       List<CompetencySpec> competencySpecs = competencies(
-          competencySource, id, competencies);
-      SkillRetrievalPolicy retrievalPolicy = retrievalPolicy(meta);
-      validateModel(id, competencies, stages, competencySpecs, schemaVersion >= 3);
-      List<String> references = strings(meta.get("references"), id, false);
+          competencySource, id, competencies, schemaVersion);
+      if (schemaVersion >= 4) {
+        competencies = competencySpecs.stream().map(CompetencySpec::name).toList();
+      }
+      SkillRetrievalPolicy retrievalPolicy = schemaVersion >= 4
+          ? SkillRetrievalPolicy.disabled() : retrievalPolicy(meta);
+      validateModel(id, competencies, stages, competencySpecs, schemaVersion);
+      List<String> references = schemaVersion >= 4
+          ? List.of() : strings(meta.get("references"), id, false);
       references.forEach(reference -> {
         if (!SAFE_REFERENCE.matcher(reference).matches()) {
           throw invalid("Skill reference 路径不安全: " + id + "/" + reference);
@@ -162,7 +172,7 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
         result.add(new SkillStageSpec(
             required(stage.get("id"), skillId, "stages.id"),
             required(stage.get("purpose"), skillId, "stages.purpose"),
-            integer(stage.get("order"), result.size() * 10, skillId, "stages.order"),
+            integer(stage.get("order"), (result.size() + 1) * 10, skillId, "stages.order"),
             strings(stage.get("entryCriteria"), skillId, false),
             strings(stage.get("exitCriteria"), skillId, false)));
       }
@@ -179,7 +189,7 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
 
   @SuppressWarnings("unchecked")
   private List<CompetencySpec> competencies(
-      Map<String, Object> meta, String skillId, List<String> defaults) {
+      Map<String, Object> meta, String skillId, List<String> defaults, int schemaVersion) {
     Object configured = meta.get("competencies");
     if (!(configured instanceof List<?> list) || list.isEmpty()) {
       List<CompetencySpec> result = new ArrayList<>();
@@ -195,24 +205,37 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
         throw invalid("Skill competency 格式无效: " + skillId);
       }
       Map<String, Object> competency = (Map<String, Object>) raw;
+      String modesField = schemaVersion >= 4 ? "modes" : "questionModes";
       List<InterviewQuestionMode> modes = strings(
-          competency.get("questionModes"), skillId, false).stream()
+          competency.get(modesField), skillId, false).stream()
           .map(value -> parseQuestionMode(value, skillId))
           .toList();
-      SkillRetrievalPolicy policy = competency.get("rag") instanceof Map<?, ?> rag
-          ? retrievalPolicy((Map<String, Object>) rag, List.of(), List.of())
-          : SkillRetrievalPolicy.disabled();
+      SkillRetrievalPolicy policy;
+      if (schemaVersion >= 4) {
+        List<String> scopes = strings(competency.get("ragScopes"), skillId, false);
+        policy = scopes.isEmpty() ? SkillRetrievalPolicy.disabled() : new SkillRetrievalPolicy(
+            true, scopes, List.of(),
+            List.of(GroundingUse.GENERATE_SCENARIO, GroundingUse.VERIFY_FACT));
+      } else {
+        policy = competency.get("rag") instanceof Map<?, ?> rag
+            ? retrievalPolicy((Map<String, Object>) rag, List.of(), List.of())
+            : SkillRetrievalPolicy.disabled();
+      }
       result.add(new CompetencySpec(
           required(competency.get("id"), skillId, "competencies.id"),
           required(competency.get("name"), skillId, "competencies.name"),
           optional(competency.get("objective")),
-          strings(competency.get("requiredEvidence"), skillId, true),
+          strings(competency.get(schemaVersion >= 4 ? "evidence" : "requiredEvidence"),
+              skillId, true),
           modes,
-          strings(competency.get("followUpAxes"), skillId, false),
-          strings(competency.get("redFlags"), skillId, false),
-          integer(competency.get("followUpLimit"), 2, skillId, "followUpLimit"),
+          strings(competency.get(schemaVersion >= 4 ? "probes" : "followUpAxes"),
+              skillId, false),
+          schemaVersion >= 4 ? List.of()
+              : strings(competency.get("redFlags"), skillId, false),
+          schemaVersion >= 4 ? 2
+              : integer(competency.get("followUpLimit"), 2, skillId, "followUpLimit"),
           policy,
-          optional(competency.get("stageId"))));
+          optional(competency.get(schemaVersion >= 4 ? "stage" : "stageId"))));
     }
     return List.copyOf(result);
   }
@@ -311,7 +334,8 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
       List<String> defaults,
       List<SkillStageSpec> stages,
       List<CompetencySpec> competencies,
-      boolean requireStageReferences) {
+      int schemaVersion) {
+    boolean requireStageReferences = schemaVersion >= 3;
     if (stages.stream().map(SkillStageSpec::id).map(String::toLowerCase).distinct().count()
         != stages.size()) {
       throw invalid("Skill stage ID 重复: " + skillId);
@@ -320,7 +344,7 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
         && stages.stream().map(SkillStageSpec::order).distinct().count() != stages.size()) {
       throw invalid("Skill stage order 重复: " + skillId);
     }
-    if (requireStageReferences && stages.stream().anyMatch(stage ->
+    if (schemaVersion == 3 && stages.stream().anyMatch(stage ->
         stage.order() <= 0 || stage.entryCriteria().isEmpty() || stage.exitCriteria().isEmpty())) {
       throw invalid("Skill stage 缺少顺序或流转条件: " + skillId);
     }

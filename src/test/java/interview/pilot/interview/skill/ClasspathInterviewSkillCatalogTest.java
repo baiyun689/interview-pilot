@@ -26,9 +26,9 @@ class ClasspathInterviewSkillCatalogTest {
             "test-development");
     assertThat(catalog.require("java-backend").defaultCompetencies())
         .contains("Java 基础与并发", "Spring 与事务", "MySQL", "Redis");
-    assertThat(catalog.require("java-backend").persona()).contains("Java 后端面试统括策略");
+    assertThat(catalog.require("java-backend").persona()).contains("Java 后端面试策略");
     assertThat(catalog.require("java-backend").rubric()).contains("证据评分规则");
-    assertThat(catalog.require("java-backend").references()).contains("java.md", "mysql.md");
+    assertThat(catalog.require("java-backend").references()).isEmpty();
     assertThat(catalog.require("java-backend").version()).matches("[0-9a-f]{64}");
     assertThat(catalog.require("java-backend").stages())
         .extracting(SkillStageSpec::id)
@@ -39,6 +39,10 @@ class ClasspathInterviewSkillCatalogTest {
         .satisfies(spec -> {
           assertThat(spec.requiredEvidence()).contains("事务传播", "失败处理");
           assertThat(spec.retrievalPolicy().enabled()).isTrue();
+          assertThat(spec.retrievalPolicy().scopes()).containsExactly("spring", "transaction");
+          assertThat(spec.retrievalPolicy().allowedUses())
+              .containsExactly(GroundingUse.GENERATE_SCENARIO, GroundingUse.VERIFY_FACT);
+          assertThat(spec.retrievalPolicy().topK()).isNull();
         });
   }
 
@@ -62,15 +66,13 @@ class ClasspathInterviewSkillCatalogTest {
   }
 
   @Test
-  void preservesTheCompleteMigratedKnowledgeWhileRuntimeCapabilitiesStayDisabled()
+  void loadsTheConciseJavaPersonaWithoutChangingLegacySkillMetadata()
       throws Exception {
     InterviewSkill java = new ClasspathInterviewSkillCatalog().require("java-backend");
     assertThat(java.persona())
-        .contains("## 全局决策顺序")
-        .contains("competencies.yml")
-        .contains("stages.yml")
-        .contains("## RAG 使用边界")
-        .contains("## 完成标准");
+        .contains("## 决策原则")
+        .contains("## RAG 资料使用规则")
+        .doesNotContain("GENERATE_SCENARIO", "VERIFY_FACT", "competencies.yml", "stages.yml");
 
     String metadata = new ClassPathResource("skills/ai-agent-dev/skill.meta.yml")
         .getContentAsString(StandardCharsets.UTF_8);
@@ -95,12 +97,19 @@ class ClasspathInterviewSkillCatalogTest {
     String stages = resource("stages.yml");
 
     assertThat(metadata)
-        .contains("schemaVersion: 3", "competencies: competencies.yml", "stages: stages.yml")
-        .doesNotContain("defaultCompetencies:", "requiredEvidence:", "questionModes:");
+        .contains("schemaVersion: 4", "icon: code")
+        .doesNotContain(
+            "resources:", "defaultCompetencies:", "retrievalScopes:", "ragKeywords:",
+            "allowedTools:", "references:", "runtime:", "toolsEnabled:");
     assertThat(competencies)
-        .contains("defaultCompetencies:", "requiredEvidence:", "stageId:");
+        .contains("evidence:", "modes:", "probes:", "stage:", "ragScopes:")
+        .doesNotContain(
+            "defaultCompetencies:", "requiredEvidence:", "questionModes:", "followUpAxes:",
+            "redFlags:", "followUpLimit:", "rag:", "allowedUses:", "topK:",
+            "candidateCount:", "minimumScore:", "contextCharacterBudget:");
     assertThat(stages)
-        .contains("id: project_deep_dive", "id: technical_depth", "id: reliability");
+        .contains("id: project_deep_dive", "id: technical_depth", "id: reliability")
+        .doesNotContain("order:", "entryCriteria:", "exitCriteria:");
     assertThat(java.competencySpecs())
         .filteredOn(spec -> spec.id().equals("distributed_reliability"))
         .singleElement()
@@ -108,9 +117,11 @@ class ClasspathInterviewSkillCatalogTest {
     assertThat(java.stages())
         .extracting(SkillStageSpec::order)
         .containsExactly(10, 20, 30);
-    assertThat(java.stages().getFirst().exitCriteria())
-        .contains("个人贡献边界清晰", "至少一项结果可核验");
-    assertThat(java.snapshot().schemaVersion()).isEqualTo(3);
+    assertThat(java.stages().getFirst().exitCriteria()).isEmpty();
+    assertThat(java.defaultCompetencies())
+        .containsExactlyElementsOf(java.competencySpecs().stream().map(CompetencySpec::name).toList());
+    assertThat(java.retrievalPolicy().enabled()).isFalse();
+    assertThat(java.snapshot().schemaVersion()).isEqualTo(4);
   }
 
   private String resource(String filename) throws Exception {
