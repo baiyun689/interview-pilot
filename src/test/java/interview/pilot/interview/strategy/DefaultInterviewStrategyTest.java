@@ -96,4 +96,26 @@ class DefaultInterviewStrategyTest {
     assertThat(moveOn.nextDirective().competency()).isEqualTo("MySQL");
     assertThat(exhaustedWithoutEvidence.decision().targetCompetency()).isEqualTo("MySQL");
   }
+
+  @Test
+  void lastUncoveredCompetencyContinuesUntilEvidenceOrTheHardTurnLimit() {
+    var only = new InterviewPlanItem(
+        "depth", "java", "Java", PlanPriority.REQUIRED, 5,
+        List.of("并发边界"), List.of(InterviewQuestionMode.MECHANISM),
+        "JD 必考", false, List.of("boundary"), 1);
+    InterviewPlan plan = InterviewPlan.execution(List.of(only), 5, List.of());
+    AnswerEvaluation assessment = new AnswerEvaluation(
+        40, "missing evidence", List.of(), List.of("并发边界"),
+        new InterviewDecision(NextStep.FOLLOW_UP, DifficultyAdjustment.KEEP,
+            "Java", "边界", "继续", 0.9));
+
+    StrategyOutcome beforeLimit = strategy.nextTurn(plan, new DecisionContext(
+        Difficulty.MEDIUM, "Java", List.of(), plan.competencies(), 1, 2, 5, 0.55), assessment);
+    StrategyOutcome atLimit = strategy.nextTurn(plan, new DecisionContext(
+        Difficulty.MEDIUM, "Java", List.of(), plan.competencies(), 1, 5, 5, 0.55), assessment);
+
+    assertThat(beforeLimit.decision().nextStep()).isEqualTo(NextStep.NEXT_TOPIC);
+    assertThat(beforeLimit.decision().targetCompetency()).isEqualTo("Java");
+    assertThat(atLimit.decision().nextStep()).isEqualTo(NextStep.FINISH);
+  }
 }

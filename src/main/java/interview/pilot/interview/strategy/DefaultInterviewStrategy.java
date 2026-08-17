@@ -66,9 +66,14 @@ public final class DefaultInterviewStrategy implements InterviewStrategy {
         .map(target -> new InterviewDecision(
             NextStep.NEXT_TOPIC, previous.difficultyAdjustment(), target, "",
             "CURRENT_ITEM_BUDGET_EXHAUSTED", previous.confidence()))
-        .orElseGet(() -> new InterviewDecision(
-            NextStep.FINISH, DifficultyAdjustment.KEEP, "", "",
-            "ALL_ITEM_BUDGETS_EXHAUSTED", previous.confidence()));
+        .orElseGet(() -> context.currentTurn() >= context.totalTurnBudget()
+            ? new InterviewDecision(
+                NextStep.FINISH, DifficultyAdjustment.KEEP, "", "",
+                "TURN_BUDGET_EXHAUSTED", previous.confidence())
+            : new InterviewDecision(
+                NextStep.NEXT_TOPIC, DifficultyAdjustment.KEEP,
+                context.currentCompetency(), "",
+                "LAST_REQUIRED_EVIDENCE_ATTEMPT", previous.confidence()));
   }
 
   private String evidenceGap(
