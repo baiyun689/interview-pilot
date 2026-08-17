@@ -83,6 +83,8 @@ app:
     batch-size: ${KNOWLEDGE_BATCH_SIZE:32}
     collection-name: knowledge_chunks_v1
     top-k: ${KNOWLEDGE_TOP_K:5}
+    candidate-count: ${KNOWLEDGE_CANDIDATE_COUNT:15}
+    context-character-budget: ${KNOWLEDGE_CONTEXT_CHARACTER_BUDGET:6000}
     similarity-threshold: ${KNOWLEDGE_SIMILARITY_THRESHOLD:0.72}
     qdrant:
       host: ${QDRANT_HOST:localhost}

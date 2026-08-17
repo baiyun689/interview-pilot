@@ -4,7 +4,8 @@ import java.util.UUID;
 
 public record KnowledgeChunk(
     String pointId, UUID documentId, String filename,
-    int chunkIndex, double score, String content) {
+    int documentRevision, int chunkIndex, String section,
+    double score, String content, Integer pageNumber) {
 
   public KnowledgeChunk {
     if (pointId == null || pointId.isBlank()) {
@@ -23,5 +24,18 @@ public record KnowledgeChunk(
       throw new IllegalArgumentException("chunkIndex must not be negative");
     }
     filename = filename == null ? "" : filename.trim();
+    if (documentRevision < 1) {
+      throw new IllegalArgumentException("documentRevision must be positive");
+    }
+    section = section == null ? "" : section.trim();
+    if (pageNumber != null && pageNumber < 1) {
+      throw new IllegalArgumentException("pageNumber must be positive");
+    }
+  }
+
+  public KnowledgeChunk(
+      String pointId, UUID documentId, String filename,
+      int chunkIndex, double score, String content) {
+    this(pointId, documentId, filename, 1, chunkIndex, "", score, content, null);
   }
 }

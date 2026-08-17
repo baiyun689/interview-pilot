@@ -126,7 +126,7 @@ public final class InterviewPlanCompiler {
           modesFor(candidate.spec(), difficulty), candidate.rationale(),
           candidate.spec().retrievalPolicy().enabled(), candidate.spec().followUpAxes(),
           Math.min(candidate.spec().followUpLimit(), Math.max(0, budgets[index] - 1)),
-          candidate.resumeEntryPoint()));
+          candidate.resumeEntryPoint(), candidate.spec().retrievalPolicy()));
     }
 
     List<PlanOmission> omitted = skill.competencySpecs().stream()

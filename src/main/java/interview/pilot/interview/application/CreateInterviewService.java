@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import interview.pilot.ai.provider.AiProviderDescriptor;
 import interview.pilot.ai.provider.AiProviderService;
 import interview.pilot.common.exception.BusinessException;
+import interview.pilot.common.observability.AiMetrics;
 import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.interview.api.CreateInterviewRequest;
 import interview.pilot.interview.api.InterviewSessionResponse;
@@ -15,12 +16,12 @@ import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.domain.GeneratedQuestion;
 import interview.pilot.interview.domain.InterviewPlan;
 import interview.pilot.interview.rag.RagContextSnapshot;
-import interview.pilot.interview.rag.RagStatus;
+import interview.pilot.interview.grounding.GroundingDirective;
+import interview.pilot.interview.grounding.KnowledgeGrounding;
+import interview.pilot.interview.grounding.GroundingUsePolicy;
 import interview.pilot.interview.skill.InterviewSkillCatalog;
 import interview.pilot.interview.skill.SkillGroup;
-import interview.pilot.knowledge.retrieval.KnowledgeRetriever;
 import interview.pilot.knowledge.retrieval.KnowledgeScopeResolver;
-import interview.pilot.knowledge.retrieval.RetrievalIntent;
 import interview.pilot.knowledge.retrieval.ValidatedKnowledgeScope;
 import interview.pilot.resume.domain.ResumeProfile;
 import interview.pilot.resume.domain.ResumeStatus;
@@ -47,8 +48,10 @@ public class CreateInterviewService {
   private final Validator validator;
   private final InterviewSkillCatalog skills;
   private final KnowledgeScopeResolver scopeResolver;
-  private final KnowledgeRetriever retriever;
+  private final KnowledgeGrounding grounding;
+  private final AiMetrics metrics;
   private final InterviewStrategy strategy = new DefaultInterviewStrategy();
+  private final QuestionGroundingValidator questionGrounding = new QuestionGroundingValidator();
 
   public CreateInterviewService(
       ResumeRepository resumes,
@@ -61,7 +64,8 @@ public class CreateInterviewService {
       Validator validator,
       InterviewSkillCatalog skills,
       KnowledgeScopeResolver scopeResolver,
-      KnowledgeRetriever retriever) {
+      KnowledgeGrounding grounding,
+      AiMetrics metrics) {
     this.resumes = resumes;
     this.providers = providers;
     this.extractor = extractor;
@@ -72,7 +76,8 @@ public class CreateInterviewService {
     this.validator = validator;
     this.skills = skills;
     this.scopeResolver = scopeResolver;
-    this.retriever = retriever;
+    this.grounding = grounding;
+    this.metrics = metrics;
   }
 
   /** Orchestrates remote calls without opening a database transaction. */
@@ -141,42 +146,34 @@ public class CreateInterviewService {
     }
     log.info("createInterview plan competencies={} budget={}", plan.competencies(), plan.totalTurnBudget());
 
-    RagContextSnapshot firstRagSnapshot = RagContextSnapshot.notConfigured();
     ValidatedKnowledgeScope scope = null;
     TurnDirective firstDirective = strategy.firstTurn(plan, request.difficulty());
 
     if (!request.knowledgeBaseIds().isEmpty()) {
       scope = scopeResolver.resolveForCreation(user, request.knowledgeBaseIds());
     }
-    if (scope != null && firstDirective.ragEnabled()) {
-      var intent = new RetrievalIntent(
-          buildQuery(plan, profile, requirements, request.difficulty()),
-          firstDirective.competency(), request.difficulty().name(),
-          profile.technicalSkills(), List.of(), 5, 0.5);
-      try {
-        var result = retriever.retrieve(scope, intent);
-        log.info("createInterview rag query=\"{}\" status={} chunks={} scores={}",
-            intent.query(), result.status(), result.chunks().size(),
-            result.chunks().stream().map(c -> String.format("%.2f", c.score())).toList());
-        firstRagSnapshot = new RagContextSnapshot(
-            convertStatus(result.status()), result.query(), result.embeddingModel(),
-            result.chunks().stream().map(c -> new RagContextSnapshot.Chunk(
-                c.pointId(), c.documentId(), c.filename(),
-                c.chunkIndex(), c.score(), c.content())).toList(),
-            result.failureReason());
-      } catch (RuntimeException exception) {
-        firstRagSnapshot = new RagContextSnapshot(
-            RagStatus.UNAVAILABLE, "", "", List.of(), exception.getMessage());
-      }
-    }
+    var groundingSnapshot = grounding.ground(
+        scope, GroundingDirective.from(firstDirective, List.of()));
+    RagContextSnapshot firstRagSnapshot = groundingSnapshot.toRagContext();
+    log.info("createInterview grounding status={} chunks={} scores={}",
+        groundingSnapshot.status(), groundingSnapshot.chunks().size(),
+        groundingSnapshot.chunks().stream().map(c -> String.format("%.2f", c.score())).toList());
 
     GeneratedQuestion first = questions.firstQuestion(
-        providerId, plan, profile, requirements, skill.snapshot(), firstRagSnapshot,
+        providerId, plan, profile, requirements, skill.snapshot(),
+        GroundingUsePolicy.allowsQuestionGeneration(firstDirective)
+            ? firstRagSnapshot : firstRagSnapshot.hiddenForDisallowedUse(),
         firstDirective);
     if (first == null) {
       log.warn("createInterview failed: AI question generator returned null skill={}", request.skillId());
       throw invalidAiOutput();
     }
+    first = questionGrounding.validate(first, firstRagSnapshot, firstDirective);
+    firstRagSnapshot = firstRagSnapshot.withQuestion(first);
+    metrics.interviewGrounding(
+        skill.id(), firstDirective.competency(), firstRagSnapshot.status().name(),
+        firstRagSnapshot.chunks().stream().mapToInt(chunk -> chunk.content().length()).sum(),
+        first.evidenceRefs().size());
     if (!firstDirective.competency().equalsIgnoreCase(first.targetCompetency())) {
       log.warn("createInterview failed: AI first question competency '{}' did not match directive '{}'",
           first.targetCompetency(), firstDirective.competency());
@@ -230,27 +227,6 @@ public class CreateInterviewService {
       throw new IllegalArgumentException("Authenticated user is required");
     }
     return user.databaseId();
-  }
-
-  private String buildQuery(InterviewPlan plan, ResumeProfile profile,
-      Object requirements, Difficulty difficulty) {
-    var sb = new StringBuilder();
-    sb.append(String.join(" ", plan.competencies()));
-    if (profile.technicalSkills() != null && !profile.technicalSkills().isEmpty()) {
-      sb.append(' ').append(String.join(" ", profile.technicalSkills().subList(
-          0, Math.min(5, profile.technicalSkills().size()))));
-    }
-    sb.append(' ').append(difficulty.name().toLowerCase(java.util.Locale.ROOT));
-    return sb.toString();
-  }
-
-  private static RagStatus convertStatus(
-      interview.pilot.knowledge.retrieval.RetrievalStatus status) {
-    return switch (status) {
-      case RETRIEVED -> RagStatus.RETRIEVED;
-      case NO_MATCH -> RagStatus.NO_MATCH;
-      case UNAVAILABLE -> RagStatus.UNAVAILABLE;
-    };
   }
 
 }

@@ -31,4 +31,22 @@ class AiMetricsTest {
     assertThat(registry.get("interview_pilot.optimistic_lock.conflicts").counter().count())
         .isEqualTo(1);
   }
+
+  @Test
+  void recordsBoundedGroundingUsageDegradationCitationsAndInjectionSize() {
+    var registry = new SimpleMeterRegistry();
+    var metrics = new AiMetrics(registry);
+
+    metrics.interviewGrounding("java-backend", "Spring 与事务", "NO_MATCH", 1200, 0);
+    metrics.interviewGrounding("java-backend", "Spring 与事务", "RETRIEVED", 800, 2);
+
+    assertThat(registry.get("interview_pilot.interview.grounding.turns").counters())
+        .hasSize(2);
+    assertThat(registry.get("interview_pilot.interview.grounding.degraded").counter().count())
+        .isEqualTo(1);
+    assertThat(registry.get("interview_pilot.interview.grounding.citations")
+        .tag("skill", "java-backend").counter().count()).isEqualTo(2);
+    assertThat(registry.get("interview_pilot.interview.grounding.injected_characters").summaries())
+        .hasSize(2);
+  }
 }

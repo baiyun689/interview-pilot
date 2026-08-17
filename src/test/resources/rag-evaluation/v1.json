@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "java-concurrency",
+      "expectNoMatch": false,
+      "relevantIds": ["java-1"],
+      "candidates": [
+        {"id":"noise-1","score":0.61,"content":"Java 基础语法"},
+        {"id":"java-1","score":0.94,"content":"线程池饱和后的拒绝策略与有界队列"}
+      ]
+    },
+    {
+      "id": "spring-transactions",
+      "expectNoMatch": false,
+      "relevantIds": ["spring-1","spring-2"],
+      "candidates": [
+        {"id":"spring-2","score":0.89,"content":"REQUIRES_NEW 会挂起现有事务"},
+        {"id":"spring-1","score":0.96,"content":"REQUIRED 默认加入现有事务"},
+        {"id":"noise-2","score":0.52,"content":"Spring MVC 参数绑定"}
+      ]
+    },
+    {
+      "id": "rag-grounding",
+      "expectNoMatch": false,
+      "relevantIds": ["rag-1"],
+      "candidates": [
+        {"id":"rag-1","score":0.92,"content":"召回片段必须保存稳定 source ID"},
+        {"id":"noise-3","score":0.66,"content":"通用语言模型介绍"}
+      ]
+    },
+    {
+      "id": "system-design-no-match",
+      "expectNoMatch": true,
+      "relevantIds": [],
+      "candidates": [
+        {"id":"noise-4","score":0.44,"content":"与容量规划无关的内容"}
+      ]
+    }
+  ]
+}

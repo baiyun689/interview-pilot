@@ -4,6 +4,7 @@ import java.util.List;
 
 import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.skill.InterviewQuestionMode;
+import interview.pilot.interview.skill.SkillRetrievalPolicy;
 
 public record TurnDirective(
     String stageId,
@@ -14,7 +15,8 @@ public record TurnDirective(
     boolean ragEnabled,
     String probeFocus,
     String reason,
-    String resumeEntryPoint) {
+    String resumeEntryPoint,
+    SkillRetrievalPolicy retrievalPolicy) {
 
   public TurnDirective {
     stageId = required(stageId, "stageId", 64);
@@ -25,20 +27,33 @@ public record TurnDirective(
     probeFocus = probeFocus == null ? "" : probeFocus.trim();
     reason = reason == null ? "" : reason.trim();
     resumeEntryPoint = resumeEntryPoint == null ? "" : resumeEntryPoint.trim();
+    retrievalPolicy = retrievalPolicy == null
+        ? (ragEnabled ? new SkillRetrievalPolicy(true, List.of(), List.of(),
+            List.of("question_generation", "fact_verification"))
+            : SkillRetrievalPolicy.disabled())
+        : retrievalPolicy;
+  }
+
+  public TurnDirective(
+      String stageId, String competency, Difficulty difficulty, List<String> evidenceTargets,
+      InterviewQuestionMode questionMode, boolean ragEnabled, String probeFocus, String reason,
+      String resumeEntryPoint) {
+    this(stageId, competency, difficulty, evidenceTargets, questionMode, ragEnabled,
+        probeFocus, reason, resumeEntryPoint, null);
   }
 
   public TurnDirective(
       String stageId, String competency, Difficulty difficulty, List<String> evidenceTargets,
       InterviewQuestionMode questionMode, boolean ragEnabled, String probeFocus, String reason) {
     this(stageId, competency, difficulty, evidenceTargets, questionMode, ragEnabled,
-        probeFocus, reason, "");
+        probeFocus, reason, "", null);
   }
 
   public TurnDirective(
       String stageId, String competency, Difficulty difficulty, List<String> evidenceTargets,
       InterviewQuestionMode questionMode, boolean ragEnabled, String reason) {
     this(stageId, competency, difficulty, evidenceTargets, questionMode, ragEnabled,
-        "", reason, "");
+        "", reason, "", null);
   }
 
   private static String required(String value, String field, int max) {

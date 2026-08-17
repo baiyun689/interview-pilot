@@ -66,7 +66,7 @@ class SubmitAnswerOwnershipTest {
             java.time.Duration.ofSeconds(1), java.time.Duration.ofSeconds(1)),
         mock(InterviewCompletionService.class),
         mock(interview.pilot.knowledge.retrieval.KnowledgeScopeResolver.class),
-        mock(interview.pilot.knowledge.retrieval.KnowledgeRetriever.class),
+        mock(interview.pilot.interview.grounding.KnowledgeGrounding.class),
         transactions, mock(AiMetrics.class));
     InterviewTurnClaim claim = new InterviewTurnClaim(
         InterviewTurnClaim.State.OWNER, 10L, 20L, 30L, requestId,

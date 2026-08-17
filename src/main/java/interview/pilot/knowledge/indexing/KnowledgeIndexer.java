@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.nio.charset.StandardCharsets;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,8 +56,8 @@ public class KnowledgeIndexer {
   /**
    * Executes parse → split → embed → upsert.
    * When the VectorStore bean is available (knowledge enabled), chunks are embedded
-   * and upserted into Qdrant. Old vectors for this document are deleted first to
-   * support reindexing. Runs entirely outside a database transaction.
+   * and deterministically upserted into Qdrant. Previous revisions remain available
+   * until revision-aware cleanup proves no active interview references them.
    *
    * @return number of chunks produced, or -1 if the document revision is stale
    */
@@ -88,18 +89,22 @@ public class KnowledgeIndexer {
     }
 
     List<String> chunks = splitter.split(parsed);
-    if (vectorStore != null && !chunks.isEmpty()) {
-      embedAndUpsert(document, chunks);
+    KnowledgeDocumentEntity current = current(documentUuid, expectedRevision);
+    if (current == null) return -1;
+    if (!chunks.isEmpty()) {
+      embedAndUpsert(current, chunks, expectedRevision);
     }
 
-    document.setParsedText(parsed);
-    document.setEmbeddingSnapshot(
-        vectorStore != null ? embeddingSnapshot() : null);
-    documentRepository.save(document);
+    current = current(documentUuid, expectedRevision);
+    if (current == null) return -1;
+    current.setParsedText(parsed);
+    current.setEmbeddingSnapshot(embeddingSnapshot());
+    documentRepository.save(current);
     return chunks.size();
   }
 
-  private void embedAndUpsert(KnowledgeDocumentEntity document, List<String> chunks) {
+  private void embedAndUpsert(
+      KnowledgeDocumentEntity document, List<String> chunks, int expectedRevision) {
     KnowledgeBaseEntity kb = document.getKnowledgeBase();
     UUID userId = userAccountRepository.findById(kb.getUserAccountId())
         .orElseThrow(() -> new IllegalArgumentException(
@@ -108,15 +113,7 @@ public class KnowledgeIndexer {
     String kbId = kb.getKnowledgeBaseId().toString();
     String docId = document.getDocumentId().toString();
     String filename = document.getOriginalFilename();
-    String revision = String.valueOf(document.getIndexRevision());
-
-    // Delete old vectors for this document before re-adding (supports reindex)
-    try {
-      vectorStore.delete(new Filter.Expression(Filter.ExpressionType.EQ,
-          new Filter.Key("document_id"), new Filter.Value(docId)));
-    } catch (RuntimeException exception) {
-      log.warn("Failed to delete old vectors for document {}: {}", docId, exception.getMessage());
-    }
+    String revision = String.valueOf(expectedRevision);
 
     List<org.springframework.ai.document.Document> docs = new ArrayList<>(chunks.size());
     for (int i = 0; i < chunks.size(); i++) {
@@ -127,12 +124,23 @@ public class KnowledgeIndexer {
       metadata.put("filename", filename);
       metadata.put("chunk_index", String.valueOf(i));
       metadata.put("index_revision", revision);
-      docs.add(new org.springframework.ai.document.Document(chunks.get(i), metadata));
+      String pointId = UUID.nameUUIDFromBytes(
+          (docId + ":" + expectedRevision + ":" + i).getBytes(StandardCharsets.UTF_8)).toString();
+      docs.add(org.springframework.ai.document.Document.builder()
+          .id(pointId).text(chunks.get(i)).metadata(metadata).build());
     }
 
     vectorStore.add(docs);
     log.info("Indexed {} chunks for document {} (user={}, kb={})",
         chunks.size(), docId, userId, kbId);
+  }
+
+  private KnowledgeDocumentEntity current(UUID documentUuid, int expectedRevision) {
+    KnowledgeDocumentEntity current = documentRepository
+        .findByDocumentIdWithKnowledgeBase(documentUuid).orElse(null);
+    if (current == null || current.getIndexRevision() != expectedRevision
+        || current.getStatus() != KnowledgeDocumentStatus.PROCESSING) return null;
+    return current;
   }
 
   private String embeddingSnapshot() {

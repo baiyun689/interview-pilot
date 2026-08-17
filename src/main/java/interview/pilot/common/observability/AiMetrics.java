@@ -80,6 +80,25 @@ public class AiMetrics {
         reason).increment();
   }
 
+  public void interviewGrounding(
+      String skillId, String competency, String status, int injectedCharacters,
+      int citationCount) {
+    String safeSkill = boundedDimension(skillId);
+    String safeCompetency = boundedDimension(competency);
+    String safeStatus = boundedDimension(status);
+    meters.counter("interview_pilot.interview.grounding.turns",
+        "skill", safeSkill, "competency", safeCompetency, "status", safeStatus).increment();
+    meters.summary("interview_pilot.interview.grounding.injected_characters",
+        "skill", safeSkill, "status", safeStatus).record(Math.max(0, injectedCharacters));
+    meters.counter("interview_pilot.interview.grounding.citations",
+        "skill", safeSkill, "competency", safeCompetency)
+        .increment(Math.max(0, citationCount));
+    if (!"retrieved".equals(safeStatus)) {
+      meters.counter("interview_pilot.interview.grounding.degraded",
+          "skill", safeSkill, "status", safeStatus).increment();
+    }
+  }
+
   public void afterCommit(Runnable recording) {
     if (TransactionSynchronizationManager.isSynchronizationActive()) {
       TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -101,5 +120,12 @@ public class AiMetrics {
     if (provider == null || provider.isBlank()) return "default";
     return provider.length() <= 64 && provider.matches("[A-Za-z0-9_-]+")
         ? provider.toLowerCase(Locale.ROOT) : "other";
+  }
+
+  private String boundedDimension(String value) {
+    if (value == null || value.isBlank()) return "unknown";
+    String normalized = value.trim().toLowerCase(Locale.ROOT)
+        .replaceAll("[^\\p{L}\\p{N}_-]", "_");
+    return normalized.length() <= 64 ? normalized : "other";
   }
 }

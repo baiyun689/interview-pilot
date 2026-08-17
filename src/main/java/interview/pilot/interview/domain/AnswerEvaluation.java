@@ -9,7 +9,9 @@ public record AnswerEvaluation(
     List<String> evidence,
     List<String> missingPoints,
     List<String> redFlags,
-    InterviewDecision suggestedDecision) {
+    InterviewDecision suggestedDecision,
+    List<ReferenceFact> referenceFacts,
+    List<ReferenceFact> conflictFacts) {
 
   public AnswerEvaluation {
     if (!Double.isFinite(score) || score < 0 || score > 100) {
@@ -20,12 +22,33 @@ public record AnswerEvaluation(
     missingPoints = normalizedItems(missingPoints, "missingPoints");
     redFlags = redFlags == null ? List.of() : normalizedItems(redFlags, "redFlags");
     suggestedDecision = Objects.requireNonNull(suggestedDecision, "suggestedDecision must not be null");
+    referenceFacts = referenceFacts == null ? List.of() : List.copyOf(referenceFacts);
+    conflictFacts = conflictFacts == null ? List.of() : List.copyOf(conflictFacts);
+  }
+
+  public AnswerEvaluation(
+      double score, String feedback, List<String> evidence, List<String> missingPoints,
+      List<String> redFlags, InterviewDecision suggestedDecision) {
+    this(score, feedback, evidence, missingPoints, redFlags, suggestedDecision, List.of(), List.of());
   }
 
   public AnswerEvaluation(
       double score, String feedback, List<String> evidence, List<String> missingPoints,
       InterviewDecision suggestedDecision) {
     this(score, feedback, evidence, missingPoints, List.of(), suggestedDecision);
+  }
+
+  public record ReferenceFact(String sourceId, String fact) {
+    public ReferenceFact {
+      sourceId = required(sourceId, "sourceId");
+      fact = required(fact, "fact");
+    }
+
+    private static String required(String value, String name) {
+      String normalized = value == null ? "" : value.trim();
+      if (normalized.isEmpty()) throw new IllegalArgumentException(name + " is required");
+      return normalized;
+    }
   }
 
   private static List<String> normalizedItems(List<String> values, String name) {

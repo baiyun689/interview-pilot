@@ -164,6 +164,7 @@ class QdrantKnowledgeRetrieverIT {
         .anySatisfy(chunk -> {
           assertThat(chunk.documentId()).isEqualTo(DOC_A);
           assertThat(chunk.content()).contains("Spring事务");
+          assertThat(chunk.score()).isGreaterThan(0.0);
         });
   }
 

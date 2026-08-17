@@ -3,6 +3,7 @@ package interview.pilot.interview.domain;
 import java.util.List;
 
 import interview.pilot.interview.skill.InterviewQuestionMode;
+import interview.pilot.interview.skill.SkillRetrievalPolicy;
 
 public record InterviewPlanItem(
     String stageId,
@@ -16,7 +17,8 @@ public record InterviewPlanItem(
     boolean ragEnabled,
     List<String> followUpAxes,
     int followUpLimit,
-    String resumeEntryPoint) {
+    String resumeEntryPoint,
+    SkillRetrievalPolicy retrievalPolicy) {
 
   public InterviewPlanItem {
     stageId = required(stageId, "stageId", 64);
@@ -39,6 +41,20 @@ public record InterviewPlanItem(
       throw new IllegalArgumentException("followUpLimit must be between 0 and 5");
     }
     resumeEntryPoint = resumeEntryPoint == null ? "" : resumeEntryPoint.trim();
+    retrievalPolicy = retrievalPolicy == null
+        ? (ragEnabled ? new SkillRetrievalPolicy(true, List.of(), List.of(),
+            List.of("question_generation", "fact_verification"))
+            : SkillRetrievalPolicy.disabled())
+        : retrievalPolicy;
+  }
+
+  public InterviewPlanItem(
+      String stageId, String competencyId, String competency, PlanPriority priority,
+      int turnBudget, List<String> evidenceTargets, List<InterviewQuestionMode> questionModes,
+      String rationale, boolean ragEnabled, List<String> followUpAxes, int followUpLimit,
+      String resumeEntryPoint) {
+    this(stageId, competencyId, competency, priority, turnBudget, evidenceTargets,
+        questionModes, rationale, ragEnabled, followUpAxes, followUpLimit, resumeEntryPoint, null);
   }
 
   public InterviewPlanItem(
@@ -46,7 +62,7 @@ public record InterviewPlanItem(
       int turnBudget, List<String> evidenceTargets, List<InterviewQuestionMode> questionModes,
       String rationale, boolean ragEnabled, List<String> followUpAxes, int followUpLimit) {
     this(stageId, competencyId, competency, priority, turnBudget, evidenceTargets,
-        questionModes, rationale, ragEnabled, followUpAxes, followUpLimit, "");
+        questionModes, rationale, ragEnabled, followUpAxes, followUpLimit, "", null);
   }
 
   public InterviewPlanItem(
@@ -55,7 +71,7 @@ public record InterviewPlanItem(
       String rationale, boolean ragEnabled) {
     this(stageId, competencyId, competency, priority, turnBudget, evidenceTargets,
         questionModes, rationale, ragEnabled, List.of(),
-        Math.min(2, Math.max(0, turnBudget - 1)), "");
+        Math.min(2, Math.max(0, turnBudget - 1)), "", null);
   }
 
   public static InterviewPlanItem legacy(String competency, int turnBudget, int index) {
@@ -67,7 +83,7 @@ public record InterviewPlanItem(
             InterviewQuestionMode.FAILURE),
         "历史能力计划兼容项", false,
         List.of("experience", "mechanism", "failure"),
-        Math.min(2, Math.max(0, turnBudget - 1)), "");
+        Math.min(2, Math.max(0, turnBudget - 1)), "", SkillRetrievalPolicy.disabled());
   }
 
   private static String required(String value, String field, int max) {

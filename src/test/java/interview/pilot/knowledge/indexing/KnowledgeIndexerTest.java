@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 import java.io.ByteArrayInputStream;
@@ -76,7 +77,11 @@ class KnowledgeIndexerTest {
           .containsEntry("document_id", documentId.toString())
           .containsEntry("index_revision", "1")
           .containsKey("chunk_index");
+      assertThat(chunk.getId()).isEqualTo(UUID.nameUUIDFromBytes(
+          (documentId + ":1:" + chunk.getMetadata().get("chunk_index"))
+              .getBytes(StandardCharsets.UTF_8)).toString());
     });
+    verify(vectorStore, never()).delete(any(org.springframework.ai.vectorstore.filter.Filter.Expression.class));
   }
 
   @Test

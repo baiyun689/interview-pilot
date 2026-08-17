@@ -2,11 +2,8 @@ package interview.pilot.knowledge.retrieval;
 
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -25,12 +22,11 @@ import interview.pilot.knowledge.config.KnowledgeProperties;
 @ConditionalOnProperty(prefix = "app.knowledge", name = "enabled", havingValue = "true")
 public class QdrantKnowledgeRetriever implements KnowledgeRetriever {
   private static final Logger log = LoggerFactory.getLogger(QdrantKnowledgeRetriever.class);
-  private static final int MIN_SEARCH_CANDIDATES = 12;
-
   private final VectorStore vectorStore;
   private final KnowledgeProperties properties;
   private final AiMetrics metrics;
   private final String embeddingModel;
+  private final KnowledgeRanker ranker = new KnowledgeRanker();
 
   public QdrantKnowledgeRetriever(
       VectorStore vectorStore, KnowledgeProperties properties, AiMetrics metrics) {
@@ -45,7 +41,7 @@ public class QdrantKnowledgeRetriever implements KnowledgeRetriever {
     long started = System.nanoTime();
     try {
       Filter.Expression filter = buildFilter(scope);
-      int candidateCount = Math.max(MIN_SEARCH_CANDIDATES, intent.topK() * 3);
+      int candidateCount = Math.max(properties.candidateCount(), intent.topK());
       var request = SearchRequest.builder()
           .query(intent.query())
           .topK(candidateCount)
@@ -61,7 +57,14 @@ public class QdrantKnowledgeRetriever implements KnowledgeRetriever {
         return RetrievedKnowledge.noMatch(intent.query(), embeddingModel, latency);
       }
 
-      List<KnowledgeChunk> chunks = deduplicate(toChunks(results), intent.topK());
+      List<KnowledgeChunk> chunks = ranker.rank(
+          excludeTopics(toChunks(results), intent.excludeTopics()),
+          intent.topK(), intent.similarityThreshold(),
+          properties.contextCharacterBudget());
+      if (chunks.isEmpty()) {
+        metrics.knowledgeRetrievalDuration("NO_MATCH", latency, 0);
+        return RetrievedKnowledge.noMatch(intent.query(), embeddingModel, latency);
+      }
       metrics.knowledgeRetrievalDuration("RETRIEVED", latency, chunks.size());
       return new RetrievedKnowledge(
           RetrievalStatus.RETRIEVED, intent.query(), embeddingModel,
@@ -123,30 +126,18 @@ public class QdrantKnowledgeRetriever implements KnowledgeRetriever {
       UUID documentId = parseUuid(meta.get("document_id"));
       if (documentId == null) continue;
       String filename = stringOrEmpty(meta.get("filename"));
+      int documentRevision = Math.max(1, parseInt(meta.get("index_revision")));
       int chunkIndex = parseInt(meta.get("chunk_index"));
-      double score = 0.0; // Spring AI VectorStore abstraction does not expose per-document scores
+      String section = stringOrEmpty(meta.get("section"));
+      Integer pageNumber = positiveInt(meta.get("page_number"));
+      Double documentScore = doc.getScore();
+      double score = documentScore == null ? 0.0 : documentScore;
 
-      chunks.add(new KnowledgeChunk(pointId, documentId, filename, chunkIndex, score, doc.getText()));
+      chunks.add(new KnowledgeChunk(
+          pointId, documentId, filename, documentRevision, chunkIndex, section,
+          score, doc.getText(), pageNumber));
     }
     return chunks;
-  }
-
-  private List<KnowledgeChunk> deduplicate(List<KnowledgeChunk> chunks, int maxCount) {
-    if (chunks.size() <= maxCount) return chunks;
-
-    // Keep highest-scoring chunk per document
-    List<KnowledgeChunk> result = new ArrayList<>();
-    Set<String> seenDocumentIds = new HashSet<>();
-    for (KnowledgeChunk chunk : chunks) {
-      String docKey = chunk.documentId().toString();
-      if (seenDocumentIds.add(docKey)) {
-        result.add(chunk);
-      }
-    }
-    if (result.size() <= maxCount) return result;
-
-    // Cap at maxCount
-    return List.copyOf(result.subList(0, Math.min(maxCount, result.size())));
   }
 
   private static UUID parseUuid(Object value) {
@@ -169,6 +160,20 @@ public class QdrantKnowledgeRetriever implements KnowledgeRetriever {
     } catch (NumberFormatException exception) {
       return 0;
     }
+  }
+
+  private static Integer positiveInt(Object value) {
+    int parsed = parseInt(value);
+    return parsed > 0 ? parsed : null;
+  }
+
+  private List<KnowledgeChunk> excludeTopics(
+      List<KnowledgeChunk> chunks, List<String> excludedTopics) {
+    if (excludedTopics.isEmpty()) return chunks;
+    return chunks.stream().filter(chunk -> excludedTopics.stream().noneMatch(topic ->
+        !topic.isBlank() && chunk.content().toLowerCase(java.util.Locale.ROOT)
+            .contains(topic.toLowerCase(java.util.Locale.ROOT))))
+        .toList();
   }
 
   private static String describe(RuntimeException exception) {

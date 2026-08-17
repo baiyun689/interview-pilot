@@ -26,6 +26,9 @@ import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.domain.GeneratedQuestion;
 import interview.pilot.interview.domain.InterviewPlan;
 import interview.pilot.interview.domain.JobRequirements;
+import interview.pilot.interview.grounding.GroundingSnapshot;
+import interview.pilot.interview.grounding.GroundingStatus;
+import interview.pilot.interview.grounding.KnowledgeGrounding;
 import interview.pilot.interview.skill.ClasspathInterviewSkillCatalog;
 import interview.pilot.resume.domain.ResumeProfile;
 import interview.pilot.resume.domain.ResumeStatus;
@@ -66,10 +69,11 @@ class CreateInterviewServiceTest {
     when(store.create(any())).thenReturn(response("deepseek", "deepseek-chat"));
 
     var scopeResolver = mock(interview.pilot.knowledge.retrieval.KnowledgeScopeResolver.class);
-    var retriever = mock(interview.pilot.knowledge.retrieval.KnowledgeRetriever.class);
+    var retriever = disabledGrounding();
     CreateInterviewService service = new CreateInterviewService(
         resumes, providers, extractor, planner, questions, store, objectMapper, validator,
-        new ClasspathInterviewSkillCatalog(), scopeResolver, retriever);
+        new ClasspathInterviewSkillCatalog(), scopeResolver, retriever,
+        mock(interview.pilot.common.observability.AiMetrics.class));
 
     InterviewSessionResponse result = service.create(LEGACY_USER,new CreateInterviewRequest(
         7L, " Backend Engineer ", " Build reliable Java services ", Difficulty.MEDIUM, 8,
@@ -101,10 +105,11 @@ class CreateInterviewServiceTest {
     when(resumes.findByIdAndUserAccountId(7L, 1L)).thenReturn(java.util.Optional.of(pending));
 
     var scopeResolver = mock(interview.pilot.knowledge.retrieval.KnowledgeScopeResolver.class);
-    var retriever = mock(interview.pilot.knowledge.retrieval.KnowledgeRetriever.class);
+    var retriever = disabledGrounding();
     CreateInterviewService service = new CreateInterviewService(
         resumes, providers, extractor, planner, questions, store, objectMapper, validator,
-        new ClasspathInterviewSkillCatalog(), scopeResolver, retriever);
+        new ClasspathInterviewSkillCatalog(), scopeResolver, retriever,
+        mock(interview.pilot.common.observability.AiMetrics.class));
 
     assertThatThrownBy(() -> service.create(LEGACY_USER,new CreateInterviewRequest(
         7L, "Backend Engineer", "Build reliable Java services", Difficulty.MEDIUM, 8, null)))
@@ -135,10 +140,11 @@ class CreateInterviewServiceTest {
     when(planner.plan(eq("qwen"), eq(profile()), eq(job), eq(Difficulty.MEDIUM), eq(8), any()))
         .thenReturn(new InterviewPlan(List.of("Java"), 9));
     var scopeResolver = mock(interview.pilot.knowledge.retrieval.KnowledgeScopeResolver.class);
-    var retriever = mock(interview.pilot.knowledge.retrieval.KnowledgeRetriever.class);
+    var retriever = disabledGrounding();
     var service = new CreateInterviewService(
         resumes, providers, extractor, planner, questions, store, new ObjectMapper(), validator,
-        new ClasspathInterviewSkillCatalog(), scopeResolver, retriever);
+        new ClasspathInterviewSkillCatalog(), scopeResolver, retriever,
+        mock(interview.pilot.common.observability.AiMetrics.class));
 
     assertThatThrownBy(() -> service.create(LEGACY_USER,new CreateInterviewRequest(
         7L, "Backend Engineer", "Build reliable Java services", Difficulty.MEDIUM, 8, null)))
@@ -160,7 +166,7 @@ class CreateInterviewServiceTest {
     InterviewCreationStore store = mock(InterviewCreationStore.class);
     Validator validator = mock(Validator.class);
     var scopeResolver = mock(interview.pilot.knowledge.retrieval.KnowledgeScopeResolver.class);
-    var retriever = mock(interview.pilot.knowledge.retrieval.KnowledgeRetriever.class);
+    var retriever = disabledGrounding();
     JobRequirements job = new JobRequirements(List.of("Java", "Spring"), List.of());
     when(resumes.findByIdAndUserAccountId(7L, 1L))
         .thenReturn(java.util.Optional.of(readyResume()));
@@ -172,7 +178,8 @@ class CreateInterviewServiceTest {
         .thenReturn(new InterviewPlan(List.of("Java"), 8));
     var service = new CreateInterviewService(
         resumes, providers, extractor, planner, questions, store, new ObjectMapper(), validator,
-        new ClasspathInterviewSkillCatalog(), scopeResolver, retriever);
+        new ClasspathInterviewSkillCatalog(), scopeResolver, retriever,
+        mock(interview.pilot.common.observability.AiMetrics.class));
 
     assertThatThrownBy(() -> service.create(LEGACY_USER,new CreateInterviewRequest(
         7L, "Backend Engineer", "Build reliable Java services", Difficulty.MEDIUM, 8, null)))
@@ -190,6 +197,11 @@ class CreateInterviewServiceTest {
          "strengths":["Reliable services"],"risks":[]}
         """);
     return resume;
+  }
+
+  private static KnowledgeGrounding disabledGrounding() {
+    return (scope, directive) -> new GroundingSnapshot(
+        GroundingStatus.DISABLED, "", "", List.of(), null);
   }
 
   private static ResumeProfile profile() {

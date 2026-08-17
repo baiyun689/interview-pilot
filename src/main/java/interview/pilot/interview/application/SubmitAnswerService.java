@@ -37,10 +37,11 @@ import interview.pilot.interview.infrastructure.InterviewTurnRepository;
 import interview.pilot.interview.infrastructure.JobProfileRepository;
 import interview.pilot.interview.rag.RagContextSnapshot;
 import interview.pilot.interview.rag.RagStatus;
+import interview.pilot.interview.grounding.GroundingDirective;
+import interview.pilot.interview.grounding.KnowledgeGrounding;
+import interview.pilot.interview.grounding.GroundingUsePolicy;
 import interview.pilot.interview.skill.SkillSnapshot;
-import interview.pilot.knowledge.retrieval.KnowledgeRetriever;
 import interview.pilot.knowledge.retrieval.KnowledgeScopeResolver;
-import interview.pilot.knowledge.retrieval.RetrievalIntent;
 import interview.pilot.knowledge.retrieval.ValidatedKnowledgeScope;
 import interview.pilot.resume.domain.ResumeProfile;
 import interview.pilot.interview.strategy.DefaultInterviewStrategy;
@@ -66,6 +67,8 @@ public class SubmitAnswerService {
   private final QuestionGenerator questionGenerator;
   private final InterviewStrategy strategy = new DefaultInterviewStrategy();
   private final AnswerEvidenceValidator evidenceValidator = new AnswerEvidenceValidator();
+  private final AnswerGroundingValidator answerGrounding = new AnswerGroundingValidator();
+  private final QuestionGroundingValidator questionGrounding = new QuestionGroundingValidator();
   private final InterviewDecisionContextFactory decisionContexts =
       new InterviewDecisionContextFactory();
   private final InterviewSessionRepository sessions;
@@ -79,7 +82,7 @@ public class SubmitAnswerService {
   private final InterviewProcessingSla processingSla;
   private final InterviewCompletionService completionService;
   private final KnowledgeScopeResolver scopeResolver;
-  private final KnowledgeRetriever retriever;
+  private final KnowledgeGrounding grounding;
   private final TransactionTemplate requiresNew;
   private final AiMetrics metrics;
 
@@ -98,7 +101,7 @@ public class SubmitAnswerService {
       InterviewProcessingSla processingSla,
       InterviewCompletionService completionService,
       KnowledgeScopeResolver scopeResolver,
-      KnowledgeRetriever retriever,
+      KnowledgeGrounding grounding,
       PlatformTransactionManager transactionManager,
       AiMetrics metrics) {
     this.claimer = claimer;
@@ -115,7 +118,7 @@ public class SubmitAnswerService {
     this.processingSla = processingSla;
     this.completionService = completionService;
     this.scopeResolver = scopeResolver;
-    this.retriever = retriever;
+    this.grounding = grounding;
     this.requiresNew = new TransactionTemplate(transactionManager);
     this.requiresNew.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     this.metrics = metrics;
@@ -172,12 +175,16 @@ public class SubmitAnswerService {
           context.providerId(), context.modelName(), claim.turnNo(), context.currentDifficulty(),
           context.currentCompetency(), context.question(), context.answer(),
           context.requirements().competencies(), context.plan().competencies(),
-          context.priorEvidence(), context.skill(), currentRag, context.currentDirective()));
+          context.priorEvidence(), context.skill(),
+          GroundingUsePolicy.allowsFactVerification(context.currentDirective())
+              ? currentRag : currentRag.hiddenForDisallowedUse(),
+          context.currentDirective()));
       long evalMs = (System.nanoTime() - evalStart) / 1_000_000;
       if (evaluation == null) {
         throw new IllegalStateException("Answer evaluator returned no result");
       }
       evaluation = evidenceValidator.validate(request.answer(), evaluation);
+      evaluation = answerGrounding.validate(evaluation, currentRag, context.currentDirective());
       log.info("interview session={} turn={} step=evaluate provider={} model={} score={} latency_ms={}",
           sid, claim.turnNo(), context.providerId(), context.modelName(),
           evaluation.score(), evalMs);
@@ -198,17 +205,28 @@ public class SubmitAnswerService {
           nextDifficulty, decision.confidence());
 
       // Retrieve next RAG snapshot after Java decision
-      RagContextSnapshot nextRag = finish || !nextDirective.ragEnabled()
+      RagContextSnapshot nextRag = finish
           ? RagContextSnapshot.notConfigured()
-          : retrieveNextRag(user, sessionId, claim.turnNo(), context, decision, nextDifficulty);
+          : retrieveNextGrounding(user, sessionId, claim.turnNo(), context, nextDirective);
 
       long genStart = System.nanoTime();
       GeneratedQuestion nextQuestion = finish ? null : questionGenerator.nextQuestion(
           context.providerId(), context.modelName(),
           new QuestionContext(
               context.plan(), context.resume(), context.requirements(), nextDifficulty,
-              context.question(), context.answer(), context.skill()).withRag(nextRag),
+              context.question(), context.answer(), context.skill()).withRag(
+                  GroundingUsePolicy.allowsQuestionGeneration(nextDirective)
+                      ? nextRag : nextRag.hiddenForDisallowedUse()),
           decision, nextDirective);
+      if (!finish) nextQuestion = questionGrounding.validate(
+          nextQuestion, nextRag, nextDirective);
+      if (!finish) nextRag = nextRag.withQuestion(nextQuestion);
+      if (!finish) {
+        metrics.interviewGrounding(
+            context.skill().id(), nextDirective.competency(), nextRag.status().name(),
+            nextRag.chunks().stream().mapToInt(chunk -> chunk.content().length()).sum(),
+            nextQuestion.evidenceRefs().size());
+      }
       long genMs = (System.nanoTime() - genStart) / 1_000_000;
       validateNextQuestion(nextQuestion, decision, context.plan(), finish);
       if (!finish) {
@@ -479,7 +497,8 @@ public class SubmitAnswerService {
     var item = plan.itemFor(competency);
     return new TurnDirective(
         item.stageId(), item.competency(), difficulty, item.evidenceTargets(),
-        item.questionModes().getFirst(), item.ragEnabled(), "LEGACY_PLAN_DERIVED");
+        item.questionModes().getFirst(), item.ragEnabled(), "", "LEGACY_PLAN_DERIVED", "",
+        item.retrievalPolicy());
   }
 
   private BusinessException retryableFailure() {
@@ -519,53 +538,43 @@ public class SubmitAnswerService {
     }
   }
 
-  private RagContextSnapshot retrieveNextRag(
+  private RagContextSnapshot retrieveNextGrounding(
       CurrentUser user, UUID sessionId, int currentTurnNo, WorkContext context,
-      InterviewDecision decision, Difficulty nextDifficulty) {
+      TurnDirective nextDirective) {
     try {
       var session = sessions.findBySessionIdAndUserAccountId(sessionId, requireOwner(user))
           .orElse(null);
       if (session == null || session.getKnowledgeScopeSnapshot() == null) {
-        return RagContextSnapshot.notConfigured();
+        return grounding.ground(null,
+            GroundingDirective.from(nextDirective, coveredTopics(context))).toRagContext();
       }
       var scope = objectMapper.readValue(
           session.getKnowledgeScopeSnapshot(), ValidatedKnowledgeScope.class);
-      var query = decision.targetCompetency() + " "
-          + (decision.probeFocus() != null ? decision.probeFocus() + " " : "")
-          + nextDifficulty.name().toLowerCase(Locale.ROOT);
-      var intent = new RetrievalIntent(
-          query, decision.targetCompetency(), nextDifficulty.name(),
-          context.plan().competencies(), List.of(), 5, 0.5);
       long ragStart = System.nanoTime();
-      var result = retriever.retrieve(scope, intent);
+      var result = grounding.ground(
+          scope, GroundingDirective.from(nextDirective, coveredTopics(context)));
       long ragMs = (System.nanoTime() - ragStart) / 1_000_000;
-      log.info("interview session={} turn={} step=retrieve_rag query=\"{}\" status={} chunks={} scores={} latency_ms={}",
-          shortId(sessionId), currentTurnNo, query, result.status(),
+      log.info("interview session={} turn={} step=grounding status={} chunks={} scores={} latency_ms={}",
+          shortId(sessionId), currentTurnNo, result.status(),
           result.chunks().size(),
           result.chunks().stream().map(c -> String.format("%.2f", c.score())).toList(),
           ragMs);
-      return new RagContextSnapshot(
-          convertStatus(result.status()), result.query(), result.embeddingModel(),
-          result.chunks().stream().map(c -> new RagContextSnapshot.Chunk(
-              c.pointId(), c.documentId(), c.filename(),
-              c.chunkIndex(), c.score(), c.content())).toList(),
-          result.failureReason());
+      return result.toRagContext();
     } catch (JacksonException exception) {
-      return new RagContextSnapshot(
-          RagStatus.UNAVAILABLE, "", "", List.of(), "Invalid scope snapshot");
+      return new interview.pilot.interview.grounding.GroundingSnapshot(
+          interview.pilot.interview.grounding.GroundingStatus.UNAVAILABLE,
+          "", "", List.of(), "INVALID_SCOPE_SNAPSHOT").toRagContext();
     } catch (RuntimeException exception) {
-      return new RagContextSnapshot(
-          RagStatus.UNAVAILABLE, "", "", List.of(), exception.getMessage());
+      return new interview.pilot.interview.grounding.GroundingSnapshot(
+          interview.pilot.interview.grounding.GroundingStatus.UNAVAILABLE,
+          "", "", List.of(), exception.getMessage()).toRagContext();
     }
   }
 
-  private static RagStatus convertStatus(
-      interview.pilot.knowledge.retrieval.RetrievalStatus status) {
-    return switch (status) {
-      case RETRIEVED -> RagStatus.RETRIEVED;
-      case NO_MATCH -> RagStatus.NO_MATCH;
-      case UNAVAILABLE -> RagStatus.UNAVAILABLE;
-    };
+  private List<String> coveredTopics(WorkContext context) {
+    return context.completedTurns().stream()
+        .map(InterviewDecisionContextFactory.CompletedTurnEvidence::competency)
+        .distinct().toList();
   }
 
   private static String shortId(UUID id) {
