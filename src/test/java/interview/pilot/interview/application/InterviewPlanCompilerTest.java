@@ -82,6 +82,23 @@ class InterviewPlanCompilerTest {
     assertThat(legacy.items()).anyMatch(item -> item.turnBudget() == 0);
   }
 
+  @Test
+  void carriesTheProposedResumeEntryPointIntoTheExecutionPlan() {
+    PlanProposal proposal = new PlanProposal(List.of(
+        new PlanProposal.Item("Java 基础与并发", 95, "支付项目的并发扣款", "简历强相关")));
+
+    InterviewPlan plan = compiler.compile(
+        proposal, profile("支付项目", "并发扣款", List.of("Java")),
+        new JobRequirements(List.of("Java 基础与并发"), List.of()),
+        Difficulty.MEDIUM, 5, skill);
+
+    assertThat(plan.itemFor("Java 基础与并发").resumeEntryPoint())
+        .isEqualTo("支付项目的并发扣款");
+    assertThat(new interview.pilot.interview.strategy.DefaultInterviewStrategy()
+        .firstTurn(plan, Difficulty.MEDIUM).resumeEntryPoint())
+        .isEqualTo("支付项目的并发扣款");
+  }
+
   private ResumeProfile profile(String name, String description, List<String> technologies) {
     return new ResumeProfile(
         description, technologies,

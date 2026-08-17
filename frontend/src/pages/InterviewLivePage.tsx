@@ -12,6 +12,7 @@ interface Progressive {
   score?: number
   evidence?: string[]
   missingPoints?: string[]
+  redFlags?: string[]
   decision?: InterviewDecision
   nextQuestion?: { question: string; targetCompetency: string; difficulty: 'EASY' | 'MEDIUM' | 'HARD' }
 }
@@ -45,7 +46,7 @@ export function InterviewLivePage() {
   function receive(id: number, event: InterviewStreamEvent) {
     if (owner.current !== id) return
     if (event.type === 'ACCEPTED') setProgressive((old) => ({ ...old, accepted: event.payload }))
-    if (event.type === 'FEEDBACK') setProgressive((old) => ({ ...old, score: event.payload.score, feedback: event.payload.feedback, evidence: event.payload.evidence, missingPoints: event.payload.missingPoints }))
+    if (event.type === 'FEEDBACK') setProgressive((old) => ({ ...old, score: event.payload.score, feedback: event.payload.feedback, evidence: event.payload.evidence, missingPoints: event.payload.missingPoints, redFlags: event.payload.redFlags }))
     if (event.type === 'DECISION') setProgressive((old) => ({ ...old, decision: event.payload.decision }))
     if (event.type === 'NEXT_QUESTION') setProgressive((old) => ({ ...old, nextQuestion: event.payload }))
     if (event.type === 'ERROR') {
@@ -109,12 +110,12 @@ export function InterviewLivePage() {
       {session.turns.map((turn) => <article className="turn-card" key={turn.turnNo}>
         <div className="message interviewer"><strong>面试官 · {turn.targetCompetency}</strong><p>{turn.question}</p></div>
         {turn.answer && <div className="message candidate"><strong>你的回答</strong><p>{turn.answer}</p></div>}
-        {turn.feedback && <div className="turn-feedback"><p>{turn.feedback}</p>{turn.decision && <Decision decision={turn.decision} />}</div>}
+        {turn.feedback && <div className="turn-feedback"><p>{turn.feedback}</p>{turn.redFlags?.length ? <p>风险信号：{turn.redFlags.join('、')}</p> : null}{turn.decision && <Decision decision={turn.decision} />}</div>}
         {turn.status === 'FAILED' && <p className="error-notice" role="alert">本轮未完成，可以重新作答。</p>}
       </article>)}
       {(progressive.accepted || progressive.feedback || progressive.decision || progressive.nextQuestion) && <article className="stream-card" role="status" aria-label="本轮处理进度" aria-live="polite">
         {progressive.accepted && <p>{progressive.accepted.replayed ? '已恢复已接收的提交' : '回答已接收，正在生成反馈'}</p>}
-        {progressive.feedback && <><strong>即时反馈 · {progressive.score} 分</strong><p>{progressive.feedback}</p>{progressive.evidence?.length ? <p>证据：{progressive.evidence.join('、')}</p> : null}{progressive.missingPoints?.length ? <p>待补充：{progressive.missingPoints.join('、')}</p> : null}</>}
+        {progressive.feedback && <><strong>即时反馈 · {progressive.score} 分</strong><p>{progressive.feedback}</p>{progressive.evidence?.length ? <p>证据：{progressive.evidence.join('、')}</p> : null}{progressive.missingPoints?.length ? <p>待补充：{progressive.missingPoints.join('、')}</p> : null}{progressive.redFlags?.length ? <p>风险信号：{progressive.redFlags.join('、')}</p> : null}</>}
         {progressive.decision && <Decision decision={progressive.decision} />}
         {progressive.nextQuestion && <p><strong>下一题：</strong>{progressive.nextQuestion.question}<br /><span>{progressive.nextQuestion.targetCompetency} · {difficultyLabel[progressive.nextQuestion.difficulty]}</span></p>}
       </article>}

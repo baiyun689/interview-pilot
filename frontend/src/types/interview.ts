@@ -26,6 +26,7 @@ export interface InterviewTurn {
   score: number | null
   evidence: string[]
   missingPoints: string[]
+  redFlags?: string[]
   decision: InterviewDecision | null
   nextDifficulty: Difficulty | null
   answeredAt: string | null
@@ -91,7 +92,7 @@ export type InterviewEventType = 'ACCEPTED' | 'FEEDBACK' | 'DECISION' | 'NEXT_QU
 interface StreamEvent<T extends InterviewEventType, P> { type: T; sessionId: string; turnNo: number; payload: P }
 export type InterviewStreamEvent =
   | StreamEvent<'ACCEPTED', { requestId: string; replayed: boolean }>
-  | StreamEvent<'FEEDBACK', { score: number; feedback: string; evidence: string[]; missingPoints: string[] }>
+  | StreamEvent<'FEEDBACK', { score: number; feedback: string; evidence: string[]; missingPoints: string[]; redFlags?: string[] }>
   | StreamEvent<'DECISION', { decision: InterviewDecision }>
   | StreamEvent<'NEXT_QUESTION', { question: string; targetCompetency: string; difficulty: Difficulty }>
   | StreamEvent<'COMPLETED', { status: SessionStatus }>

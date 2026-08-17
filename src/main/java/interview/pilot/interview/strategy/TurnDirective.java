@@ -13,7 +13,8 @@ public record TurnDirective(
     InterviewQuestionMode questionMode,
     boolean ragEnabled,
     String probeFocus,
-    String reason) {
+    String reason,
+    String resumeEntryPoint) {
 
   public TurnDirective {
     stageId = required(stageId, "stageId", 64);
@@ -23,12 +24,21 @@ public record TurnDirective(
     questionMode = questionMode == null ? InterviewQuestionMode.PROJECT : questionMode;
     probeFocus = probeFocus == null ? "" : probeFocus.trim();
     reason = reason == null ? "" : reason.trim();
+    resumeEntryPoint = resumeEntryPoint == null ? "" : resumeEntryPoint.trim();
+  }
+
+  public TurnDirective(
+      String stageId, String competency, Difficulty difficulty, List<String> evidenceTargets,
+      InterviewQuestionMode questionMode, boolean ragEnabled, String probeFocus, String reason) {
+    this(stageId, competency, difficulty, evidenceTargets, questionMode, ragEnabled,
+        probeFocus, reason, "");
   }
 
   public TurnDirective(
       String stageId, String competency, Difficulty difficulty, List<String> evidenceTargets,
       InterviewQuestionMode questionMode, boolean ragEnabled, String reason) {
-    this(stageId, competency, difficulty, evidenceTargets, questionMode, ragEnabled, "", reason);
+    this(stageId, competency, difficulty, evidenceTargets, questionMode, ragEnabled,
+        "", reason, "");
   }
 
   private static String required(String value, String field, int max) {

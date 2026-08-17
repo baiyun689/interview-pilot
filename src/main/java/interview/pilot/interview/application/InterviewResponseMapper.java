@@ -72,7 +72,8 @@ public class InterviewResponseMapper {
         result == null ? List.of() : result.evaluation().missingPoints(),
         result == null ? null : result.decision(),
         result == null ? null : result.nextDifficulty(), turn.getAnsweredAt(),
-        turn.getProcessingError());
+        turn.getProcessingError(),
+        result == null ? List.of() : result.evaluation().redFlags());
   }
 
   private IllegalStateException invalidStoredPlan() {

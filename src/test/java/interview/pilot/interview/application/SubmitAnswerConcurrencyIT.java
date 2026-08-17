@@ -343,7 +343,7 @@ class SubmitAnswerConcurrencyIT {
     var finishSuggestion = new InterviewDecision(
         NextStep.FINISH, DifficultyAdjustment.INCREASE, "", "", "enough evidence", 0.9);
     when(answerEvaluator.evaluate(any())).thenReturn(new AnswerEvaluation(
-        90, "Strong answer", List.of("version check"), List.of(), finishSuggestion));
+        90, "Strong answer", List.of("optimistic version"), List.of(), finishSuggestion));
     when(questionGenerator.nextQuestion(
         org.mockito.ArgumentMatchers.eq("deepseek"),
         org.mockito.ArgumentMatchers.eq("deepseek-chat"), any(), any(), any()))

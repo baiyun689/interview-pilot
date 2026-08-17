@@ -28,4 +28,16 @@ class AnswerEvidenceValidatorTest {
     assertThat(validated.missingPoints()).anyMatch(value -> value.contains("Kafka"));
     assertThat(validated.redFlags()).containsExactly("缺少容量指标");
   }
+
+  @Test
+  void doesNotAcceptAComplexClaimFromOneSharedTechnologyName() {
+    AnswerEvaluation evaluation = new AnswerEvaluation(
+        70, "partial", List.of("Kafka 完成削峰并保证端到端一致性"), List.of(),
+        new InterviewDecision(NextStep.FOLLOW_UP, DifficultyAdjustment.KEEP,
+            "Kafka", "一致性", "继续", 0.8));
+
+    AnswerEvaluation validated = validator.validate("项目里使用过 Kafka。", evaluation);
+
+    assertThat(validated.evidence()).isEmpty();
+  }
 }

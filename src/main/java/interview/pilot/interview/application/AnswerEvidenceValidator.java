@@ -34,19 +34,23 @@ public final class AnswerEvidenceValidator {
   private boolean grounded(String evidence, String answer) {
     String normalizedEvidence = normalize(evidence);
     if (normalizedEvidence.length() >= 4 && answer.contains(normalizedEvidence)) return true;
+    int signals = 0;
+    int matched = 0;
     var matcher = ASCII_TOKENS.matcher(normalizedEvidence);
     while (matcher.find()) {
+      signals++;
       String token = matcher.group();
-      if (answer.contains(token)) return true;
+      if (answer.contains(token)) matched++;
     }
     matcher = CJK_RUNS.matcher(normalizedEvidence);
     while (matcher.find()) {
       String run = matcher.group();
       for (int index = 0; index <= run.length() - 3; index++) {
-        if (answer.contains(run.substring(index, index + 3))) return true;
+        signals++;
+        if (answer.contains(run.substring(index, index + 3))) matched++;
       }
     }
-    return false;
+    return signals > 0 && matched >= Math.min(2, signals);
   }
 
   private String normalize(String value) {

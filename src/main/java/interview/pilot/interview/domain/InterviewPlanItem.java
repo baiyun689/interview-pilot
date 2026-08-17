@@ -15,7 +15,8 @@ public record InterviewPlanItem(
     String rationale,
     boolean ragEnabled,
     List<String> followUpAxes,
-    int followUpLimit) {
+    int followUpLimit,
+    String resumeEntryPoint) {
 
   public InterviewPlanItem {
     stageId = required(stageId, "stageId", 64);
@@ -37,6 +38,15 @@ public record InterviewPlanItem(
     if (followUpLimit < 0 || followUpLimit > 5) {
       throw new IllegalArgumentException("followUpLimit must be between 0 and 5");
     }
+    resumeEntryPoint = resumeEntryPoint == null ? "" : resumeEntryPoint.trim();
+  }
+
+  public InterviewPlanItem(
+      String stageId, String competencyId, String competency, PlanPriority priority,
+      int turnBudget, List<String> evidenceTargets, List<InterviewQuestionMode> questionModes,
+      String rationale, boolean ragEnabled, List<String> followUpAxes, int followUpLimit) {
+    this(stageId, competencyId, competency, priority, turnBudget, evidenceTargets,
+        questionModes, rationale, ragEnabled, followUpAxes, followUpLimit, "");
   }
 
   public InterviewPlanItem(
@@ -44,7 +54,8 @@ public record InterviewPlanItem(
       int turnBudget, List<String> evidenceTargets, List<InterviewQuestionMode> questionModes,
       String rationale, boolean ragEnabled) {
     this(stageId, competencyId, competency, priority, turnBudget, evidenceTargets,
-        questionModes, rationale, ragEnabled, List.of(), Math.min(2, Math.max(0, turnBudget - 1)));
+        questionModes, rationale, ragEnabled, List.of(),
+        Math.min(2, Math.max(0, turnBudget - 1)), "");
   }
 
   public static InterviewPlanItem legacy(String competency, int turnBudget, int index) {
@@ -56,7 +67,7 @@ public record InterviewPlanItem(
             InterviewQuestionMode.FAILURE),
         "历史能力计划兼容项", false,
         List.of("experience", "mechanism", "failure"),
-        Math.min(2, Math.max(0, turnBudget - 1)));
+        Math.min(2, Math.max(0, turnBudget - 1)), "");
   }
 
   private static String required(String value, String field, int max) {

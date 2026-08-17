@@ -29,11 +29,18 @@ public record InterviewStreamEvent(
   public record AcceptedPayload(UUID requestId, boolean replayed) implements Payload {}
 
   public record FeedbackPayload(
-      double score, String feedback, List<String> evidence, List<String> missingPoints)
+      double score, String feedback, List<String> evidence, List<String> missingPoints,
+      List<String> redFlags)
       implements Payload {
     public FeedbackPayload {
       evidence = List.copyOf(evidence);
       missingPoints = List.copyOf(missingPoints);
+      redFlags = redFlags == null ? List.of() : List.copyOf(redFlags);
+    }
+
+    public FeedbackPayload(
+        double score, String feedback, List<String> evidence, List<String> missingPoints) {
+      this(score, feedback, evidence, missingPoints, List.of());
     }
   }
 

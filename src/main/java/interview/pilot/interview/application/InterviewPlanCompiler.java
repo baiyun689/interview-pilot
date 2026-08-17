@@ -57,8 +57,10 @@ public final class InterviewPlanCompiler {
     for (String required : job.competencies()) {
       requiredKeys.add(key(required));
       CompetencySpec spec = bestSpec(required, skill.competencySpecs());
+      PlanProposal.Item proposed = proposal == null ? null : proposal.itemFor(required);
       add(selected, candidate(required, spec, PlanPriority.REQUIRED,
-          10_000, "JD 明确要求的必考能力"));
+          10_000, "JD 明确要求的必考能力",
+          proposed == null ? "" : proposed.resumeEntryPoint()));
     }
 
     int targetCount = Math.max(requiredKeys.size(), Math.max(2, totalTurnBudget / 2));
@@ -84,7 +86,9 @@ public final class InterviewPlanCompiler {
           ? "候选人简历存在相关技术或项目证据"
           : jobScore > 0 ? "JD 加分项与该能力相关"
               : proposed != null ? proposed.rationale() : "Skill 基线能力补充";
-      optional.add(candidate(spec.name(), spec, priority, score, rationale));
+      optional.add(candidate(
+          spec.name(), spec, priority, score, rationale,
+          proposed == null ? "" : proposed.resumeEntryPoint()));
     }
     optional.sort(Comparator.comparingInt(Candidate::score).reversed());
 
@@ -121,7 +125,8 @@ public final class InterviewPlanCompiler {
           candidate.priority(), budgets[index], candidate.spec().requiredEvidence(),
           modesFor(candidate.spec(), difficulty), candidate.rationale(),
           candidate.spec().retrievalPolicy().enabled(), candidate.spec().followUpAxes(),
-          Math.min(candidate.spec().followUpLimit(), Math.max(0, budgets[index] - 1))));
+          Math.min(candidate.spec().followUpLimit(), Math.max(0, budgets[index] - 1)),
+          candidate.resumeEntryPoint()));
     }
 
     List<PlanOmission> omitted = skill.competencySpecs().stream()
@@ -134,9 +139,15 @@ public final class InterviewPlanCompiler {
 
   private Candidate candidate(
       String name, CompetencySpec spec, PlanPriority priority, int score, String rationale) {
+    return candidate(name, spec, priority, score, rationale, "");
+  }
+
+  private Candidate candidate(
+      String name, CompetencySpec spec, PlanPriority priority, int score,
+      String rationale, String resumeEntryPoint) {
     CompetencySpec effective = spec != null ? spec : CompetencySpec.legacy(
         "jd-" + Integer.toUnsignedString(key(name).hashCode(), 36), name);
-    return new Candidate(name, effective, priority, score, rationale);
+    return new Candidate(name, effective, priority, score, rationale, resumeEntryPoint);
   }
 
   private void add(Map<String, Candidate> selected, Candidate candidate) {
@@ -235,13 +246,14 @@ public final class InterviewPlanCompiler {
   }
 
   private record Candidate(
-      String name, CompetencySpec spec, PlanPriority priority, int score, String rationale) {
+      String name, CompetencySpec spec, PlanPriority priority, int score, String rationale,
+      String resumeEntryPoint) {
     Candidate withScore(int value) {
-      return new Candidate(name, spec, priority, value, rationale);
+      return new Candidate(name, spec, priority, value, rationale, resumeEntryPoint);
     }
 
     Candidate withRationale(String value) {
-      return new Candidate(name, spec, priority, score, value);
+      return new Candidate(name, spec, priority, score, value, resumeEntryPoint);
     }
   }
 }

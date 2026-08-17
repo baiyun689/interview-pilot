@@ -91,7 +91,8 @@ public class InterviewSseService {
           EventType.FEEDBACK, sessionId, result.turnNo(),
           new FeedbackPayload(
               result.evaluation().score(), result.evaluation().feedback(),
-              result.evaluation().evidence(), result.evaluation().missingPoints())));
+              result.evaluation().evidence(), result.evaluation().missingPoints(),
+              result.evaluation().redFlags())));
       send(emitter, transportTerminal, new InterviewStreamEvent(
           EventType.DECISION, sessionId, result.turnNo(), new DecisionPayload(result.decision())));
       if (result.nextQuestion() != null) {
