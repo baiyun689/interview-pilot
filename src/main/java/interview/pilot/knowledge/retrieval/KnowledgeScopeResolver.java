@@ -61,7 +61,7 @@ public class KnowledgeScopeResolver {
     List<ValidatedKnowledgeScope.DocumentRevision> revisions = new ArrayList<>();
     for (var doc : readyDocs) {
       revisions.add(new ValidatedKnowledgeScope.DocumentRevision(
-          doc.getDocumentId(), doc.getIndexRevision()));
+          doc.getDocumentId(), doc.getActiveIndexRevision()));
     }
 
     return new ValidatedKnowledgeScope(user.userId(), distinct, revisions, embeddingVersion);

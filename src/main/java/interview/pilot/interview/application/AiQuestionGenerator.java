@@ -72,8 +72,8 @@ public class AiQuestionGenerator implements QuestionGenerator {
         "retrievedKnowledge", ragMap))
         + "\n</untrusted_context_json>";
     return output.invoke(new AiRequest(
-        providerId, systemPrompt, firstPrompt + data, GeneratedQuestion.class),
-        GeneratedQuestion.class);
+        providerId, systemPrompt, firstPrompt + data, GeneratedQuestionOutput.class),
+        GeneratedQuestionOutput.class).toDomain();
   }
 
   @Override
@@ -107,7 +107,7 @@ public class AiQuestionGenerator implements QuestionGenerator {
             : java.util.Map.of("status", rag.status().name())))
         + "\n</untrusted_context_json>";
     return output.invoke(new AiRequest(
-        providerId, expectedModel, systemPrompt, nextPrompt + data, GeneratedQuestion.class),
-        GeneratedQuestion.class);
+        providerId, expectedModel, systemPrompt, nextPrompt + data, GeneratedQuestionOutput.class),
+        GeneratedQuestionOutput.class).toDomain();
   }
 }

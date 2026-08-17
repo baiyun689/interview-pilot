@@ -25,10 +25,18 @@ public final class DefaultKnowledgeGrounding implements KnowledgeGrounding {
     if (!directive.enabled()) return empty(GroundingStatus.DISABLED, "", null);
     if (scope == null) return empty(GroundingStatus.NOT_REQUESTED, "", null);
     String query = query(directive);
+    var policy = directiveToPolicy(directive);
+    int topK = policy.topK() == null ? properties.topK() : policy.topK();
+    int candidateCount = policy.candidateCount() == null
+        ? Math.max(properties.candidateCount(), topK) : policy.candidateCount();
+    double minimumScore = policy.minimumScore() == null
+        ? properties.similarityThreshold() : policy.minimumScore();
+    int characterBudget = policy.contextCharacterBudget() == null
+        ? properties.contextCharacterBudget() : policy.contextCharacterBudget();
     var intent = new RetrievalIntent(
         query, directive.competency(), directive.difficulty().name(),
         directive.triggerKeywords(), directive.coveredTopics(),
-        properties.topK(), properties.similarityThreshold());
+        topK, candidateCount, minimumScore, characterBudget);
     final interview.pilot.knowledge.retrieval.RetrievedKnowledge result;
     try {
       result = retriever.retrieve(scope, intent);
@@ -46,6 +54,11 @@ public final class DefaultKnowledgeGrounding implements KnowledgeGrounding {
             chunk.pointId(), directive.role(), chunk.documentId(), chunk.documentRevision(),
             chunk.filename(), chunk.chunkIndex(), chunk.section(), chunk.pageNumber(),
             chunk.score(), chunk.content())).toList(), result.failureReason());
+  }
+
+  private interview.pilot.interview.skill.SkillRetrievalPolicy directiveToPolicy(
+      GroundingDirective directive) {
+    return directive.policy();
   }
 
   private GroundingSnapshot empty(GroundingStatus status, String query, String failure) {

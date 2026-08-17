@@ -5,6 +5,7 @@ import java.util.List;
 import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.skill.InterviewQuestionMode;
 import interview.pilot.interview.skill.SkillRetrievalPolicy;
+import interview.pilot.interview.skill.GroundingUse;
 
 public record TurnDirective(
     String stageId,
@@ -16,7 +17,8 @@ public record TurnDirective(
     String probeFocus,
     String reason,
     String resumeEntryPoint,
-    SkillRetrievalPolicy retrievalPolicy) {
+    SkillRetrievalPolicy retrievalPolicy,
+    List<String> coveredTopics) {
 
   public TurnDirective {
     stageId = required(stageId, "stageId", 64);
@@ -29,9 +31,18 @@ public record TurnDirective(
     resumeEntryPoint = resumeEntryPoint == null ? "" : resumeEntryPoint.trim();
     retrievalPolicy = retrievalPolicy == null
         ? (ragEnabled ? new SkillRetrievalPolicy(true, List.of(), List.of(),
-            List.of("question_generation", "fact_verification"))
+            List.of(GroundingUse.GENERATE_SCENARIO, GroundingUse.VERIFY_FACT))
             : SkillRetrievalPolicy.disabled())
         : retrievalPolicy;
+    coveredTopics = coveredTopics == null ? List.of() : List.copyOf(coveredTopics);
+  }
+
+  public TurnDirective(
+      String stageId, String competency, Difficulty difficulty, List<String> evidenceTargets,
+      InterviewQuestionMode questionMode, boolean ragEnabled, String probeFocus, String reason,
+      String resumeEntryPoint, SkillRetrievalPolicy retrievalPolicy) {
+    this(stageId, competency, difficulty, evidenceTargets, questionMode, ragEnabled,
+        probeFocus, reason, resumeEntryPoint, retrievalPolicy, List.of());
   }
 
   public TurnDirective(
@@ -39,21 +50,21 @@ public record TurnDirective(
       InterviewQuestionMode questionMode, boolean ragEnabled, String probeFocus, String reason,
       String resumeEntryPoint) {
     this(stageId, competency, difficulty, evidenceTargets, questionMode, ragEnabled,
-        probeFocus, reason, resumeEntryPoint, null);
+        probeFocus, reason, resumeEntryPoint, null, List.of());
   }
 
   public TurnDirective(
       String stageId, String competency, Difficulty difficulty, List<String> evidenceTargets,
       InterviewQuestionMode questionMode, boolean ragEnabled, String probeFocus, String reason) {
     this(stageId, competency, difficulty, evidenceTargets, questionMode, ragEnabled,
-        probeFocus, reason, "", null);
+        probeFocus, reason, "", null, List.of());
   }
 
   public TurnDirective(
       String stageId, String competency, Difficulty difficulty, List<String> evidenceTargets,
       InterviewQuestionMode questionMode, boolean ragEnabled, String reason) {
     this(stageId, competency, difficulty, evidenceTargets, questionMode, ragEnabled,
-        "", reason, "", null);
+        "", reason, "", null, List.of());
   }
 
   private static String required(String value, String field, int max) {

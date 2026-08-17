@@ -2,6 +2,7 @@ package interview.pilot.interview.rag;
 
 import java.util.List;
 import java.util.UUID;
+import java.util.Collection;
 
 import interview.pilot.interview.grounding.KnowledgeRole;
 import interview.pilot.interview.domain.GeneratedQuestion;
@@ -66,5 +67,13 @@ public record RagContextSnapshot(
     return new RagContextSnapshot(
         RagStatus.NOT_REQUESTED, query, embeddingVersion, List.of(),
         "USE_NOT_ALLOWED", GroundingMode.SKILL_GENERAL, List.of());
+  }
+
+  public void requireCurrentSources(Collection<String> sourceIds) {
+    java.util.Set<String> allowed = chunks.stream()
+        .map(Chunk::pointId).collect(java.util.stream.Collectors.toSet());
+    if (!allowed.containsAll(sourceIds)) {
+      throw new IllegalArgumentException("References must belong to current grounding snapshot");
+    }
   }
 }

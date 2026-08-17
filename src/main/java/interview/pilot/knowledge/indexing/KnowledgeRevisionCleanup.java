@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.vectorstore.filter.Filter;
 import org.springframework.stereotype.Component;
+import org.springframework.scheduling.annotation.Scheduled;
 
 import interview.pilot.interview.domain.SessionStatus;
 import interview.pilot.interview.infrastructure.InterviewSessionRepository;
@@ -21,13 +22,24 @@ public final class KnowledgeRevisionCleanup {
   private final VectorStore vectorStore;
   private final InterviewSessionRepository sessions;
   private final ObjectMapper objectMapper;
+  private final KnowledgeRevisionCandidates candidates;
 
   public KnowledgeRevisionCleanup(
       Optional<VectorStore> vectorStore, InterviewSessionRepository sessions,
-      ObjectMapper objectMapper) {
+      ObjectMapper objectMapper, KnowledgeRevisionCandidates candidates) {
     this.vectorStore = vectorStore.orElse(null);
     this.sessions = sessions;
     this.objectMapper = objectMapper;
+    this.candidates = candidates;
+  }
+
+  @Scheduled(
+      fixedDelayString = "${app.knowledge.revision-cleanup-interval:PT10M}",
+      initialDelayString = "${app.knowledge.revision-cleanup-initial-delay:PT2M}")
+  public void retryEligibleCleanups() {
+    if (vectorStore == null) return;
+    candidates.findEligible().forEach(candidate -> cleanupOlderRevisions(
+        candidate.documentId(), candidate.activeRevision()));
   }
 
   public void cleanupOlderRevisions(UUID documentId, int activeRevision) {

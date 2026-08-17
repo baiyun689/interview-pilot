@@ -46,7 +46,8 @@ class KnowledgeScopeResolverTest {
 
     var ready = mock(KnowledgeDocumentEntity.class);
     when(ready.getDocumentId()).thenReturn(readyDoc);
-    when(ready.getIndexRevision()).thenReturn(1);
+    when(ready.getIndexRevision()).thenReturn(2);
+    when(ready.getActiveIndexRevision()).thenReturn(1);
     when(ready.getStatus()).thenReturn(KnowledgeDocumentStatus.READY);
 
     when(documentRepository.findReadyByKnowledgeBaseIdsAndUserAccountId(

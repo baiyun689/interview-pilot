@@ -124,6 +124,7 @@ public class KnowledgeIndexer {
       metadata.put("filename", filename);
       metadata.put("chunk_index", String.valueOf(i));
       metadata.put("index_revision", revision);
+      metadata.put("section", "chunk:" + i);
       String pointId = UUID.nameUUIDFromBytes(
           (docId + ":" + expectedRevision + ":" + i).getBytes(StandardCharsets.UTF_8)).toString();
       docs.add(org.springframework.ai.document.Document.builder()

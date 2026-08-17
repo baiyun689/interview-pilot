@@ -17,6 +17,8 @@ import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.async.messaging.TaskMessage;
 import interview.pilot.interview.domain.InterviewReport;
+import interview.pilot.interview.domain.InterviewPlan;
+import interview.pilot.interview.rag.RagContextSnapshot;
 import interview.pilot.interview.domain.SessionStatus;
 import interview.pilot.interview.domain.TurnStatus;
 import interview.pilot.interview.infrastructure.InterviewReportEntity;
@@ -184,7 +186,8 @@ public class InterviewReportHandler {
     }
     task.setAttemptCount(task.getAttemptCount() + 1);
     task.setLastError(null);
-    List<ReportEvidence> evidence = validatedEvidence(session);
+    InterviewPlan plan = readPlan(session.getPlanSnapshot());
+    List<ReportEvidence> evidence = validatedEvidence(session, plan);
     var job = jobs.findById(session.getJobProfileId())
         .orElseThrow(() -> new IllegalStateException("Interview job profile is missing"));
     SkillSnapshot skill = readSkill(job.getSkillSnapshot());
@@ -202,7 +205,18 @@ public class InterviewReportHandler {
     }
   }
 
-  private List<ReportEvidence> validatedEvidence(InterviewSessionEntity session) {
+  private InterviewPlan readPlan(String snapshot) {
+    try {
+      InterviewPlan plan = objectMapper.readValue(snapshot, InterviewPlan.class);
+      if (plan == null) throw new IllegalStateException("Stored interview plan is invalid");
+      return plan;
+    } catch (JacksonException | IllegalArgumentException exception) {
+      throw new IllegalStateException("Stored interview plan is invalid", exception);
+    }
+  }
+
+  private List<ReportEvidence> validatedEvidence(
+      InterviewSessionEntity session, InterviewPlan plan) {
     var storedTurns = turns.findAllBySessionIdOrderByTurnNo(session.getId());
     if (storedTurns.isEmpty() || storedTurns.size() != session.getCurrentTurnNo()) {
       throw new IllegalStateException("Completed interview evidence is incomplete");
@@ -219,11 +233,36 @@ public class InterviewReportHandler {
           || !Objects.equals(turn.getFeedbackText(), answer.evaluation().feedback())) {
         throw new IllegalStateException("Completed interview evidence does not match stored result");
       }
+      var directive = answer.currentDirective();
+      var item = plan.itemFor(turn.getTargetCompetency());
+      RagContextSnapshot rag = readRag(turn.getRagContextSnapshot());
+      java.util.Set<String> cited = new java.util.LinkedHashSet<>(rag.evidenceRefs());
+      List<ReportEvidence.SourceReference> sources = rag.chunks().stream()
+          .filter(chunk -> cited.contains(chunk.pointId()))
+          .map(chunk -> new ReportEvidence.SourceReference(
+              chunk.pointId(), chunk.filename(), chunk.documentRevision(),
+              chunk.section(), chunk.pageNumber(), chunk.score()))
+          .toList();
       result.add(new ReportEvidence(
           turn.getTurnNo(), turn.getTargetCompetency(), answer.evaluation().score(),
-          answer.evaluation().feedback(), answer.evaluation().evidence()));
+          answer.evaluation().feedback(), answer.evaluation().evidence(),
+          directive == null ? item.stageId() : directive.stageId(),
+          directive == null ? item.questionModes().getFirst() : directive.questionMode(),
+          directive == null ? item.evidenceTargets() : directive.evidenceTargets(),
+          item.rationale(), rag.groundingMode(), rag.evidenceRefs(), sources,
+          answer.evaluation().referenceFacts(), answer.evaluation().conflictFacts()));
     }
     return List.copyOf(result);
+  }
+
+  private RagContextSnapshot readRag(String snapshot) {
+    if (snapshot == null || snapshot.isBlank()) return RagContextSnapshot.notConfigured();
+    try {
+      RagContextSnapshot rag = objectMapper.readValue(snapshot, RagContextSnapshot.class);
+      return rag == null ? RagContextSnapshot.notConfigured() : rag;
+    } catch (JacksonException | IllegalArgumentException exception) {
+      throw new IllegalStateException("Stored grounding snapshot is invalid", exception);
+    }
   }
 
   private Outcome complete(Work work, InterviewReport report, String snapshot) {

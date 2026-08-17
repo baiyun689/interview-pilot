@@ -208,7 +208,7 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
     }
     return new SkillRetrievalPolicy(
         enabled, scopes, keywords,
-        enabled ? List.of("GENERATE_SCENARIO", "VERIFY_FACT") : List.of());
+        enabled ? List.of(GroundingUse.GENERATE_SCENARIO, GroundingUse.VERIFY_FACT) : List.of());
   }
 
   private SkillRetrievalPolicy retrievalPolicy(
@@ -221,7 +221,35 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
     if (keywords.isEmpty()) keywords = fallbackKeywords;
     return new SkillRetrievalPolicy(
         enabled, scopes, keywords,
-        strings(configured.get("allowedUses"), "retrieval", false));
+        groundingUses(configured.get("allowedUses"), "retrieval"),
+        optionalInteger(configured.get("topK"), "retrieval.topK"),
+        optionalInteger(configured.get("candidateCount"), "retrieval.candidateCount"),
+        optionalDouble(configured.get("minimumScore"), "retrieval.minimumScore"),
+        optionalInteger(configured.get("contextCharacterBudget"),
+            "retrieval.contextCharacterBudget"));
+  }
+
+  private List<GroundingUse> groundingUses(Object value, String skillId) {
+    return strings(value, skillId, false).stream().map(item -> {
+      try {
+        return GroundingUse.valueOf(item);
+      } catch (IllegalArgumentException exception) {
+        throw invalid("Skill RAG 用途无效: " + skillId + "/" + item);
+      }
+    }).toList();
+  }
+
+  private Integer optionalInteger(Object value, String field) {
+    return value == null ? null : integer(value, 0, "retrieval", field);
+  }
+
+  private Double optionalDouble(Object value, String field) {
+    if (value == null) return null;
+    try {
+      return Double.valueOf(value.toString());
+    } catch (NumberFormatException exception) {
+      throw invalid("Skill 数字字段无效: retrieval/" + field);
+    }
   }
 
   private InterviewQuestionMode parseQuestionMode(String value, String skillId) {

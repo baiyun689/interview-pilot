@@ -55,6 +55,8 @@ import interview.pilot.interview.application.CreateInterviewService;
 import interview.pilot.interview.application.InterviewQueryService;
 import interview.pilot.interview.application.InterviewReportHandler;
 import interview.pilot.interview.application.PlanProposal;
+import interview.pilot.interview.application.GeneratedQuestionOutput;
+import interview.pilot.interview.application.AnswerEvaluationOutput;
 import interview.pilot.interview.application.SubmitAnswerService;
 import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.domain.DifficultyAdjustment;
@@ -235,8 +237,8 @@ class InterviewJourneyIT {
     verifyPromptContract(ResumeProfile.class, "严谨的中文简历分析师", 1);
     verifyPromptContract(JobRequirements.class, "资深招聘需求分析师", 1);
     verifyPromptContract(PlanProposal.class, "资深技术面试负责人", 1);
-    verifyPromptContract(GeneratedQuestion.class, "中文技术面试官", 3);
-    verifyPromptContract(AnswerEvaluation.class, "中文技术面试评审官", 3);
+    verifyPromptContract(GeneratedQuestionOutput.class, "中文技术面试官", 3);
+    verifyPromptContract(AnswerEvaluationOutput.class, "中文技术面试评审官", 3);
     verifyPromptContract(InterviewReport.class, "资深面试委员会评审", 1);
   }
 
@@ -248,17 +250,17 @@ class InterviewJourneyIT {
             "{\"competencies\":[\"Java\",\"System Design\",\"Observability\"],\"preferredSkills\":[\"Redis\"]}"),
         new Fixture(PlanProposal.class, "资深技术面试负责人",
             "{\"items\":[{\"competency\":\"Java\",\"priorityScore\":95,\"resumeEntryPoint\":\"InterviewPilot\",\"rationale\":\"JD required\"},{\"competency\":\"System Design\",\"priorityScore\":90,\"resumeEntryPoint\":\"Reliable adaptive interviews\",\"rationale\":\"JD required\"},{\"competency\":\"Observability\",\"priorityScore\":85,\"resumeEntryPoint\":\"\",\"rationale\":\"JD required\"}]}"),
-        new Fixture(GeneratedQuestion.class, "中文技术面试官",
+        new Fixture(GeneratedQuestionOutput.class, "中文技术面试官",
             question("How do you make answer submission idempotent?", "Java")),
-        new Fixture(AnswerEvaluation.class, "中文技术面试评审官",
+        new Fixture(AnswerEvaluationOutput.class, "中文技术面试评审官",
             evaluation("NEXT_TOPIC", "INCREASE", "System Design")),
-        new Fixture(GeneratedQuestion.class, "中文技术面试官",
+        new Fixture(GeneratedQuestionOutput.class, "中文技术面试官",
             question("Design the durable interview answer flow.", "System Design")),
-        new Fixture(AnswerEvaluation.class, "中文技术面试评审官",
+        new Fixture(AnswerEvaluationOutput.class, "中文技术面试评审官",
             evaluation("NEXT_TOPIC", "KEEP", "Observability")),
-        new Fixture(GeneratedQuestion.class, "中文技术面试官",
+        new Fixture(GeneratedQuestionOutput.class, "中文技术面试官",
             question("How would you observe AI failures?", "Observability")),
-        new Fixture(AnswerEvaluation.class, "中文技术面试评审官",
+        new Fixture(AnswerEvaluationOutput.class, "中文技术面试评审官",
             evaluation("FOLLOW_UP", "DECREASE", "Observability")),
         new Fixture(InterviewReport.class, "资深面试委员会评审",
             "{\"overallScore\":86,\"competencyScores\":{\"Java\":88,\"System Design\":84,\"Observability\":86},\"strengths\":[\"Concrete idempotency evidence\"],\"improvements\":[\"Quantify trade-offs\"],\"summary\":\"Strong backend reasoning grounded in the completed turns.\"}"));
@@ -291,7 +293,7 @@ class InterviewJourneyIT {
 
   private static String question(String question, String competency) {
     return "{\"question\":\"" + question + "\",\"targetCompetency\":\""
-        + competency + "\"}";
+        + competency + "\",\"groundingMode\":\"SKILL_GENERAL\",\"evidenceRefs\":[]}";
   }
 
   private static String evaluation(String nextStep, String adjustment, String target) {
@@ -301,7 +303,7 @@ class InterviewJourneyIT {
         + "\",\"difficultyAdjustment\":\"" + adjustment
         + "\",\"targetCompetency\":\"" + target
         + "\",\"probeFocus\":\"failure modes\",\"reason\":\"deterministic fixture\","
-        + "\"confidence\":0.9}}";
+        + "\"confidence\":0.9},\"redFlags\":[],\"referenceFacts\":[],\"conflictFacts\":[]}";
   }
 
   private static String openAiResponse(String content) {

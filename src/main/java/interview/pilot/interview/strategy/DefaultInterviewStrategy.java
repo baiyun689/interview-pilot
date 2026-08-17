@@ -18,7 +18,8 @@ public final class DefaultInterviewStrategy implements InterviewStrategy {
   @Override
   public TurnDirective firstTurn(InterviewPlan plan, Difficulty difficulty) {
     InterviewPlanItem item = plan.items().getFirst();
-    return directive(item, difficulty, 0, item.evidenceTargets().getFirst(), "PLAN_FIRST_TURN");
+    return directive(item, difficulty, 0, item.evidenceTargets().getFirst(),
+        "PLAN_FIRST_TURN", java.util.List.of());
   }
 
   @Override
@@ -45,18 +46,19 @@ public final class DefaultInterviewStrategy implements InterviewStrategy {
         ? evidenceGap(item, assessment, context.followUpCount())
         : item.evidenceTargets().getFirst();
     return new StrategyOutcome(
-        decision, directive(item, nextDifficulty, modeIndex, probeFocus, decision.reason()));
+        decision, directive(item, nextDifficulty, modeIndex, probeFocus, decision.reason(),
+            context.coveredCompetencies()));
   }
 
   private TurnDirective directive(
       InterviewPlanItem item, Difficulty difficulty, int modeIndex,
-      String probeFocus, String reason) {
+      String probeFocus, String reason, java.util.List<String> coveredTopics) {
     InterviewQuestionMode mode = item.questionModes().get(
         Math.min(modeIndex, item.questionModes().size() - 1));
     return new TurnDirective(
         item.stageId(), item.competency(), difficulty, item.evidenceTargets(),
         mode, item.ragEnabled(), probeFocus, reason, item.resumeEntryPoint(),
-        item.retrievalPolicy());
+        item.retrievalPolicy(), coveredTopics);
   }
 
   private InterviewDecision nextAfterExhaustedItem(

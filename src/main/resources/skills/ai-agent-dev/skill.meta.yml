@@ -88,6 +88,10 @@ competencies:
       enabled: true
       scopes: [rag, search]
       allowedUses: [GENERATE_SCENARIO, VERIFY_FACT]
+      topK: 4
+      candidateCount: 16
+      minimumScore: 0.78
+      contextCharacterBudget: 5000
   - id: tool_mcp
     name: 工具调用
     objective: 验证工具和 MCP 的接口、权限、重试、沙箱与审计设计

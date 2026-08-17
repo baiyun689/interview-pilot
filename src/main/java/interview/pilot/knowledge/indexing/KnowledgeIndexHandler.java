@@ -32,7 +32,6 @@ public class KnowledgeIndexHandler {
   private final ObjectMapper objectMapper;
   private final TransactionTemplate transactions;
   private final AiMetrics metrics;
-  private final KnowledgeRevisionCleanup revisionCleanup;
 
   public KnowledgeIndexHandler(
       KnowledgeIndexer indexer,
@@ -40,15 +39,13 @@ public class KnowledgeIndexHandler {
       AsyncTaskRepository taskRepository,
       ObjectMapper objectMapper,
       PlatformTransactionManager transactionManager,
-      AiMetrics metrics,
-      KnowledgeRevisionCleanup revisionCleanup) {
+      AiMetrics metrics) {
     this.indexer = indexer;
     this.documentRepository = documentRepository;
     this.taskRepository = taskRepository;
     this.objectMapper = objectMapper;
     this.transactions = new TransactionTemplate(transactionManager);
     this.metrics = metrics;
-    this.revisionCleanup = revisionCleanup;
   }
 
   public Outcome handle(TaskMessage message) {
@@ -170,8 +167,6 @@ public class KnowledgeIndexHandler {
     task.setStatus(AsyncTaskStatus.COMPLETED);
     task.setLastError(null);
     metrics.afterCommit(() -> metrics.taskCompleted(AsyncTaskType.KNOWLEDGE_DOCUMENT_INDEX));
-    metrics.afterCommit(() -> revisionCleanup.cleanupOlderRevisions(
-        work.documentUuid(), work.indexRevision()));
     return Outcome.TERMINAL;
   }
 

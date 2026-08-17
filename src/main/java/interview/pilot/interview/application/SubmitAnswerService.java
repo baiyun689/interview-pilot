@@ -546,13 +546,13 @@ public class SubmitAnswerService {
           .orElse(null);
       if (session == null || session.getKnowledgeScopeSnapshot() == null) {
         return grounding.ground(null,
-            GroundingDirective.from(nextDirective, coveredTopics(context))).toRagContext();
+            GroundingDirective.from(nextDirective)).toRagContext();
       }
       var scope = objectMapper.readValue(
           session.getKnowledgeScopeSnapshot(), ValidatedKnowledgeScope.class);
       long ragStart = System.nanoTime();
       var result = grounding.ground(
-          scope, GroundingDirective.from(nextDirective, coveredTopics(context)));
+          scope, GroundingDirective.from(nextDirective));
       long ragMs = (System.nanoTime() - ragStart) / 1_000_000;
       log.info("interview session={} turn={} step=grounding status={} chunks={} scores={} latency_ms={}",
           shortId(sessionId), currentTurnNo, result.status(),
@@ -569,12 +569,6 @@ public class SubmitAnswerService {
           interview.pilot.interview.grounding.GroundingStatus.UNAVAILABLE,
           "", "", List.of(), exception.getMessage()).toRagContext();
     }
-  }
-
-  private List<String> coveredTopics(WorkContext context) {
-    return context.completedTurns().stream()
-        .map(InterviewDecisionContextFactory.CompletedTurnEvidence::competency)
-        .distinct().toList();
   }
 
   private static String shortId(UUID id) {

@@ -1,8 +1,5 @@
 package interview.pilot.interview.application;
 
-import java.util.Set;
-import java.util.stream.Collectors;
-
 import interview.pilot.interview.domain.GeneratedQuestion;
 import interview.pilot.interview.domain.GroundingMode;
 import interview.pilot.interview.rag.RagContextSnapshot;
@@ -24,11 +21,7 @@ public final class QuestionGroundingValidator {
     if (directive != null && !GroundingUsePolicy.allowsQuestionGeneration(directive)) {
       throw new IllegalArgumentException("Question generation is not allowed by grounding policy");
     }
-    Set<String> allowed = snapshot.chunks().stream()
-        .map(RagContextSnapshot.Chunk::pointId).collect(Collectors.toSet());
-    if (!allowed.containsAll(question.evidenceRefs())) {
-      throw new IllegalArgumentException("Question evidenceRefs must belong to current grounding snapshot");
-    }
+    snapshot.requireCurrentSources(question.evidenceRefs());
     return new GeneratedQuestion(
         question.question(), question.targetCompetency(), GroundingMode.KNOWLEDGE_ASSISTED,
         question.evidenceRefs());

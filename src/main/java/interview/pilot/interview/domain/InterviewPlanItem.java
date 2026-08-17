@@ -4,6 +4,7 @@ import java.util.List;
 
 import interview.pilot.interview.skill.InterviewQuestionMode;
 import interview.pilot.interview.skill.SkillRetrievalPolicy;
+import interview.pilot.interview.skill.GroundingUse;
 
 public record InterviewPlanItem(
     String stageId,
@@ -43,7 +44,7 @@ public record InterviewPlanItem(
     resumeEntryPoint = resumeEntryPoint == null ? "" : resumeEntryPoint.trim();
     retrievalPolicy = retrievalPolicy == null
         ? (ragEnabled ? new SkillRetrievalPolicy(true, List.of(), List.of(),
-            List.of("question_generation", "fact_verification"))
+            List.of(GroundingUse.GENERATE_SCENARIO, GroundingUse.VERIFY_FACT))
             : SkillRetrievalPolicy.disabled())
         : retrievalPolicy;
   }

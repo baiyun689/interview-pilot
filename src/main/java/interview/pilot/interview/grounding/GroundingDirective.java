@@ -11,7 +11,7 @@ public record GroundingDirective(
     boolean enabled, KnowledgeRole role, String competency, Difficulty difficulty,
     InterviewQuestionMode questionMode, List<String> evidenceGaps, String probeFocus,
     List<String> coveredTopics, List<String> scopes, List<String> triggerKeywords,
-    List<String> allowedUses) {
+    interview.pilot.interview.skill.SkillRetrievalPolicy policy) {
 
   public GroundingDirective {
     role = role == null ? KnowledgeRole.TECHNICAL_REFERENCE : role;
@@ -19,17 +19,16 @@ public record GroundingDirective(
     coveredTopics = copy(coveredTopics);
     scopes = copy(scopes);
     triggerKeywords = copy(triggerKeywords);
-    allowedUses = copy(allowedUses);
+    policy = policy == null ? interview.pilot.interview.skill.SkillRetrievalPolicy.disabled() : policy;
     probeFocus = probeFocus == null ? "" : probeFocus.trim();
   }
 
-  public static GroundingDirective from(TurnDirective turn, List<String> coveredTopics) {
+  public static GroundingDirective from(TurnDirective turn) {
     SkillRetrievalPolicy policy = turn.retrievalPolicy();
     return new GroundingDirective(
         turn.ragEnabled() && policy.enabled(), KnowledgeRole.TECHNICAL_REFERENCE,
         turn.competency(), turn.difficulty(), turn.questionMode(), turn.evidenceTargets(),
-        turn.probeFocus(), coveredTopics, policy.scopes(), policy.triggerKeywords(),
-        policy.allowedUses());
+        turn.probeFocus(), turn.coveredTopics(), policy.scopes(), policy.triggerKeywords(), policy);
   }
 
   private static List<String> copy(List<String> values) {

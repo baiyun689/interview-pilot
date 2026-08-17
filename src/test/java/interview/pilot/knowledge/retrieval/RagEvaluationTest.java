@@ -9,6 +9,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 import tools.jackson.databind.ObjectMapper;
+import interview.pilot.common.observability.AiMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 class RagEvaluationTest {
   @Test
@@ -47,10 +49,18 @@ class RagEvaluationTest {
       }
     }
 
+    double recallAtK = (double) hits / retrievedCases;
+    double mrr = reciprocalRanks / retrievedCases;
+    double noMatchAccuracy = (double) noMatchCorrect / noMatchCases;
+    var meters = new SimpleMeterRegistry();
+    new AiMetrics(meters).ragEvaluation(suite.version(), recallAtK, mrr, noMatchAccuracy);
+
     assertThat(suite.version()).isEqualTo(1);
-    assertThat((double) hits / retrievedCases).isGreaterThanOrEqualTo(0.9);
-    assertThat(reciprocalRanks / retrievedCases).isGreaterThanOrEqualTo(0.9);
-    assertThat((double) noMatchCorrect / noMatchCases).isEqualTo(1.0);
+    assertThat(recallAtK).isGreaterThanOrEqualTo(0.9);
+    assertThat(mrr).isGreaterThanOrEqualTo(0.9);
+    assertThat(noMatchAccuracy).isEqualTo(1.0);
+    assertThat(meters.get("interview_pilot.knowledge.evaluation.recall_at_k").gauge().value())
+        .isEqualTo(recallAtK);
   }
 
   record Suite(int version, List<Case> cases) {}

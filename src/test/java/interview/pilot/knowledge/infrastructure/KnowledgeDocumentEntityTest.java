@@ -44,6 +44,20 @@ class KnowledgeDocumentEntityTest {
   }
 
   @Test
+  void reindexKeepsPreviousActiveRevisionUntilNewRevisionIsReady() {
+    var document = pendingDocument();
+    int first = document.beginReindex();
+    document.markReady(first, "v1", 1);
+
+    int second = document.beginReindex();
+
+    assertThat(document.getIndexRevision()).isEqualTo(2);
+    assertThat(document.getActiveIndexRevision()).isEqualTo(1);
+    document.markReady(second, "v2", 1);
+    assertThat(document.getActiveIndexRevision()).isEqualTo(2);
+  }
+
+  @Test
   void failedIndexingRecordsTheFailureForItsCurrentRevision() {
     var base = KnowledgeBaseEntity.active(42L, "Java platform");
     var document = KnowledgeDocumentEntity.pending(

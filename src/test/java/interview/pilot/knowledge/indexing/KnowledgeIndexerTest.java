@@ -76,6 +76,7 @@ class KnowledgeIndexerTest {
           .containsEntry("knowledge_base_id", knowledgeBaseId.toString())
           .containsEntry("document_id", documentId.toString())
           .containsEntry("index_revision", "1")
+          .containsKey("section")
           .containsKey("chunk_index");
       assertThat(chunk.getId()).isEqualTo(UUID.nameUUIDFromBytes(
           (documentId + ":1:" + chunk.getMetadata().get("chunk_index"))

@@ -5,6 +5,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
 
 import java.util.List;
 import java.util.Optional;
@@ -36,7 +38,8 @@ class KnowledgeRevisionCleanupTest {
             List.of(new ValidatedKnowledgeScope.DocumentRevision(documentId, 1)), "embed")));
     when(sessions.findAllByOrderByCreatedAtDesc()).thenReturn(List.of(session));
 
-    new KnowledgeRevisionCleanup(Optional.of(store), sessions, objectMapper)
+    new KnowledgeRevisionCleanup(
+        Optional.of(store), sessions, objectMapper, mock(KnowledgeRevisionCandidates.class))
         .cleanupOlderRevisions(documentId, 2);
 
     verify(store, never()).delete(any(Filter.Expression.class));
@@ -49,9 +52,30 @@ class KnowledgeRevisionCleanupTest {
     InterviewSessionRepository sessions = mock(InterviewSessionRepository.class);
     when(sessions.findAllByOrderByCreatedAtDesc()).thenReturn(List.of());
 
-    new KnowledgeRevisionCleanup(Optional.of(store), sessions, objectMapper)
+    new KnowledgeRevisionCleanup(
+        Optional.of(store), sessions, objectMapper, mock(KnowledgeRevisionCandidates.class))
         .cleanupOlderRevisions(documentId, 2);
 
     verify(store).delete(any(Filter.Expression.class));
+  }
+
+  @Test
+  void scheduledSweepRevisitsAndRetriesFailedCleanup() {
+    UUID documentId = UUID.randomUUID();
+    VectorStore store = mock(VectorStore.class);
+    InterviewSessionRepository sessions = mock(InterviewSessionRepository.class);
+    KnowledgeRevisionCandidates candidates = mock(KnowledgeRevisionCandidates.class);
+    when(candidates.findEligible()).thenReturn(List.of(
+        new KnowledgeRevisionCandidates.Candidate(documentId, 2)));
+    when(sessions.findAllByOrderByCreatedAtDesc()).thenReturn(List.of());
+    doThrow(new RuntimeException("temporary"))
+        .doNothing().when(store).delete(any(Filter.Expression.class));
+    var cleanup = new KnowledgeRevisionCleanup(
+        Optional.of(store), sessions, objectMapper, candidates);
+
+    cleanup.retryEligibleCleanups();
+    cleanup.retryEligibleCleanups();
+
+    verify(store, times(2)).delete(any(Filter.Expression.class));
   }
 }

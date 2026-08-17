@@ -90,6 +90,10 @@ competencies:
       enabled: true
       scopes: [spring, distributed]
       allowedUses: [GENERATE_SCENARIO, VERIFY_FACT]
+      topK: 4
+      candidateCount: 12
+      minimumScore: 0.75
+      contextCharacterBudget: 4000
   - id: mysql
     name: MySQL
     objective: 验证数据模型、索引、事务锁和慢查询治理

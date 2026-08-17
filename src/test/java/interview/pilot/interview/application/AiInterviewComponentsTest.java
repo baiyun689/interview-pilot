@@ -1,6 +1,7 @@
 package interview.pilot.interview.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -31,14 +32,29 @@ import tools.jackson.databind.ObjectMapper;
 class AiInterviewComponentsTest {
 
   @Test
+  void ragStructuredOutputsRejectMissingMandatoryFields() {
+    ObjectMapper mapper = new ObjectMapper();
+
+    assertThatThrownBy(() -> mapper.readValue(
+        "{\"question\":\"q\",\"targetCompetency\":\"Java\"}",
+        GeneratedQuestionOutput.class)).isInstanceOf(Exception.class);
+    assertThatThrownBy(() -> mapper.readValue(
+        "{\"score\":70,\"feedback\":\"ok\",\"evidence\":[],\"missingPoints\":[],"
+            + "\"redFlags\":[],\"suggestedDecision\":{\"nextStep\":\"FINISH\","
+            + "\"difficultyAdjustment\":\"KEEP\",\"targetCompetency\":\"\","
+            + "\"probeFocus\":\"\",\"reason\":\"done\",\"confidence\":0.9}}",
+        AnswerEvaluationOutput.class)).isInstanceOf(Exception.class);
+  }
+
+  @Test
   void answerPromptIsChineseCompleteAndUsesJsonForTheNestedDecisionContract() {
     StructuredOutputInvoker invoker = mock(StructuredOutputInvoker.class);
-    AnswerEvaluation result = new AnswerEvaluation(
-        70, "继续深入", List.of("说明了机制"), List.of("缺少边界"),
+    AnswerEvaluationOutput output = new AnswerEvaluationOutput(
+        70, "继续深入", List.of("说明了机制"), List.of("缺少边界"), List.of(),
         new InterviewDecision(NextStep.FOLLOW_UP, DifficultyAdjustment.KEEP,
-            "Java", "边界", "需要证据", 0.8));
-    when(invoker.invoke(org.mockito.ArgumentMatchers.any(), eq(AnswerEvaluation.class)))
-        .thenReturn(result);
+            "Java", "边界", "需要证据", 0.8), List.of(), List.of());
+    when(invoker.invoke(org.mockito.ArgumentMatchers.any(), eq(AnswerEvaluationOutput.class)))
+        .thenReturn(output);
     var evaluator = new AiAnswerEvaluator(
         invoker, new PromptJsonEncoder(new ObjectMapper()),
         new ClassPathResource("prompts/answer-evaluation-system.st"),
@@ -47,10 +63,10 @@ class AiInterviewComponentsTest {
     assertThat(evaluator.evaluate(new AnswerEvaluationRequest(
         "deepseek", "deepseek-chat", 1, Difficulty.MEDIUM, "Java",
         "解释线程池", "核心线程会复用", List.of("Java"), List.of("Java"), List.of())))
-        .isSameAs(result);
+        .isEqualTo(output.toDomain());
 
     ArgumentCaptor<AiRequest> request = ArgumentCaptor.forClass(AiRequest.class);
-    verify(invoker).invoke(request.capture(), eq(AnswerEvaluation.class));
+    verify(invoker).invoke(request.capture(), eq(AnswerEvaluationOutput.class));
     assertThat(request.getValue().systemPrompt())
         .contains("# 角色定位", "# 上下文与安全边界", "# 任务", "# 返回格式", "# 示例")
         .contains("\"suggestedDecision\"")
@@ -98,9 +114,11 @@ class AiInterviewComponentsTest {
     InterviewPlan plan = new InterviewPlan(List.of("Java"), 8);
     PlanProposal proposal = new PlanProposal(List.of(
         new PlanProposal.Item("Java", 90, "payments project", "JD required")));
-    GeneratedQuestion question = new GeneratedQuestion("Explain your Java design.", "Java");
+    GeneratedQuestionOutput question = new GeneratedQuestionOutput(
+        "Explain your Java design.", "Java",
+        interview.pilot.interview.domain.GroundingMode.SKILL_GENERAL, List.of());
     when(invoker.invoke(org.mockito.ArgumentMatchers.any(), eq(PlanProposal.class))).thenReturn(proposal);
-    when(invoker.invoke(org.mockito.ArgumentMatchers.any(), eq(GeneratedQuestion.class)))
+    when(invoker.invoke(org.mockito.ArgumentMatchers.any(), eq(GeneratedQuestionOutput.class)))
         .thenReturn(question);
     var planner = new AiInterviewPlanner(
         invoker,
@@ -120,7 +138,7 @@ class AiInterviewComponentsTest {
         InterviewQuestionMode.MECHANISM, false, "PLAN_FIRST_TURN");
     assertThat(generator.firstQuestion(
         "qwen", plan, resume, job, null, RagContextSnapshot.notConfigured(), directive))
-        .isSameAs(question);
+        .isEqualTo(question.toDomain());
 
     ArgumentCaptor<AiRequest> requests = ArgumentCaptor.forClass(AiRequest.class);
     verify(invoker, org.mockito.Mockito.times(2)).invoke(requests.capture(), org.mockito.ArgumentMatchers.any());

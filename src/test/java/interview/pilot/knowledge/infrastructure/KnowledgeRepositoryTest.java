@@ -29,14 +29,21 @@ class KnowledgeRepositoryTest {
         "findReadyByKnowledgeBaseIdsAndUserAccountId", Collection.class, Long.class);
     Method visibleDocuments = KnowledgeDocumentJpaRepository.class.getMethod(
         "findVisibleByKnowledgeBaseIdsAndUserAccountId", Collection.class, Long.class);
+    Method cleanupCandidates = KnowledgeDocumentJpaRepository.class.getMethod(
+        "findRevisionCleanupCandidates");
 
     assertThat(baseLookup.getReturnType().getSimpleName()).isEqualTo("Optional");
     assertThat(readyDocuments.getAnnotation(Query.class).value())
         .contains("knowledgeBase.userAccountId = :userAccountId")
-        .contains("document.status = interview.pilot.knowledge.domain.KnowledgeDocumentStatus.READY");
+        .contains("document.activeIndexRevision > 0")
+        .contains("KnowledgeDocumentStatus.DELETING")
+        .contains("KnowledgeDocumentStatus.DELETED");
     assertThat(visibleDocuments.getAnnotation(Query.class).value())
         .contains("knowledgeBase.userAccountId = :userAccountId")
         .contains("document.status <> interview.pilot.knowledge.domain.KnowledgeDocumentStatus.DELETED");
+    assertThat(cleanupCandidates.getAnnotation(Query.class).value())
+        .contains("document.activeIndexRevision > 1")
+        .contains("KnowledgeDocumentStatus.READY");
   }
 
   @Test

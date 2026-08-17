@@ -41,7 +41,7 @@ public class QdrantKnowledgeRetriever implements KnowledgeRetriever {
     long started = System.nanoTime();
     try {
       Filter.Expression filter = buildFilter(scope);
-      int candidateCount = Math.max(properties.candidateCount(), intent.topK());
+      int candidateCount = intent.candidateCount();
       var request = SearchRequest.builder()
           .query(intent.query())
           .topK(candidateCount)
@@ -60,7 +60,7 @@ public class QdrantKnowledgeRetriever implements KnowledgeRetriever {
       List<KnowledgeChunk> chunks = ranker.rank(
           excludeTopics(toChunks(results), intent.excludeTopics()),
           intent.topK(), intent.similarityThreshold(),
-          properties.contextCharacterBudget());
+          intent.contextCharacterBudget());
       if (chunks.isEmpty()) {
         metrics.knowledgeRetrievalDuration("NO_MATCH", latency, 0);
         return RetrievedKnowledge.noMatch(intent.query(), embeddingModel, latency);

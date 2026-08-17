@@ -66,6 +66,9 @@ public class KnowledgeDocumentEntity {
   @Column(name = "index_revision", nullable = false)
   private int indexRevision;
 
+  @Column(name = "active_index_revision", nullable = false)
+  private int activeIndexRevision;
+
   @JdbcTypeCode(SqlTypes.JSON)
   @Column(name = "embedding_snapshot", columnDefinition = "json")
   private String embeddingSnapshot;
@@ -100,6 +103,7 @@ public class KnowledgeDocumentEntity {
     document.storageKey = requireText(storageKey, "storageKey");
     document.status = KnowledgeDocumentStatus.PENDING;
     document.indexRevision = 0;
+    document.activeIndexRevision = 0;
     document.chunkCount = 0;
     return document;
   }
@@ -121,6 +125,7 @@ public class KnowledgeDocumentEntity {
     }
     this.parsedText = parsedText;
     this.chunkCount = chunkCount;
+    this.activeIndexRevision = expectedRevision;
     status = KnowledgeDocumentStatus.READY;
   }
 
@@ -145,6 +150,7 @@ public class KnowledgeDocumentEntity {
       chunkCount = 0;
       parsedText = null;
       embeddingSnapshot = null;
+      activeIndexRevision = 0;
     }
   }
 

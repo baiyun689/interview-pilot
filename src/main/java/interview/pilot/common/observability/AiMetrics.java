@@ -99,6 +99,20 @@ public class AiMetrics {
     }
   }
 
+  public void ragEvaluation(
+      int datasetVersion, double recallAtK, double meanReciprocalRank,
+      double noMatchAccuracy) {
+    String version = "v" + Math.max(1, datasetVersion);
+    meters.gauge("interview_pilot.knowledge.evaluation.recall_at_k",
+        java.util.List.of(io.micrometer.core.instrument.Tag.of("dataset", version)), recallAtK);
+    meters.gauge("interview_pilot.knowledge.evaluation.mrr",
+        java.util.List.of(io.micrometer.core.instrument.Tag.of("dataset", version)),
+        meanReciprocalRank);
+    meters.gauge("interview_pilot.knowledge.evaluation.no_match_accuracy",
+        java.util.List.of(io.micrometer.core.instrument.Tag.of("dataset", version)),
+        noMatchAccuracy);
+  }
+
   public void afterCommit(Runnable recording) {
     if (TransactionSynchronizationManager.isSynchronizationActive()) {
       TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {

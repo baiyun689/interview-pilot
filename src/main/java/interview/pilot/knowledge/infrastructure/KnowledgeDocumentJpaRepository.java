@@ -48,10 +48,19 @@ public interface KnowledgeDocumentJpaRepository extends JpaRepository<KnowledgeD
       join document.knowledgeBase knowledgeBase
       where knowledgeBase.knowledgeBaseId in :knowledgeBaseIds
         and knowledgeBase.userAccountId = :userAccountId
-        and document.status = interview.pilot.knowledge.domain.KnowledgeDocumentStatus.READY
+        and document.activeIndexRevision > 0
+        and document.status <> interview.pilot.knowledge.domain.KnowledgeDocumentStatus.DELETING
+        and document.status <> interview.pilot.knowledge.domain.KnowledgeDocumentStatus.DELETED
       order by document.createdAt desc
       """)
   List<KnowledgeDocumentEntity> findReadyByKnowledgeBaseIdsAndUserAccountId(
       @Param("knowledgeBaseIds") Collection<UUID> knowledgeBaseIds,
       @Param("userAccountId") Long userAccountId);
+
+  @Query("""
+      select document from KnowledgeDocumentEntity document
+      where document.activeIndexRevision > 1
+        and document.status = interview.pilot.knowledge.domain.KnowledgeDocumentStatus.READY
+      """)
+  List<KnowledgeDocumentEntity> findRevisionCleanupCandidates();
 }

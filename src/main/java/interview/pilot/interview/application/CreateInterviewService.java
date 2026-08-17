@@ -153,7 +153,7 @@ public class CreateInterviewService {
       scope = scopeResolver.resolveForCreation(user, request.knowledgeBaseIds());
     }
     var groundingSnapshot = grounding.ground(
-        scope, GroundingDirective.from(firstDirective, List.of()));
+        scope, GroundingDirective.from(firstDirective));
     RagContextSnapshot firstRagSnapshot = groundingSnapshot.toRagContext();
     log.info("createInterview grounding status={} chunks={} scores={}",
         groundingSnapshot.status(), groundingSnapshot.chunks().size(),

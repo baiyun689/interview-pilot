@@ -37,6 +37,6 @@ public class AiAnswerEvaluator implements AnswerEvaluator {
     return output.invoke(new AiRequest(
         request.providerId(), request.modelName(), systemPrompt,
         userPrompt + "\n<untrusted_context_json>\n" + data + "\n</untrusted_context_json>",
-        AnswerEvaluation.class), AnswerEvaluation.class);
+        AnswerEvaluationOutput.class), AnswerEvaluationOutput.class).toDomain();
   }
 }
