@@ -46,6 +46,12 @@ class KnowledgeDocumentRepositoryAdapter implements KnowledgeDocumentRepository 
   }
 
   @Override
+  public List<KnowledgeDocumentEntity> lockReadyByKnowledgeBaseIdsAndUserAccountId(
+      Collection<UUID> knowledgeBaseIds, Long userAccountId) {
+    return delegate.lockReadyByKnowledgeBaseIdsAndUserAccountId(knowledgeBaseIds, userAccountId);
+  }
+
+  @Override
   public List<KnowledgeDocumentEntity> findAllByKnowledgeBase(KnowledgeBaseEntity knowledgeBase) {
     return delegate.findAllByKnowledgeBase(knowledgeBase);
   }

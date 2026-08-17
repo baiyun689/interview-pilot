@@ -7,5 +7,5 @@ import java.util.UUID;
 public interface KnowledgeRevisionCandidates {
   List<Candidate> findEligible();
 
-  record Candidate(UUID documentId, int activeRevision) {}
+  record Candidate(UUID documentId, int activeRevision, int currentRevision) {}
 }

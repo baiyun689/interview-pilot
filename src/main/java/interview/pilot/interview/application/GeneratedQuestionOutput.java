@@ -17,6 +17,7 @@ public record GeneratedQuestionOutput(
         || (groundingMode == GroundingMode.KNOWLEDGE_ASSISTED && evidenceRefs.isEmpty())) {
       throw new IllegalArgumentException("groundingMode and evidenceRefs are inconsistent");
     }
+    new GeneratedQuestion(question, targetCompetency, groundingMode, evidenceRefs);
   }
 
   public GeneratedQuestion toDomain() {

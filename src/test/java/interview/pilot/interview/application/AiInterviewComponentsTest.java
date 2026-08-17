@@ -39,8 +39,19 @@ class AiInterviewComponentsTest {
         "{\"question\":\"q\",\"targetCompetency\":\"Java\"}",
         GeneratedQuestionOutput.class)).isInstanceOf(Exception.class);
     assertThatThrownBy(() -> mapper.readValue(
+        "{\"question\":\"\",\"targetCompetency\":\"Java\","
+            + "\"groundingMode\":\"SKILL_GENERAL\",\"evidenceRefs\":[]}",
+        GeneratedQuestionOutput.class)).isInstanceOf(Exception.class);
+    assertThatThrownBy(() -> mapper.readValue(
         "{\"score\":70,\"feedback\":\"ok\",\"evidence\":[],\"missingPoints\":[],"
             + "\"redFlags\":[],\"suggestedDecision\":{\"nextStep\":\"FINISH\","
+            + "\"difficultyAdjustment\":\"KEEP\",\"targetCompetency\":\"\","
+            + "\"probeFocus\":\"\",\"reason\":\"done\",\"confidence\":0.9}}",
+        AnswerEvaluationOutput.class)).isInstanceOf(Exception.class);
+    assertThatThrownBy(() -> mapper.readValue(
+        "{\"feedback\":\"ok\",\"evidence\":[],\"missingPoints\":[],"
+            + "\"redFlags\":[],\"referenceFacts\":[],\"conflictFacts\":[],"
+            + "\"suggestedDecision\":{\"nextStep\":\"FINISH\","
             + "\"difficultyAdjustment\":\"KEEP\",\"targetCompetency\":\"\","
             + "\"probeFocus\":\"\",\"reason\":\"done\",\"confidence\":0.9}}",
         AnswerEvaluationOutput.class)).isInstanceOf(Exception.class);
@@ -50,7 +61,7 @@ class AiInterviewComponentsTest {
   void answerPromptIsChineseCompleteAndUsesJsonForTheNestedDecisionContract() {
     StructuredOutputInvoker invoker = mock(StructuredOutputInvoker.class);
     AnswerEvaluationOutput output = new AnswerEvaluationOutput(
-        70, "继续深入", List.of("说明了机制"), List.of("缺少边界"), List.of(),
+        70d, "继续深入", List.of("说明了机制"), List.of("缺少边界"), List.of(),
         new InterviewDecision(NextStep.FOLLOW_UP, DifficultyAdjustment.KEEP,
             "Java", "边界", "需要证据", 0.8), List.of(), List.of());
     when(invoker.invoke(org.mockito.ArgumentMatchers.any(), eq(AnswerEvaluationOutput.class)))

@@ -1,6 +1,7 @@
 package interview.pilot.interview.grounding;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
 import java.util.List;
@@ -89,6 +90,16 @@ class KnowledgeGroundingTest {
     }, properties());
 
     grounding.ground(SCOPE, GroundingDirective.from(turn));
+  }
+
+  @Test
+  void skillCannotRequestMoreChunksThanThePersistedSnapshotSupports() {
+    assertThatThrownBy(() -> new SkillRetrievalPolicy(
+        true, List.of("technical"), List.of(),
+        List.of(interview.pilot.interview.skill.GroundingUse.GENERATE_SCENARIO),
+        7, 21, 0.8, 2_000))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("topK is invalid");
   }
 
   private TurnDirective directive(boolean enabled) {

@@ -237,6 +237,8 @@ public class InterviewReportHandler {
       var item = plan.itemFor(turn.getTargetCompetency());
       RagContextSnapshot rag = readRag(turn.getRagContextSnapshot());
       java.util.Set<String> cited = new java.util.LinkedHashSet<>(rag.evidenceRefs());
+      answer.evaluation().referenceFacts().forEach(fact -> cited.add(fact.sourceId()));
+      answer.evaluation().conflictFacts().forEach(fact -> cited.add(fact.sourceId()));
       List<ReportEvidence.SourceReference> sources = rag.chunks().stream()
           .filter(chunk -> cited.contains(chunk.pointId()))
           .map(chunk -> new ReportEvidence.SourceReference(

@@ -20,7 +20,8 @@ public class KnowledgeRepositoryAdapterAutoConfiguration {
   KnowledgeRevisionCandidates knowledgeRevisionCandidates(KnowledgeDocumentJpaRepository delegate) {
     return () -> delegate.findRevisionCleanupCandidates().stream()
         .map(document -> new KnowledgeRevisionCandidates.Candidate(
-            document.getDocumentId(), document.getActiveIndexRevision()))
+            document.getDocumentId(), document.getActiveIndexRevision(),
+            document.getIndexRevision()))
         .toList();
   }
 }

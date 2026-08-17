@@ -38,13 +38,19 @@ public final class KnowledgeRevisionCleanup {
       initialDelayString = "${app.knowledge.revision-cleanup-initial-delay:PT2M}")
   public void retryEligibleCleanups() {
     if (vectorStore == null) return;
-    candidates.findEligible().forEach(candidate -> cleanupOlderRevisions(
-        candidate.documentId(), candidate.activeRevision()));
+    candidates.findEligible().forEach(candidate -> cleanupInactiveRevisions(
+        candidate.documentId(), candidate.activeRevision(), candidate.currentRevision()));
   }
 
   public void cleanupOlderRevisions(UUID documentId, int activeRevision) {
-    if (vectorStore == null || activeRevision <= 1) return;
-    for (int revision = 1; revision < activeRevision; revision++) {
+    cleanupInactiveRevisions(documentId, activeRevision, activeRevision);
+  }
+
+  public void cleanupInactiveRevisions(
+      UUID documentId, int activeRevision, int currentRevision) {
+    if (vectorStore == null || currentRevision < 1) return;
+    for (int revision = 1; revision <= currentRevision; revision++) {
+      if (revision == activeRevision) continue;
       if (hasActiveReference(documentId, revision)) continue;
       try {
         vectorStore.delete(and(

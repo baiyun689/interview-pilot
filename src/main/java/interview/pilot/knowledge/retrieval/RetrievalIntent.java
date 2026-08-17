@@ -4,7 +4,7 @@ import java.util.List;
 
 public record RetrievalIntent(
     String query, String competency, String difficulty,
-    List<String> keywords, List<String> excludeTopics,
+    List<String> keywords, List<String> coveredTopics,
     int topK, int candidateCount, double similarityThreshold,
     int contextCharacterBudget) {
 
@@ -23,14 +23,14 @@ public record RetrievalIntent(
       throw new IllegalArgumentException("similarityThreshold must be between 0 and 1");
     }
     keywords = keywords == null ? List.of() : List.copyOf(keywords);
-    excludeTopics = excludeTopics == null ? List.of() : List.copyOf(excludeTopics);
+    coveredTopics = coveredTopics == null ? List.of() : List.copyOf(coveredTopics);
   }
 
   public RetrievalIntent(
       String query, String competency, String difficulty,
-      List<String> keywords, List<String> excludeTopics,
+      List<String> keywords, List<String> coveredTopics,
       int topK, double similarityThreshold) {
-    this(query, competency, difficulty, keywords, excludeTopics,
+    this(query, competency, difficulty, keywords, coveredTopics,
         topK, Math.max(12, topK * 3), similarityThreshold, 6_000);
   }
 }

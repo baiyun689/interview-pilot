@@ -66,7 +66,7 @@ class KnowledgeRevisionCleanupTest {
     InterviewSessionRepository sessions = mock(InterviewSessionRepository.class);
     KnowledgeRevisionCandidates candidates = mock(KnowledgeRevisionCandidates.class);
     when(candidates.findEligible()).thenReturn(List.of(
-        new KnowledgeRevisionCandidates.Candidate(documentId, 2)));
+        new KnowledgeRevisionCandidates.Candidate(documentId, 2, 2)));
     when(sessions.findAllByOrderByCreatedAtDesc()).thenReturn(List.of());
     doThrow(new RuntimeException("temporary"))
         .doNothing().when(store).delete(any(Filter.Expression.class));
@@ -77,5 +77,21 @@ class KnowledgeRevisionCleanupTest {
     cleanup.retryEligibleCleanups();
 
     verify(store, times(2)).delete(any(Filter.Expression.class));
+  }
+
+  @Test
+  void scheduledSweepDeletesFailedRevisionAboveTheLastActiveRevision() {
+    UUID documentId = UUID.randomUUID();
+    VectorStore store = mock(VectorStore.class);
+    InterviewSessionRepository sessions = mock(InterviewSessionRepository.class);
+    KnowledgeRevisionCandidates candidates = mock(KnowledgeRevisionCandidates.class);
+    when(candidates.findEligible()).thenReturn(List.of(
+        new KnowledgeRevisionCandidates.Candidate(documentId, 1, 2)));
+    when(sessions.findAllByOrderByCreatedAtDesc()).thenReturn(List.of());
+
+    new KnowledgeRevisionCleanup(Optional.of(store), sessions, objectMapper, candidates)
+        .retryEligibleCleanups();
+
+    verify(store).delete(any(Filter.Expression.class));
   }
 }

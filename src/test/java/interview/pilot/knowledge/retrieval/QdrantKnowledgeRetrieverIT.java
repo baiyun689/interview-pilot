@@ -169,6 +169,28 @@ class QdrantKnowledgeRetrieverIT {
   }
 
   @Test
+  void coveredTopicHintsDoNotRemoveRelevantFollowUpChunks() {
+    var scope = new ValidatedKnowledgeScope(
+        USER_A, List.of(KB_A),
+        List.of(new ValidatedKnowledgeScope.DocumentRevision(DOC_A, 1)),
+        "text-embedding-v3");
+    var intent = new RetrievalIntent("Spring事务失败边界", "Spring事务", "HARD",
+        List.of(), List.of("Spring事务"), 5, 0.5);
+
+    var result = new QdrantKnowledgeRetriever(vectorStore,
+        new interview.pilot.knowledge.config.KnowledgeProperties(
+            true, java.nio.file.Path.of("./build/tmp/kt-covered"), 800, 100, 32,
+            "knowledge_chunks_v1", 5, 0.5,
+            new interview.pilot.knowledge.config.KnowledgeProperties.Qdrant("localhost", 6334),
+            new interview.pilot.knowledge.config.KnowledgeProperties.Embedding(
+                java.net.URI.create("http://localhost"), "k", "text-embedding-v3", 1024)),
+        aiMetrics).retrieve(scope, intent);
+
+    assertThat(result.chunks()).anySatisfy(chunk ->
+        assertThat(chunk.content()).contains("Spring事务"));
+  }
+
+  @Test
   void uploadedDocumentCanBeIndexedAndRetrievedForInterviewScope() {
     var account = users.save(UserAccountEntity.register(
         "rag-e2e-" + UUID.randomUUID() + "@example.com", "{noop}pw", "RAG E2E"));

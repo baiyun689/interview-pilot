@@ -58,7 +58,7 @@ public class QdrantKnowledgeRetriever implements KnowledgeRetriever {
       }
 
       List<KnowledgeChunk> chunks = ranker.rank(
-          excludeTopics(toChunks(results), intent.excludeTopics()),
+          toChunks(results),
           intent.topK(), intent.similarityThreshold(),
           intent.contextCharacterBudget());
       if (chunks.isEmpty()) {
@@ -165,15 +165,6 @@ public class QdrantKnowledgeRetriever implements KnowledgeRetriever {
   private static Integer positiveInt(Object value) {
     int parsed = parseInt(value);
     return parsed > 0 ? parsed : null;
-  }
-
-  private List<KnowledgeChunk> excludeTopics(
-      List<KnowledgeChunk> chunks, List<String> excludedTopics) {
-    if (excludedTopics.isEmpty()) return chunks;
-    return chunks.stream().filter(chunk -> excludedTopics.stream().noneMatch(topic ->
-        !topic.isBlank() && chunk.content().toLowerCase(java.util.Locale.ROOT)
-            .contains(topic.toLowerCase(java.util.Locale.ROOT))))
-        .toList();
   }
 
   private static String describe(RuntimeException exception) {

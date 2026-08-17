@@ -16,7 +16,7 @@ public record SkillRetrievalPolicy(
     scopes = immutable(scopes);
     triggerKeywords = immutable(triggerKeywords);
     allowedUses = allowedUses == null ? List.of() : List.copyOf(allowedUses);
-    if (topK != null && (topK < 1 || topK > 20)) throw new IllegalArgumentException("topK is invalid");
+    if (topK != null && (topK < 1 || topK > 6)) throw new IllegalArgumentException("topK is invalid");
     if (candidateCount != null && (candidateCount < 1 || candidateCount > 100)) {
       throw new IllegalArgumentException("candidateCount is invalid");
     }

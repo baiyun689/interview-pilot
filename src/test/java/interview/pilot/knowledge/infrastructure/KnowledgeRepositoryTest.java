@@ -14,7 +14,10 @@ import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.JpaRepository;
+
+import jakarta.persistence.LockModeType;
 
 class KnowledgeRepositoryTest {
   @Test
@@ -24,9 +27,13 @@ class KnowledgeRepositoryTest {
     KnowledgeDocumentRepository.class.getMethod(
         "findReadyByKnowledgeBaseIdsAndUserAccountId", Collection.class, Long.class);
     KnowledgeDocumentRepository.class.getMethod(
+        "lockReadyByKnowledgeBaseIdsAndUserAccountId", Collection.class, Long.class);
+    KnowledgeDocumentRepository.class.getMethod(
         "findVisibleByKnowledgeBaseIdsAndUserAccountId", Collection.class, Long.class);
     Method readyDocuments = KnowledgeDocumentJpaRepository.class.getMethod(
         "findReadyByKnowledgeBaseIdsAndUserAccountId", Collection.class, Long.class);
+    Method lockedReadyDocuments = KnowledgeDocumentJpaRepository.class.getMethod(
+        "lockReadyByKnowledgeBaseIdsAndUserAccountId", Collection.class, Long.class);
     Method visibleDocuments = KnowledgeDocumentJpaRepository.class.getMethod(
         "findVisibleByKnowledgeBaseIdsAndUserAccountId", Collection.class, Long.class);
     Method cleanupCandidates = KnowledgeDocumentJpaRepository.class.getMethod(
@@ -36,14 +43,20 @@ class KnowledgeRepositoryTest {
     assertThat(readyDocuments.getAnnotation(Query.class).value())
         .contains("knowledgeBase.userAccountId = :userAccountId")
         .contains("document.activeIndexRevision > 0")
-        .contains("KnowledgeDocumentStatus.DELETING")
-        .contains("KnowledgeDocumentStatus.DELETED");
+        .contains("document.status = interview.pilot.knowledge.domain.KnowledgeDocumentStatus.READY");
+    assertThat(lockedReadyDocuments.getAnnotation(Query.class).value())
+        .contains("knowledgeBase.userAccountId = :userAccountId")
+        .contains("KnowledgeDocumentStatus.READY");
+    assertThat(lockedReadyDocuments.getAnnotation(Lock.class).value())
+        .isEqualTo(LockModeType.PESSIMISTIC_READ);
     assertThat(visibleDocuments.getAnnotation(Query.class).value())
         .contains("knowledgeBase.userAccountId = :userAccountId")
         .contains("document.status <> interview.pilot.knowledge.domain.KnowledgeDocumentStatus.DELETED");
     assertThat(cleanupCandidates.getAnnotation(Query.class).value())
         .contains("document.activeIndexRevision > 1")
-        .contains("KnowledgeDocumentStatus.READY");
+        .contains("KnowledgeDocumentStatus.READY")
+        .contains("KnowledgeDocumentStatus.FAILED")
+        .contains("document.indexRevision > document.activeIndexRevision");
   }
 
   @Test

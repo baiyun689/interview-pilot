@@ -246,7 +246,7 @@ class SkillLedRagInterviewJourneyIT {
       assertThat(evidence.planRationale()).isNotBlank();
       assertThat(evidence.evidenceRefs()).contains("source-spring");
       assertThat(evidence.sources()).extracting(ReportEvidence.SourceReference::sourceId)
-          .contains("source-spring");
+          .contains("source-spring", "source-answer-only");
     });
   }
 
@@ -287,10 +287,15 @@ class SkillLedRagInterviewJourneyIT {
         var revision = scope.documents().getFirst();
         return new interview.pilot.interview.grounding.GroundingSnapshot(
             GroundingStatus.RETRIEVED, directive.competency(), scope.embeddingVersion(),
-            List.of(new interview.pilot.interview.grounding.GroundingSnapshot.Chunk(
-                "source-spring", KnowledgeRole.TECHNICAL_REFERENCE,
-                revision.documentId(), revision.indexRevision(), "spring.md", 0,
-                "transaction", 1, 0.94, "saved reference")), null);
+            List.of(
+                new interview.pilot.interview.grounding.GroundingSnapshot.Chunk(
+                    "source-spring", KnowledgeRole.TECHNICAL_REFERENCE,
+                    revision.documentId(), revision.indexRevision(), "spring.md", 0,
+                    "transaction", 1, 0.94, "saved reference"),
+                new interview.pilot.interview.grounding.GroundingSnapshot.Chunk(
+                    "source-answer-only", KnowledgeRole.TECHNICAL_REFERENCE,
+                    revision.documentId(), revision.indexRevision(), "spring.md", 1,
+                    "rollback", 2, 0.91, "answer-only reference")), null);
       };
     }
 
@@ -341,7 +346,7 @@ class SkillLedRagInterviewJourneyIT {
               "失败边界", "继续收集证据", 0.9),
           request.ragContext().status() == interview.pilot.interview.rag.RagStatus.RETRIEVED
               ? List.of(new AnswerEvaluation.ReferenceFact(
-                  "source-spring", "事务代理存在调用边界")) : List.of(),
+                  "source-answer-only", "事务回滚存在传播边界")) : List.of(),
           List.of());
     }
 
