@@ -128,6 +128,24 @@ class InterviewPlanCompilerTest {
   }
 
   @Test
+  void v5CompetenciesWithoutStageAreAssignedToDefaultStages() {
+    JobRequirements job = new JobRequirements(
+        List.of("Java 基础与并发", "MySQL"), List.of());
+
+    InterviewPlan plan = compiler.compile(
+        new InterviewPlan(specNames(skill), 6),
+        profile("支付项目", "并发扣款与订单存储", List.of("Java", "MySQL")),
+        job, Difficulty.MEDIUM, 6, skill);
+
+    assertThat(plan.items())
+        .extracting(item -> item.competency() + ":" + item.stageId())
+        .contains(
+            "项目深挖:project_deep_dive",
+            "Java 基础与并发:technical_depth",
+            "MySQL:technical_depth");
+  }
+
+  @Test
   void preservesDeclaredStageOrderEvenWhenLaterStageIsRequiredByTheJob() {
     InterviewPlan plan = compiler.compile(
         new InterviewPlan(specNames(skill), 5),

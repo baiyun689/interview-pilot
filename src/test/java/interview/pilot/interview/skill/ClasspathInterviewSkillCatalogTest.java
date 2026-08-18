@@ -28,9 +28,9 @@ class ClasspathInterviewSkillCatalogTest {
             "system-design",
             "test-development");
     assertThat(catalog.require("java-backend").defaultCompetencies()).isEmpty();
-    assertThat(catalog.require("java-backend").persona()).contains("Java 后端面试策略");
-    assertThat(catalog.require("java-backend").rubric()).contains("证据评分规则");
-    assertThat(catalog.require("java-backend").redFlags()).isEmpty();
+    assertThat(catalog.require("java-backend").persona()).contains("Java 后端面试官手册");
+    assertThat(catalog.require("java-backend").rubric()).contains("Java 后端面试官手册");
+    assertThat(catalog.require("java-backend").redFlags()).hasSize(4);
     assertThat(catalog.require("java-backend").version()).matches("[0-9a-f]{64}");
     assertThat(catalog.require("java-backend").stages())
         .extracting(SkillStageSpec::id)
@@ -73,7 +73,11 @@ class ClasspathInterviewSkillCatalogTest {
     assertThat(java.persona())
         .contains("## 决策原则")
         .contains("## RAG 资料使用规则")
-        .doesNotContain("GENERATE_SCENARIO", "VERIFY_FACT", "competencies.yml", "stages.yml");
+        .contains("## 反套路原则")
+        .contains("## 难度锚点")
+        .doesNotContain(
+            "GENERATE_SCENARIO", "VERIFY_FACT", "competencies.yml", "stages.yml",
+            "schemaVersion: 4");
   }
 
   @Test
@@ -85,46 +89,40 @@ class ClasspathInterviewSkillCatalogTest {
   }
 
   @Test
-  void javaBackendLoadsItsStrategyFromFivePurposeSpecificFiles() throws Exception {
+  void javaBackendLoadsItsStrategyFromTwoPurposeSpecificFiles() throws Exception {
     InterviewSkill java = new ClasspathInterviewSkillCatalog().require("java-backend");
-    String metadata = resource("skill.meta.yml");
-    String competencies = resource("competencies.yml");
-    String stages = resource("stages.yml");
+    String metadata = resource("skill.yml");
+    String handbook = resource("SKILL.md");
 
     assertThat(metadata)
-        .contains("schemaVersion: 4", "icon: code")
+        .contains("schemaVersion: 5", "icon: code", "redFlags:")
         .doesNotContain(
             "resources:", "defaultCompetencies:", "retrievalScopes:", "ragKeywords:",
-            "allowedTools:", "references:", "runtime:", "toolsEnabled:");
-    assertThat(competencies)
-        .contains("evidence:", "modes:", "probes:", "stage:", "ragScopes:")
-        .doesNotContain(
-            "defaultCompetencies:", "requiredEvidence:", "questionModes:", "followUpAxes:",
-            "redFlags:", "followUpLimit:", "rag:", "allowedUses:", "topK:",
-            "candidateCount:", "minimumScore:", "contextCharacterBudget:");
-    assertThat(stages)
-        .contains("id: project_deep_dive", "id: technical_depth", "id: reliability")
-        .doesNotContain("order:", "entryCriteria:", "exitCriteria:");
+            "allowedTools:", "references:", "runtime:", "toolsEnabled:", "followUpLimit:",
+            "topK:", "candidateCount:", "minimumScore:", "contextCharacterBudget:");
+    assertThat(handbook)
+        .contains("## 岗位考察重点", "## 反套路原则", "## 难度锚点", "## 五级评分锚点", "## 证据规则");
     assertThat(java.competencySpecs())
         .filteredOn(spec -> spec.id().equals("distributed_reliability"))
         .singleElement()
-        .satisfies(spec -> assertThat(spec.stageId()).isEqualTo("reliability"));
+        .satisfies(spec -> assertThat(spec.stageId()).isBlank());
     assertThat(java.stages())
         .extracting(SkillStageSpec::order)
         .containsExactly(10, 20, 30);
+    assertThat(java.redFlags()).hasSize(4);
     assertThat(java.defaultCompetencies()).isEmpty();
     assertThat(java.retrievalPolicy().enabled()).isFalse();
-    assertThat(java.snapshot().schemaVersion()).isEqualTo(4);
+    assertThat(java.snapshot().schemaVersion()).isEqualTo(5);
   }
 
   @Test
-  void everyCuratedInterviewDirectionUsesTheConciseV4Contract() {
+  void everyCuratedInterviewDirectionUsesTheConciseV5Contract() {
     InterviewSkillCatalog catalog = new ClasspathInterviewSkillCatalog();
     List<String> migrated = catalog.list().stream()
-        .filter(skill -> skill.schemaVersion() == 4)
+        .filter(skill -> skill.schemaVersion() == 5)
         .map(InterviewSkill::id)
         .toList();
-    assertThat(migrated).hasSize(7).doesNotContain("custom");
+    assertThat(migrated).containsExactly("java-backend");
     Map<String, Set<String>> allowedScopes = Map.of(
         "ai-agent-dev", Set.of("ai-agent", "tool-use", "rag", "mcp", "system-design"),
         "algorithm", Set.of("algorithm-data-structures", "complexity", "edge-cases"),
@@ -138,27 +136,18 @@ class ClasspathInterviewSkillCatalogTest {
 
     for (String id : migrated) {
       InterviewSkill skill = catalog.require(id);
-      Set<String> stageIds = skill.stages().stream().map(SkillStageSpec::id).collect(
-          java.util.stream.Collectors.toSet());
 
-      assertThat(skill.schemaVersion()).as(id).isEqualTo(4);
+      assertThat(skill.schemaVersion()).as(id).isEqualTo(5);
       assertThat(skill.defaultCompetencies()).as(id).isEmpty();
+      assertThat(skill.redFlags()).as(id).isNotEmpty();
       assertThat(skill.competencySpecs()).as(id).allSatisfy(spec -> {
-        assertThat(spec.stageId()).isIn(stageIds);
         assertThat(spec.requiredEvidence()).isNotEmpty();
         assertThat(spec.questionModes()).isNotEmpty();
         assertThat(spec.followUpAxes()).isNotEmpty();
         assertThat(spec.retrievalPolicy().scopes()).isSubsetOf(allowedScopes.get(id));
+        assertThat(spec.followUpLimit()).isEqualTo(2);
       });
     }
-
-    assertThat(catalog.require("algorithm").competencySpecs())
-        .filteredOn(spec -> spec.id().equals("complexity_analysis"))
-        .singleElement().satisfies(spec -> assertThat(spec.retrievalPolicy().scopes())
-            .containsExactly("algorithm-data-structures", "complexity"));
-    assertThat(catalog.require("frontend").competencySpecs())
-        .filteredOn(spec -> spec.id().equals("project_ownership"))
-        .singleElement().satisfies(spec -> assertThat(spec.retrievalPolicy().enabled()).isFalse());
   }
 
   private String resource(String filename) throws Exception {

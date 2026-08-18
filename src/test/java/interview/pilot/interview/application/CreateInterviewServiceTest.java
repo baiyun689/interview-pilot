@@ -88,7 +88,7 @@ class CreateInterviewServiceTest {
     verify(questions).firstQuestion(eq("deepseek"), eq(plan), eq(profile), eq(job), any(), any(), any());
     verify(store).create(org.mockito.ArgumentMatchers.argThat(creation ->
         creation.skillSnapshot().id().equals("java-backend")
-            && creation.skillSnapshot().rubric().contains("证据评分规则")));
+            && creation.skillSnapshot().rubric().contains("Java 后端面试官手册")));
   }
 
   @Test

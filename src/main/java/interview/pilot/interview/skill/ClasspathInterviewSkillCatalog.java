@@ -23,6 +23,8 @@ import org.yaml.snakeyaml.Yaml;
 public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
   private static final Pattern SKILL_PATH =
       Pattern.compile(".*/skills/([^/]+)/skill\\.meta\\.yml$");
+  private static final Pattern SKILL_PATH_V5 =
+      Pattern.compile(".*/skills/([^/]+)/skill\\.yml$");
   private static final Pattern SAFE_ID = Pattern.compile("[a-z0-9]+(?:-[a-z0-9]+)*");
   private static final Pattern SAFE_RESOURCE = Pattern.compile("[a-zA-Z0-9._-]+\\.(?:md|yml)");
 
@@ -59,10 +61,19 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
 
   private List<InterviewSkill> loadSkills() {
     try {
-      Resource[] resources = new PathMatchingResourcePatternResolver()
-          .getResources("classpath*:skills/*/skill.meta.yml");
+      var resolver = new PathMatchingResourcePatternResolver();
+      List<Resource> resources = new ArrayList<>();
+      resources.addAll(List.of(resolver.getResources("classpath*:skills/*/skill.meta.yml")));
+      resources.addAll(List.of(resolver.getResources("classpath*:skills/*/skill.yml")));
       var loaded = new ArrayList<InterviewSkill>();
-      for (Resource resource : resources) loaded.add(loadSkill(resource));
+      var seenIds = new java.util.HashSet<String>();
+      for (Resource resource : resources) {
+        String id = extractId(resource);
+        if (!seenIds.add(id)) {
+          throw invalid("Skill 同时存在 skill.yml 与 skill.meta.yml: " + id);
+        }
+        loaded.add(loadSkill(resource));
+      }
       loaded.sort(Comparator.comparing(InterviewSkill::id));
       return List.copyOf(loaded);
     } catch (IOException exception) {
@@ -70,10 +81,20 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
     }
   }
 
-  @SuppressWarnings("unchecked")
   private InterviewSkill loadSkill(Resource metaResource) {
     try {
       String id = extractId(metaResource);
+      String path = metaResource.getURL().toString().replace('\\', '/');
+      if (path.endsWith("/skill.yml")) return loadV5Skill(metaResource, id);
+      return loadLegacySkill(metaResource, id);
+    } catch (IOException exception) {
+      throw new IllegalStateException("无法读取面试 Skill 资源: " + metaResource, exception);
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  private InterviewSkill loadLegacySkill(Resource metaResource, String id) {
+    try {
       Map<String, Object> meta = new Yaml().load(metaResource.getContentAsString(StandardCharsets.UTF_8));
       if (meta == null) throw invalid("Skill 元数据为空: " + id);
       int schemaVersion = integer(meta.get("schemaVersion"), 1, id, "schemaVersion");
@@ -125,9 +146,99 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
     }
   }
 
+  @SuppressWarnings("unchecked")
+  private InterviewSkill loadV5Skill(Resource metaResource, String id) {
+    try {
+      Map<String, Object> meta =
+          new Yaml().load(metaResource.getContentAsString(StandardCharsets.UTF_8));
+      if (meta == null) throw invalid("Skill 元数据为空: " + id);
+      String name = required(meta.get("displayName"), id, "displayName");
+      String description = required(meta.get("description"), id, "description");
+      SkillGroup group = parseGroup(required(meta.get("group"), id, "group"), id);
+      String icon = required(meta.get("icon"), id, "icon");
+      List<String> redFlags = strings(meta.get("redFlags"), id, false);
+
+      List<SkillStageSpec> stages;
+      if (meta.get("stages") instanceof List<?> list && !list.isEmpty()) {
+        stages = stages(meta, id);
+        validateStageUniqueness(id, stages);
+      } else {
+        stages = SkillStageSpec.DEFAULT_STAGES;
+      }
+
+      List<CompetencySpec> specs = v5Competencies(meta, id);
+      validateModelV5(id, stages, specs);
+
+      String handbook = readRequired(id, "SKILL.md");
+      String version = sha256(String.join("\n",
+          id, name, description, group.name(), icon,
+          String.join("|", redFlags), stages.toString(), specs.toString(), handbook));
+      return new InterviewSkill(
+          id, name, description, group, new InterviewSkill.Display(icon),
+          List.of(), stages, specs, SkillRetrievalPolicy.disabled(),
+          handbook, handbook, redFlags, version, 5);
+    } catch (IOException exception) {
+      throw new IllegalStateException("无法读取面试 Skill 资源: " + metaResource, exception);
+    }
+  }
+
+  @SuppressWarnings("unchecked")
+  private List<CompetencySpec> v5Competencies(Map<String, Object> meta, String skillId) {
+    Object configured = meta.get("competencies");
+    if (!(configured instanceof List<?> list) || list.isEmpty()) {
+      throw invalid("Skill 缺少 competencies: " + skillId);
+    }
+    List<CompetencySpec> result = new ArrayList<>();
+    for (Object item : list) {
+      if (!(item instanceof Map<?, ?> raw)) {
+        throw invalid("Skill competency 格式无效: " + skillId);
+      }
+      Map<String, Object> competency = (Map<String, Object>) raw;
+      List<InterviewQuestionMode> modes = strings(competency.get("modes"), skillId, false).stream()
+          .map(value -> parseQuestionMode(value, skillId))
+          .toList();
+      List<String> scopes = strings(competency.get("ragScopes"), skillId, false);
+      KnowledgeDomains.requireRegistered(skillId, scopes);
+      SkillRetrievalPolicy policy = scopes.isEmpty()
+          ? SkillRetrievalPolicy.disabled()
+          : new SkillRetrievalPolicy(true, scopes,
+              List.of(GroundingUse.GENERATE_SCENARIO, GroundingUse.VERIFY_FACT));
+      result.add(new CompetencySpec(
+          required(competency.get("id"), skillId, "competencies.id"),
+          required(competency.get("name"), skillId, "competencies.name"),
+          required(competency.get("objective"), skillId, "competencies.objective"),
+          strings(competency.get("evidence"), skillId, true),
+          modes,
+          strings(competency.get("probes"), skillId, false),
+          List.of(), 2, policy,
+          optional(competency.get("stage"))));
+    }
+    return List.copyOf(result);
+  }
+
+  private void validateModelV5(String skillId, List<SkillStageSpec> stages,
+      List<CompetencySpec> competencies) {
+    if (competencies.stream().map(CompetencySpec::id).map(String::toLowerCase).distinct().count()
+        != competencies.size()) {
+      throw invalid("Skill competency ID 重复: " + skillId);
+    }
+    java.util.Set<String> stageIds = stages.stream()
+        .map(SkillStageSpec::id)
+        .map(String::toLowerCase)
+        .collect(java.util.stream.Collectors.toSet());
+    for (CompetencySpec competency : competencies) {
+      if (!competency.stageId().isBlank()
+          && !stageIds.contains(competency.stageId().toLowerCase())) {
+        throw invalid("Skill competency 引用了不存在的 stage: "
+            + skillId + "/" + competency.id() + "/" + competency.stageId());
+      }
+    }
+  }
+
   private String extractId(Resource resource) throws IOException {
     String normalized = resource.getURL().toString().replace('\\', '/');
     Matcher matcher = SKILL_PATH.matcher(normalized);
+    if (!matcher.matches()) matcher = SKILL_PATH_V5.matcher(normalized);
     if (!matcher.matches() || !SAFE_ID.matcher(matcher.group(1)).matches()) {
       throw invalid("Skill 资源路径无效: " + normalized);
     }
@@ -320,10 +431,7 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
       List<CompetencySpec> competencies,
       int schemaVersion) {
     boolean requireStageReferences = schemaVersion >= 3;
-    if (stages.stream().map(SkillStageSpec::id).map(String::toLowerCase).distinct().count()
-        != stages.size()) {
-      throw invalid("Skill stage ID 重复: " + skillId);
-    }
+    validateStageUniqueness(skillId, stages);
     if (requireStageReferences
         && stages.stream().map(SkillStageSpec::order).distinct().count() != stages.size()) {
       throw invalid("Skill stage order 重复: " + skillId);
@@ -350,6 +458,13 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
         throw invalid("Skill competency 引用了不存在的 stage: "
             + skillId + "/" + competency.id() + "/" + competency.stageId());
       }
+    }
+  }
+
+  private void validateStageUniqueness(String skillId, List<SkillStageSpec> stages) {
+    if (stages.stream().map(SkillStageSpec::id).map(String::toLowerCase).distinct().count()
+        != stages.size()) {
+      throw invalid("Skill stage ID 重复: " + skillId);
     }
   }
 

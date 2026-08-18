@@ -1,53 +1,59 @@
+schemaVersion: 5
+displayName: Java 后端
+description: 面向 Java 后端工程师的证据驱动技术面试。
+group: JOB
+icon: code
+
+redFlags:
+  - 声称性能优化但无测量方式或基线
+  - 生产方案无失败检测或回滚路径
+  - 术语密集但无法说明实现或验证细节
+  - 技术结论与前述项目事实矛盾
+
 competencies:
   - id: project_ownership
     name: 项目深挖
-    stage: project_deep_dive
-    objective: 验证个人贡献、业务约束、关键指标和事故处理
+    objective: 验证个人贡献边界、业务约束、核心指标和事故处理能力
     evidence: [个人贡献边界, 关键约束, 核心指标, 真实问题与恢复]
     modes: [PROJECT, FAILURE, METRICS, TRADEOFF]
-    probes: [ownership, constraint, metric, incident]
+    probes: [贡献边界, 业务约束, 指标口径, 事故复盘]
 
   - id: java_concurrency
     name: Java 基础与并发
-    stage: technical_depth
     objective: 验证 Java 运行机制、并发语义、性能边界和工程决策
     evidence: [核心机制, 并发安全, 性能边界, 实际使用依据]
     modes: [PROJECT, CONCEPT, MECHANISM, FAILURE, CODING]
-    probes: [mechanism, concurrency, performance, boundary]
+    probes: [实现机制, 并发安全, 性能边界, 依据与反例]
     ragScopes: [java, concurrency]
 
   - id: spring_transaction
     name: Spring 与事务
-    stage: technical_depth
     objective: 验证 Spring 代理边界、事务传播、回滚条件和异常处理
     evidence: [代理与调用边界, 事务传播, 回滚条件, 失败处理]
     modes: [PROJECT, MECHANISM, FAILURE, TRADEOFF]
-    probes: [proxy, boundary, propagation, rollback]
+    probes: [代理边界, 传播行为, 回滚条件, 失败路径]
     ragScopes: [spring, transaction]
 
   - id: mysql
     name: MySQL
-    stage: technical_depth
     objective: 验证数据建模、索引设计、事务锁和慢查询治理
     evidence: [访问模式与建模, 索引依据, 事务与锁, 定位和优化指标]
     modes: [PROJECT, MECHANISM, FAILURE, METRICS, TRADEOFF]
-    probes: [index, lock, transaction, diagnosis]
+    probes: [索引依据, 锁与事务, 定位方法, 优化指标]
     ragScopes: [mysql, database]
 
   - id: redis
     name: Redis
-    stage: technical_depth
     objective: 验证缓存设计、一致性、热点治理和故障恢复
     evidence: [缓存适用性, 一致性策略, 热点与穿透防护, 故障降级]
     modes: [PROJECT, ARCHITECTURE, FAILURE, METRICS, TRADEOFF]
-    probes: [consistency, hotspot, failure, metric]
+    probes: [一致性窗口, 热点治理, 故障降级, 效果指标]
     ragScopes: [redis, cache]
 
   - id: distributed_reliability
     name: 分布式与高可用
-    stage: reliability
     objective: 验证一致性、幂等、容量、降级、恢复和系统演进
     evidence: [一致性与幂等, 容量和 SLO, 降级恢复, 可观测与演练]
     modes: [ARCHITECTURE, FAILURE, METRICS, TRADEOFF]
-    probes: [consistency, capacity, recovery, evolution]
+    probes: [一致性与幂等, 容量与 SLO, 降级恢复, 演进路径]
     ragScopes: [distributed, high-availability, mq]
