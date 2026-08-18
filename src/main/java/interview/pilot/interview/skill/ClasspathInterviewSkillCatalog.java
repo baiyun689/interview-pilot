@@ -25,7 +25,7 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
       Pattern.compile(".*/skills/([^/]+)/skill\\.meta\\.yml$");
   private static final Pattern SKILL_PATH_V5 =
       Pattern.compile(".*/skills/([^/]+)/skill\\.yml$");
-  private static final Pattern SAFE_ID = Pattern.compile("[a-z0-9]+(?:-[a-z0-9]+)*");
+  private static final Pattern SAFE_ID = Pattern.compile("_?[a-z0-9]+(?:-[a-z0-9]+)*");
   private static final Pattern SAFE_RESOURCE = Pattern.compile("[a-zA-Z0-9._-]+\\.(?:md|yml)");
 
   private final List<InterviewSkill> skills;
@@ -69,6 +69,7 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
       var seenIds = new java.util.HashSet<String>();
       for (Resource resource : resources) {
         String id = extractId(resource);
+        if (id.startsWith("_")) continue;  // 模板目录不参与加载
         if (!seenIds.add(id)) {
           throw invalid("Skill 同时存在 skill.yml 与 skill.meta.yml: " + id);
         }

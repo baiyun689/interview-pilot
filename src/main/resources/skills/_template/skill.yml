@@ -1,0 +1,19 @@
+schemaVersion: 5
+displayName: 模板岗位
+description: 一句话说明该岗位面试验证什么。
+group: JOB
+icon: code
+
+redFlags:
+  - 该岗位最常见的假证据或危险信号一
+  - 信号二
+
+competencies:
+  - id: first_competency
+    name: 能力展示名
+    objective: 一句话说明这个能力考什么
+    evidence: [证据目标一, 证据目标二, 证据目标三]
+    modes: [PROJECT, MECHANISM]        # 可删（默认 PROJECT+MECHANISM）
+    probes: [追问方向一, 追问方向二]    # 可删
+    ragScopes: [java]                 # 可删（不开 RAG）；必须是注册域
+    # stage 可删（自动归类：project→项目深挖，reliab/distributed→可靠性，其余→技术深度）
