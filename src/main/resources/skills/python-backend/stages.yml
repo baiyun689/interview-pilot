@@ -1,7 +1,0 @@
-stages:
-  - id: project_deep_dive
-    purpose: 建立 Python 服务项目事实和个人贡献基线
-  - id: technical_depth
-    purpose: 验证语言、框架、并发异步和数据访问机制
-  - id: reliability
-    purpose: 验证失败处理、可观测性、部署和服务演进

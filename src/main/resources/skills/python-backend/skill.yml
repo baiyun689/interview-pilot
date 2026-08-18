@@ -1,48 +1,59 @@
+schemaVersion: 5
+displayName: Python 后端
+description: 面向 Python 后端工程师的证据驱动技术面试。
+group: JOB
+icon: terminal
+
+redFlags:
+  - 孤立语法点当工程能力
+  - 异步方案无阻塞与资源边界分析
+  - 性能结论无测量
+  - 生产方案无重试、监控或恢复
+
 competencies:
   - id: project_ownership
     name: 项目深挖
-    stage: project_deep_dive
     objective: 验证个人贡献、服务边界、业务约束和生产结果
     evidence: [个人贡献边界, 服务职责, 关键约束, 结果与事故]
     modes: [PROJECT, FAILURE, METRICS, TRADEOFF]
-    probes: [ownership, boundary, constraint, incident]
+    probes: [贡献边界, 服务边界, 关键约束, 结果与事故]
+
   - id: python_runtime
     name: Python 核心与运行机制
-    stage: technical_depth
     objective: 验证对象模型、迭代协议、内存、GIL 和工程使用边界
     evidence: [核心语言机制, 内存与生命周期, GIL 边界, 使用依据]
     modes: [PROJECT, CONCEPT, MECHANISM, FAILURE, CODING]
-    probes: [object, protocol, memory, gil]
+    probes: [对象模型, 迭代协议, 内存与生命周期, GIL 边界]
     ragScopes: [python]
+
   - id: web_framework
     name: Web 框架
-    stage: technical_depth
     objective: 验证请求生命周期、中间件、校验、ORM 和错误处理
     evidence: [请求链路, 中间件边界, 数据校验, ORM 与错误处理]
     modes: [PROJECT, MECHANISM, ARCHITECTURE, FAILURE, TRADEOFF]
-    probes: [request, middleware, validation, orm]
+    probes: [请求链路, 中间件边界, 数据校验, ORM 与错误处理]
     ragScopes: [django-flask, python]
+
   - id: concurrency_async
     name: 并发与异步
-    stage: technical_depth
     objective: 验证事件循环、线程进程取舍和阻塞调用治理
     evidence: [并发模型, 阻塞边界, 资源控制, 性能验证]
     modes: [PROJECT, MECHANISM, FAILURE, METRICS, TRADEOFF]
-    probes: [event-loop, blocking, worker, resource]
+    probes: [事件循环, 阻塞边界, 线程进程取舍, 资源控制]
     ragScopes: [python, distributed]
+
   - id: database
     name: 数据库
-    stage: technical_depth
     objective: 验证数据建模、ORM SQL、索引、事务和访问效率
     evidence: [访问模式, SQL 与 ORM 边界, 索引依据, 事务处理]
     modes: [PROJECT, MECHANISM, FAILURE, METRICS, TRADEOFF]
-    probes: [model, sql, index, transaction]
+    probes: [访问模式, SQL 与 ORM 边界, 索引依据, 事务处理]
     ragScopes: [database, django-flask]
+
   - id: service_reliability
     name: 服务可靠性
-    stage: reliability
     objective: 验证重试幂等、限流降级、可观测性和部署恢复
     evidence: [失败检测, 重试与幂等, 监控诊断, 发布与恢复]
     modes: [PROJECT, ARCHITECTURE, FAILURE, METRICS, TRADEOFF]
-    probes: [failure, idempotency, observability, recovery]
+    probes: [失败检测, 重试与幂等, 监控诊断, 发布与恢复]
     ragScopes: [distributed]
