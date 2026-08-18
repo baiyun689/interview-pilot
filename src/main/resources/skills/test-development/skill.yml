@@ -1,3 +1,23 @@
+schemaVersion: 5
+displayName: 测试开发
+description: 面向测试开发工程师的质量工程面试。
+group: JOB
+icon: flask
+
+redFlags:
+  - 用例数量等同于质量
+  - 指标无口径或基线
+  - Flaky 无根因归因
+  - 缺陷逃逸无预防闭环
+
+stages:
+  - id: project_deep_dive
+    purpose: 验证真实质量问题和改进贡献
+  - id: test_strategy
+    purpose: 验证风险识别、测试策略和自动化实现
+  - id: quality_engineering
+    purpose: 验证 CI 门禁、反馈速度和测试系统可靠性
+
 competencies:
   - id: project_ownership
     name: 项目深挖
@@ -5,52 +25,49 @@ competencies:
     objective: 验证个人贡献、质量风险、改进动作和结果指标
     evidence: [个人贡献边界, 质量风险, 改进方案, 结果指标]
     modes: [PROJECT, FAILURE, METRICS, TRADEOFF]
-    probes: [ownership, risk, action, outcome]
+    probes: [贡献边界, 质量风险, 改进动作, 结果指标]
+
   - id: test_strategy
     name: 测试策略
     stage: test_strategy
     objective: 验证风险识别、测试分层、覆盖边界和缺陷预防
     evidence: [风险排序, 测试分层, 覆盖边界, 缺陷预防]
     modes: [PROJECT, ARCHITECTURE, FAILURE, TRADEOFF]
-    probes: [risk, layer, coverage, prevention]
+    probes: [风险排序, 测试分层, 覆盖边界, 缺陷预防]
     ragScopes: [test-development, quality]
+
   - id: automation_framework
     name: 自动化框架
     stage: test_strategy
     objective: 验证可维护、可并行、低 flaky 的自动化设计
-    evidence: [框架边界, fixture 与数据, 并行隔离, 失败诊断]
+    evidence: [框架边界, Fixture 与数据, 并行隔离, 失败诊断]
     modes: [PROJECT, ARCHITECTURE, FAILURE, CODING, TRADEOFF]
-    probes: [framework, fixture, parallel, diagnosis]
+    probes: [框架边界, Fixture 与数据, 并行隔离, 失败诊断]
     ragScopes: [test-development, automation]
+
   - id: api_performance_testing
     name: 接口与性能测试
     stage: test_strategy
     objective: 验证接口契约、负载模型、瓶颈定位和结果判定
     evidence: [接口契约, 负载模型, 性能指标, 瓶颈归因]
     modes: [PROJECT, MECHANISM, FAILURE, METRICS, TRADEOFF]
-    probes: [contract, workload, metric, bottleneck]
+    probes: [接口契约, 负载模型, 性能指标, 瓶颈归因]
     ragScopes: [test-development]
+
   - id: ci_integration
     name: CI 集成
     stage: quality_engineering
     objective: 验证流水线分层、反馈速度、flaky 隔离和发布门禁
-    evidence: [流水线设计, 反馈时长, flaky 治理, 发布门禁]
+    evidence: [流水线设计, 反馈时长, Flaky 治理, 发布门禁]
     modes: [PROJECT, ARCHITECTURE, FAILURE, METRICS, TRADEOFF]
-    probes: [pipeline, feedback, flaky, gate]
+    probes: [流水线分层, 反馈时长, Flaky 治理, 发布门禁]
     ragScopes: [ci, automation]
-  - id: quality_metrics
-    name: 质量度量
-    stage: quality_engineering
-    objective: 验证指标定义、口径、归因和行动闭环
-    evidence: [指标定义, 数据口径, 趋势归因, 改进行动]
-    modes: [PROJECT, METRICS, FAILURE, TRADEOFF]
-    probes: [metric, baseline, attribution, action]
-    ragScopes: [quality, test-development]
+
   - id: test_reliability
-    name: 测试可靠性
+    name: 测试可靠性与质量度量
     stage: quality_engineering
-    objective: 验证测试稳定性、可重复性、诊断和环境治理
-    evidence: [稳定性指标, 根因分类, 隔离与重试, 环境治理]
+    objective: 验证测试稳定性、可重复性、指标口径和行动闭环
+    evidence: [稳定性指标, 根因分类, 指标口径与基线, 改进行动]
     modes: [PROJECT, FAILURE, METRICS, TRADEOFF]
-    probes: [stability, root-cause, isolation, environment]
+    probes: [稳定性指标, 根因分类, 指标口径, 行动闭环]
     ragScopes: [test-development, automation]

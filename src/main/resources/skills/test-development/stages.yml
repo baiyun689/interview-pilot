@@ -1,7 +1,0 @@
-stages:
-  - id: project_deep_dive
-    purpose: 建立质量项目事实和个人贡献基线
-  - id: test_strategy
-    purpose: 验证风险分析、测试分层和自动化设计
-  - id: quality_engineering
-    purpose: 验证 CI、质量度量、稳定性和工程效率
