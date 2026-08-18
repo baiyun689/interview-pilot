@@ -1,7 +1,0 @@
-stages:
-  - id: project_deep_dive
-    purpose: 建立 AI 应用项目事实和个人贡献基线
-  - id: architecture
-    purpose: 验证 Agent、RAG、Prompt 与工具编排的设计取舍
-  - id: reliability
-    purpose: 验证评估、安全、故障恢复、延迟和成本控制
