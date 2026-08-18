@@ -246,7 +246,8 @@ public class SubmitAnswerService {
           nextDifficulty, finish ? SessionStatus.EVALUATING : SessionStatus.INTERVIEWING, false,
           nextRag, finish ? null : nextDirective, context.currentDirective(),
           finish ? nextDirective.finishReason() : "",
-          finish ? nextDirective.unfinishedEvidence() : "");
+          finish ? nextDirective.unfinishedEvidence() : "",
+          strategyOutcome.progress());
       String snapshot = resultCodec.write(result);
       Long ownerId = requireOwner(user);
       Boolean finalized = requiresNew.execute(

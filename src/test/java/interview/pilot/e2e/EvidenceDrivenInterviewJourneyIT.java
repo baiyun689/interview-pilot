@@ -162,6 +162,10 @@ class EvidenceDrivenInterviewJourneyIT {
         stored.getEvaluationSnapshot(), AnswerProcessingResult.class);
     assertThat(finished.finishReason()).isEqualTo("ALL_COMPETENCIES_SETTLED");
     assertThat(finished.unfinishedEvidence()).isEmpty();
+    assertThat(finished.progressSnapshot()).isNotNull();
+    assertThat(finished.progressSnapshot().progressOf("java").status())
+        .isEqualTo(interview.pilot.interview.strategy.CompetencyStatus.SUFFICIENT);
+    assertThat(finished.progressSnapshot().progressOf("design").missingEvidence()).isEmpty();
     assertThat(sessions.findBySessionId(sessionId).orElseThrow().getStatus())
         .isEqualTo(SessionStatus.EVALUATING);
     assertThat(tasks.findByTaskTypeAndBizKey(

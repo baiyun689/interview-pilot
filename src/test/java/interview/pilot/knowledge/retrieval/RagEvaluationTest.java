@@ -61,6 +61,26 @@ class RagEvaluationTest {
     assertThat(noMatchAccuracy).isEqualTo(1.0);
     assertThat(meters.get("interview_pilot.knowledge.evaluation.recall_at_k").gauge().value())
         .isEqualTo(recallAtK);
+    assertSameDocumentAdjacentChunksAreBothKept(suite);
+  }
+
+  /** 同一文档的多个高质量相邻片段不得被按文档去重丢失。 */
+  private void assertSameDocumentAdjacentChunksAreBothKept(Suite suite) {
+    Case sameDoc = suite.cases().stream()
+        .filter(case_ -> case_.id().equals("same-document-adjacent-chunks"))
+        .findFirst()
+        .orElseThrow();
+    List<KnowledgeChunk> candidates = sameDoc.candidates().stream()
+        .map(candidate -> new KnowledgeChunk(
+            candidate.id(), UUID.nameUUIDFromBytes(candidate.id().getBytes()), "eval.md",
+            1, 0, sameDoc.id(), candidate.score(), candidate.content(), null))
+        .toList();
+
+    List<String> ranked = new KnowledgeRanker().rank(candidates, 3, 0.72, 2_000).stream()
+        .map(KnowledgeChunk::pointId)
+        .toList();
+
+    assertThat(ranked).contains("tx-chunk-1", "tx-chunk-2");
   }
 
   record Suite(int version, List<Case> cases) {}

@@ -50,6 +50,26 @@ class DefaultInterviewStrategyTest {
   }
 
   @Test
+  void outcomeCarriesProgressWithTheCurrentTurnApplied() {
+    var item = item("depth", "java", "Java", List.of("并发边界", "故障处置"), 2, 5);
+    InterviewPlan plan = execution(item);
+    TurnAssessment assessment = TurnAssessment.of(
+        evaluation(70, List.of(assessed("并发边界", true, "锁粒度"))), item, 1);
+
+    StrategyOutcome outcome = strategy.nextTurn(
+        plan, InterviewProgress.from(plan, List.of()),
+        assessment, context(Difficulty.MEDIUM, "Java", 1, 5));
+
+    assertThat(outcome.progress()).isNotNull();
+    CompetencyProgress progress = outcome.progress().progressOf("java");
+    assertThat(progress.followUpCount()).isEqualTo(1);
+    assertThat(progress.observedEvidence())
+        .extracting(ObservedEvidence::evidenceId)
+        .containsExactly("并发边界");
+    assertThat(progress.missingEvidence()).containsExactly("故障处置");
+  }
+
+  @Test
   void sufficientCompetencySwitchesToTheNextOneInTheSameStage() {
     var first = item("depth", "java", "Java", List.of("并发边界"), 2);
     var second = item("depth", "mysql", "MySQL", List.of("索引依据"), 2);

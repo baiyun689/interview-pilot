@@ -36,6 +36,16 @@
       "candidates": [
         {"id":"noise-4","score":0.44,"content":"与容量规划无关的内容"}
       ]
+    },
+    {
+      "id": "same-document-adjacent-chunks",
+      "expectNoMatch": false,
+      "relevantIds": ["tx-chunk-1","tx-chunk-2"],
+      "candidates": [
+        {"id":"tx-chunk-1","score":0.95,"content":"事务传播级别定义与挂起语义"},
+        {"id":"tx-chunk-2","score":0.88,"content":"REQUIRES_NEW 挂起当前事务并开启独立事务"},
+        {"id":"noise-5","score":0.51,"content":"数据库连接池配置"}
+      ]
     }
   ]
 }

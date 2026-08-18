@@ -108,9 +108,6 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
       List<SkillStageSpec> stages = stages(stageSource, id);
       List<CompetencySpec> competencySpecs = competencies(
           competencySource, id, competencies, schemaVersion);
-      if (schemaVersion >= 4) {
-        competencies = competencySpecs.stream().map(CompetencySpec::name).toList();
-      }
       SkillRetrievalPolicy retrievalPolicy = schemaVersion >= 4
           ? SkillRetrievalPolicy.disabled() : retrievalPolicy(meta);
       validateModel(id, competencies, stages, competencySpecs, schemaVersion);
@@ -213,6 +210,7 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
       SkillRetrievalPolicy policy;
       if (schemaVersion >= 4) {
         List<String> scopes = strings(competency.get("ragScopes"), skillId, false);
+        KnowledgeDomains.requireRegistered(skillId, scopes);
         policy = scopes.isEmpty() ? SkillRetrievalPolicy.disabled() : new SkillRetrievalPolicy(
             true, scopes, List.of(),
             List.of(GroundingUse.GENERATE_SCENARIO, GroundingUse.VERIFY_FACT));

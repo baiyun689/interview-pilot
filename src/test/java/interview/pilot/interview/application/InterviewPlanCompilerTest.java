@@ -9,6 +9,8 @@ import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.domain.InterviewPlan;
 import interview.pilot.interview.domain.JobRequirements;
 import interview.pilot.interview.skill.ClasspathInterviewSkillCatalog;
+import interview.pilot.interview.skill.CompetencySpec;
+import interview.pilot.interview.skill.SkillSnapshot;
 import interview.pilot.resume.domain.ResumeProfile;
 
 class InterviewPlanCompilerTest {
@@ -18,7 +20,7 @@ class InterviewPlanCompilerTest {
 
   @Test
   void compilesDefaultsIntoABudgetedPlanDrivenByJdAndResumeEvidence() {
-    InterviewPlan copiedDefaults = new InterviewPlan(skill.defaultCompetencies(), 8);
+    InterviewPlan copiedDefaults = new InterviewPlan(specNames(skill), 8);
     ResumeProfile redisResume = profile("Redis", "Built a distributed cache", List.of("Redis"));
     JobRequirements job = new JobRequirements(List.of("MySQL"), List.of("高并发"));
 
@@ -28,7 +30,7 @@ class InterviewPlanCompilerTest {
     assertThat(plan.schemaVersion()).isEqualTo(2);
     assertThat(plan.competencies())
         .contains("MySQL", "项目深挖", "Redis")
-        .hasSizeLessThan(skill.defaultCompetencies().size());
+        .hasSizeLessThan(specNames(skill).size());
     assertThat(plan.items()).allSatisfy(item -> {
       assertThat(item.evidenceTargets()).isNotEmpty();
       assertThat(item.questionModes()).isNotEmpty();
@@ -41,7 +43,7 @@ class InterviewPlanCompilerTest {
 
   @Test
   void differentResumeEvidenceChangesTheOptionalPlanSelection() {
-    InterviewPlan copiedDefaults = new InterviewPlan(skill.defaultCompetencies(), 6);
+    InterviewPlan copiedDefaults = new InterviewPlan(specNames(skill), 6);
     JobRequirements job = new JobRequirements(List.of("Java 基础与并发"), List.of());
 
     InterviewPlan redis = compiler.compile(
@@ -128,7 +130,7 @@ class InterviewPlanCompilerTest {
   @Test
   void preservesDeclaredStageOrderEvenWhenLaterStageIsRequiredByTheJob() {
     InterviewPlan plan = compiler.compile(
-        new InterviewPlan(skill.defaultCompetencies(), 5),
+        new InterviewPlan(specNames(skill), 5),
         ResumeProfile.empty(),
         new JobRequirements(List.of("分布式与高可用"), List.of("MySQL")),
         Difficulty.MEDIUM, 5, skill);
@@ -143,7 +145,7 @@ class InterviewPlanCompilerTest {
     var frontend = new ClasspathInterviewSkillCatalog().require("frontend").snapshot();
 
     InterviewPlan plan = compiler.compile(
-        new InterviewPlan(frontend.defaultCompetencies(), 5),
+        new InterviewPlan(specNames(frontend), 5),
         ResumeProfile.empty(),
         new JobRequirements(List.of("JavaScript"), List.of("浏览器机制")),
         Difficulty.MEDIUM, 5, frontend);
@@ -185,5 +187,9 @@ class InterviewPlanCompilerTest {
         description, technologies,
         List.of(new ResumeProfile.ProjectEvidence(name, description, technologies)),
         List.of(), List.of());
+  }
+
+  private static List<String> specNames(SkillSnapshot skill) {
+    return skill.competencySpecs().stream().map(CompetencySpec::name).toList();
   }
 }

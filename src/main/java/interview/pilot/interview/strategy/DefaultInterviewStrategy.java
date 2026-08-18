@@ -62,7 +62,7 @@ public final class DefaultInterviewStrategy implements InterviewStrategy {
     TurnDirective directive = directive(
         next.item(), adjust(context.currentDifficulty(), adjustment), 0,
         firstMissing(next.progress()), next.reason(), coveredTopics(tentative));
-    return new StrategyOutcome(decision, directive);
+    return new StrategyOutcome(decision, directive, tentative);
   }
 
   private StrategyOutcome followUp(
@@ -76,7 +76,7 @@ public final class DefaultInterviewStrategy implements InterviewStrategy {
     TurnDirective directive = directive(
         item, adjust(context.currentDifficulty(), adjustment), current.followUpCount(),
         probeFocus, "EVIDENCE_GAP_FOLLOW_UP", coveredTopics(tentative));
-    return new StrategyOutcome(decision, directive);
+    return new StrategyOutcome(decision, directive, tentative);
   }
 
   private StrategyOutcome finish(
@@ -84,7 +84,8 @@ public final class DefaultInterviewStrategy implements InterviewStrategy {
       Difficulty difficulty) {
     return new StrategyOutcome(
         new InterviewDecision(NextStep.FINISH, DifficultyAdjustment.KEEP, "", "", reason, confidence),
-        TurnDirective.finish(reason, difficulty, tentative.unfinishedSummary(plan)));
+        TurnDirective.finish(reason, difficulty, tentative.unfinishedSummary(plan)),
+        tentative);
   }
 
   private record Candidate(InterviewPlanItem item, CompetencyProgress progress, String reason) {}

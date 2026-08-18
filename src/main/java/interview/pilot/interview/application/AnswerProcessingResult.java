@@ -9,6 +9,7 @@ import interview.pilot.interview.domain.GeneratedQuestion;
 import interview.pilot.interview.domain.InterviewDecision;
 import interview.pilot.interview.domain.SessionStatus;
 import interview.pilot.interview.rag.RagContextSnapshot;
+import interview.pilot.interview.strategy.InterviewProgress;
 import interview.pilot.interview.strategy.TurnDirective;
 
 public record AnswerProcessingResult(
@@ -25,7 +26,8 @@ public record AnswerProcessingResult(
     TurnDirective nextDirective,
     TurnDirective currentDirective,
     String finishReason,
-    String unfinishedEvidence) {
+    String unfinishedEvidence,
+    InterviewProgress progressSnapshot) {
 
   public AnswerProcessingResult(
       UUID sessionId, UUID requestId, int turnNo, AnswerEvaluation evaluation,
@@ -33,7 +35,7 @@ public record AnswerProcessingResult(
       Difficulty nextDifficulty, SessionStatus sessionStatus, boolean replayed) {
     this(sessionId, requestId, turnNo, evaluation, decision, nextQuestion,
         nextDifficulty, sessionStatus, replayed, RagContextSnapshot.notConfigured(),
-        null, null, "", "");
+        null, null, "", "", null);
   }
 
   public AnswerProcessingResult(
@@ -42,7 +44,7 @@ public record AnswerProcessingResult(
       Difficulty nextDifficulty, SessionStatus sessionStatus, boolean replayed,
       RagContextSnapshot nextRagSnapshot) {
     this(sessionId, requestId, turnNo, evaluation, decision, nextQuestion,
-        nextDifficulty, sessionStatus, replayed, nextRagSnapshot, null, null, "", "");
+        nextDifficulty, sessionStatus, replayed, nextRagSnapshot, null, null, "", "", null);
   }
 
   public AnswerProcessingResult(
@@ -51,7 +53,7 @@ public record AnswerProcessingResult(
       Difficulty nextDifficulty, SessionStatus sessionStatus, boolean replayed,
       RagContextSnapshot nextRagSnapshot, TurnDirective nextDirective) {
     this(sessionId, requestId, turnNo, evaluation, decision, nextQuestion,
-        nextDifficulty, sessionStatus, replayed, nextRagSnapshot, nextDirective, null, "", "");
+        nextDifficulty, sessionStatus, replayed, nextRagSnapshot, nextDirective, null, "", "", null);
   }
 
   public AnswerProcessingResult(
@@ -62,7 +64,7 @@ public record AnswerProcessingResult(
       TurnDirective currentDirective) {
     this(sessionId, requestId, turnNo, evaluation, decision, nextQuestion,
         nextDifficulty, sessionStatus, replayed, nextRagSnapshot, nextDirective,
-        currentDirective, "", "");
+        currentDirective, "", "", null);
   }
 
   public AnswerProcessingResult {
@@ -88,6 +90,6 @@ public record AnswerProcessingResult(
     return new AnswerProcessingResult(
         sessionId, requestId, turnNo, evaluation, decision, nextQuestion,
         nextDifficulty, sessionStatus, true, nextRagSnapshot, nextDirective,
-        currentDirective, finishReason, unfinishedEvidence);
+        currentDirective, finishReason, unfinishedEvidence, progressSnapshot);
   }
 }

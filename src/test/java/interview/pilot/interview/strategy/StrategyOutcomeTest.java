@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.domain.DifficultyAdjustment;
 import interview.pilot.interview.domain.InterviewDecision;
+import interview.pilot.interview.domain.InterviewPlan;
 import interview.pilot.interview.domain.NextStep;
 import interview.pilot.interview.skill.InterviewQuestionMode;
 
@@ -20,10 +21,11 @@ class StrategyOutcomeTest {
     InterviewDecision finish = new InterviewDecision(
         NextStep.FINISH, DifficultyAdjustment.KEEP, "", "", "TURN_BUDGET_EXHAUSTED", 0);
 
-    assertThatThrownBy(() -> new StrategyOutcome(finish, askDirective()))
+    assertThatThrownBy(() -> new StrategyOutcome(finish, askDirective(), progress()))
         .isInstanceOf(IllegalArgumentException.class);
     assertThat(new StrategyOutcome(finish,
-        TurnDirective.finish("TURN_BUDGET_EXHAUSTED", Difficulty.MEDIUM, "未完成摘要")))
+        TurnDirective.finish("TURN_BUDGET_EXHAUSTED", Difficulty.MEDIUM, "未完成摘要"),
+        progress()))
         .isNotNull();
   }
 
@@ -33,9 +35,10 @@ class StrategyOutcomeTest {
         NextStep.NEXT_TOPIC, DifficultyAdjustment.KEEP, "MySQL", "", "切换", 0.8);
 
     assertThatThrownBy(() -> new StrategyOutcome(ask,
-        TurnDirective.finish("TURN_BUDGET_EXHAUSTED", Difficulty.MEDIUM, "未完成摘要")))
+        TurnDirective.finish("TURN_BUDGET_EXHAUSTED", Difficulty.MEDIUM, "未完成摘要"),
+        progress()))
         .isInstanceOf(IllegalArgumentException.class);
-    assertThat(new StrategyOutcome(ask, askDirective())).isNotNull();
+    assertThat(new StrategyOutcome(ask, askDirective(), progress())).isNotNull();
   }
 
   @Test
@@ -43,8 +46,30 @@ class StrategyOutcomeTest {
     InterviewDecision finish = new InterviewDecision(
         NextStep.FINISH, DifficultyAdjustment.KEEP, "", "", "TURN_BUDGET_EXHAUSTED", 0);
 
-    assertThatThrownBy(() -> new StrategyOutcome(finish, null))
+    assertThatThrownBy(() -> new StrategyOutcome(finish, null, progress()))
         .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void missingProgressIsRejected() {
+    InterviewDecision ask = new InterviewDecision(
+        NextStep.NEXT_TOPIC, DifficultyAdjustment.KEEP, "MySQL", "", "切换", 0.8);
+
+    assertThatThrownBy(() -> new StrategyOutcome(ask, askDirective(), null))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  private InterviewProgress progress() {
+    return InterviewProgress.from(InterviewPlan.execution(List.of(
+        new interview.pilot.interview.domain.InterviewPlanItem(
+            "depth", "java", "Java", interview.pilot.interview.domain.PlanPriority.REQUIRED, 3,
+            List.of("并发边界"), List.of(InterviewQuestionMode.PROJECT),
+            "JD 必考", false, List.of("边界"), 1, ""),
+        new interview.pilot.interview.domain.InterviewPlanItem(
+            "depth", "mysql", "MySQL", interview.pilot.interview.domain.PlanPriority.REQUIRED, 3,
+            List.of("索引依据"), List.of(InterviewQuestionMode.PROJECT),
+            "JD 必考", false, List.of("依据"), 1, "")),
+        6, List.of()), List.of());
   }
 
   private TurnDirective askDirective() {

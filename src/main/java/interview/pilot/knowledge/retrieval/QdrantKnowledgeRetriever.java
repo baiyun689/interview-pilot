@@ -57,8 +57,22 @@ public class QdrantKnowledgeRetriever implements KnowledgeRetriever {
         return RetrievedKnowledge.noMatch(intent.query(), embeddingModel, latency);
       }
 
+      ChunkResult scored = toChunks(results);
+      if (scored.chunks().isEmpty()) {
+        // 有召回结果但没有一个带分数：显式降级为不可用，不再静默使用 0.0 伪装成 NO_MATCH。
+        log.warn("Knowledge retrieval returned {} results without scores for user {}",
+            scored.missingScores(), scope.userId());
+        metrics.knowledgeRetrievalDuration("UNAVAILABLE", latency, 0);
+        return RetrievedKnowledge.unavailable(
+            intent.query(), embeddingModel, "SCORE_MISSING", latency);
+      }
+      if (scored.missingScores() > 0) {
+        log.warn("Knowledge retrieval dropped {} results without scores for user {}",
+            scored.missingScores(), scope.userId());
+      }
+
       List<KnowledgeChunk> chunks = ranker.rank(
-          toChunks(results),
+          scored.chunks(),
           intent.topK(), intent.similarityThreshold(),
           intent.contextCharacterBudget());
       if (chunks.isEmpty()) {
@@ -118,27 +132,33 @@ public class QdrantKnowledgeRetriever implements KnowledgeRetriever {
     return result;
   }
 
-  private List<KnowledgeChunk> toChunks(List<Document> documents) {
+  private ChunkResult toChunks(List<Document> documents) {
     List<KnowledgeChunk> chunks = new ArrayList<>();
+    int missingScores = 0;
     for (Document doc : documents) {
       Map<String, Object> meta = doc.getMetadata();
       String pointId = doc.getId();
       UUID documentId = parseUuid(meta.get("document_id"));
       if (documentId == null) continue;
+      Double documentScore = doc.getScore();
+      if (documentScore == null) {
+        missingScores++;
+        continue;
+      }
       String filename = stringOrEmpty(meta.get("filename"));
       int documentRevision = Math.max(1, parseInt(meta.get("index_revision")));
       int chunkIndex = parseInt(meta.get("chunk_index"));
       String section = stringOrEmpty(meta.get("section"));
       Integer pageNumber = positiveInt(meta.get("page_number"));
-      Double documentScore = doc.getScore();
-      double score = documentScore == null ? 0.0 : documentScore;
 
       chunks.add(new KnowledgeChunk(
           pointId, documentId, filename, documentRevision, chunkIndex, section,
-          score, doc.getText(), pageNumber));
+          documentScore, doc.getText(), pageNumber));
     }
-    return chunks;
+    return new ChunkResult(chunks, missingScores);
   }
+
+  private record ChunkResult(List<KnowledgeChunk> chunks, int missingScores) {}
 
   private static UUID parseUuid(Object value) {
     if (value == null) return null;

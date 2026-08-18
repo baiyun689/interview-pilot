@@ -27,8 +27,7 @@ class ClasspathInterviewSkillCatalogTest {
             "python-backend",
             "system-design",
             "test-development");
-    assertThat(catalog.require("java-backend").defaultCompetencies())
-        .contains("Java 基础与并发", "Spring 与事务", "MySQL", "Redis");
+    assertThat(catalog.require("java-backend").defaultCompetencies()).isEmpty();
     assertThat(catalog.require("java-backend").persona()).contains("Java 后端面试策略");
     assertThat(catalog.require("java-backend").rubric()).contains("证据评分规则");
     assertThat(catalog.require("java-backend").references()).isEmpty();
@@ -114,8 +113,7 @@ class ClasspathInterviewSkillCatalogTest {
         .extracting(SkillStageSpec::order)
         .containsExactly(10, 20, 30);
     assertThat(java.stages().getFirst().exitCriteria()).isEmpty();
-    assertThat(java.defaultCompetencies())
-        .containsExactlyElementsOf(java.competencySpecs().stream().map(CompetencySpec::name).toList());
+    assertThat(java.defaultCompetencies()).isEmpty();
     assertThat(java.retrievalPolicy().enabled()).isFalse();
     assertThat(java.snapshot().schemaVersion()).isEqualTo(4);
   }
@@ -146,8 +144,7 @@ class ClasspathInterviewSkillCatalogTest {
 
       assertThat(skill.schemaVersion()).as(id).isEqualTo(4);
       assertThat(skill.references()).as(id).isEmpty();
-      assertThat(skill.defaultCompetencies()).as(id)
-          .containsExactlyElementsOf(skill.competencySpecs().stream().map(CompetencySpec::name).toList());
+      assertThat(skill.defaultCompetencies()).as(id).isEmpty();
       assertThat(skill.competencySpecs()).as(id).allSatisfy(spec -> {
         assertThat(spec.stageId()).isIn(stageIds);
         assertThat(spec.requiredEvidence()).isNotEmpty();
