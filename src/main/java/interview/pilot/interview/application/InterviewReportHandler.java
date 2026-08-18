@@ -90,7 +90,8 @@ public class InterviewReportHandler {
     if (work == null) return Outcome.TERMINAL;
     try {
       InterviewReport report = generator.generate(
-          work.providerId(), work.modelName(), work.evidence(), work.skill());
+          work.providerId(), work.modelName(), work.evidence(), work.skill(),
+          work.finishReason(), work.unfinishedEvidence());
       if (report == null) throw new AiStructuredOutputException("Empty report");
       String snapshot = reportCodec.write(work.publicSessionId(), report);
       return transactions.execute(status -> complete(work, report, snapshot));
@@ -191,9 +192,26 @@ public class InterviewReportHandler {
     var job = jobs.findById(session.getJobProfileId())
         .orElseThrow(() -> new IllegalStateException("Interview job profile is missing"));
     SkillSnapshot skill = readSkill(job.getSkillSnapshot());
+    FinishInfo finish = finishInfo(session);
     return new Work(task.getTaskId(), session.getId(), session.getUserAccountId(), session.getSessionId(),
-        session.getProviderId(), session.getModelName(), evidence, skill, task.getAttemptCount());
+        session.getProviderId(), session.getModelName(), evidence, skill, task.getAttemptCount(),
+        finish.finishReason(), finish.unfinishedEvidence());
   }
+
+  /** 结束原因与未完成证据摘要来自最后一轮持久化的 FINISH 指令快照。 */
+  private FinishInfo finishInfo(InterviewSessionEntity session) {
+    var storedTurns = turns.findAllBySessionIdOrderByTurnNo(session.getId());
+    if (storedTurns.isEmpty()) return new FinishInfo("", "");
+    var last = storedTurns.getLast();
+    if (last.getStatus() != TurnStatus.COMPLETED || last.getEvaluationSnapshot() == null) {
+      return new FinishInfo("", "");
+    }
+    AnswerProcessingResult answer = answerCodec.readCompleted(
+        last.getEvaluationSnapshot(), session.getSessionId(), last.getRequestId(), last.getTurnNo());
+    return new FinishInfo(answer.finishReason(), answer.unfinishedEvidence());
+  }
+
+  private record FinishInfo(String finishReason, String unfinishedEvidence) {}
 
   private SkillSnapshot readSkill(String snapshot) {
     try {
@@ -376,7 +394,8 @@ public class InterviewReportHandler {
   private record Work(
       UUID taskId, Long sessionDatabaseId, Long userAccountId, UUID publicSessionId,
       String providerId, String modelName, List<ReportEvidence> evidence,
-      SkillSnapshot skill, int attemptGeneration) {}
+      SkillSnapshot skill, int attemptGeneration, String finishReason,
+      String unfinishedEvidence) {}
 
   private record BeginResult(Work work, boolean stale) {}
 

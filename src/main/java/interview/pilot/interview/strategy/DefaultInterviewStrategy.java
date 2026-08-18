@@ -1,19 +1,27 @@
 package interview.pilot.interview.strategy;
 
-import interview.pilot.interview.domain.AnswerEvaluation;
-import interview.pilot.interview.domain.CompetencyMatcher;
+import java.util.ArrayList;
+import java.util.List;
+
 import interview.pilot.interview.domain.DecisionContext;
 import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.domain.DifficultyAdjustment;
 import interview.pilot.interview.domain.InterviewDecision;
-import interview.pilot.interview.domain.InterviewDecisionPolicy;
 import interview.pilot.interview.domain.InterviewPlan;
 import interview.pilot.interview.domain.InterviewPlanItem;
 import interview.pilot.interview.domain.NextStep;
 import interview.pilot.interview.skill.InterviewQuestionMode;
 
+/**
+ * 证据驱动的确定性策略。决策顺序固定：
+ * 1. 硬轮次上限直接结束（记录未完成证据由 FINISH 指令承担）；
+ * 2. 当前能力仍有证据缺口且未达追问上限，生成定向追问；
+ * 3. 当前能力已充分或已耗尽，切换到同 stage 下一个未充分能力；
+ * 4. 当前 stage 完成或预算耗尽后进入下一个 stage；
+ * 5. 所有能力均已充分或耗尽才允许 FINISH。
+ * AI 建议只贡献难度调整与置信度，动作、目标能力与理由由本类重算。
+ */
 public final class DefaultInterviewStrategy implements InterviewStrategy {
-  private final InterviewDecisionPolicy decisionPolicy = new InterviewDecisionPolicy();
 
   @Override
   public TurnDirective firstTurn(InterviewPlan plan, Difficulty difficulty) {
@@ -24,35 +32,114 @@ public final class DefaultInterviewStrategy implements InterviewStrategy {
 
   @Override
   public StrategyOutcome nextTurn(
-      InterviewPlan plan, DecisionContext context, AnswerEvaluation assessment) {
-    InterviewDecision suggestion = trustedSuggestion(assessment.suggestedDecision(), plan);
+      InterviewPlan plan, InterviewProgress progress, TurnAssessment assessment,
+      DecisionContext context) {
     InterviewPlanItem currentItem = plan.itemFor(context.currentCompetency());
-    InterviewDecision decision = decisionPolicy.apply(
-        suggestion, context, currentItem.followUpLimit());
-    if (decision.nextStep() == NextStep.NEXT_TOPIC
-        && same(decision.targetCompetency(), context.currentCompetency())
-        && context.followUpCount() >= currentItem.followUpLimit()) {
-      decision = nextAfterExhaustedItem(plan, context, decision);
+    InterviewDecision suggestion = trustedSuggestion(assessment.suggestedDecision(),
+        context.minimumConfidence());
+
+    InterviewProgress tentative = progress.apply(assessment, currentItem);
+    CompetencyProgress current = tentative.progressOf(currentItem.competencyId());
+
+    if (context.currentTurn() >= context.totalTurnBudget()) {
+      return finish("TURN_BUDGET_EXHAUSTED", confidenceOf(suggestion), plan, tentative,
+          context.currentDifficulty());
     }
-    if (decision.nextStep() == NextStep.FINISH) {
-      return new StrategyOutcome(decision, null);
+
+    if (current.status() == CompetencyStatus.OPEN) {
+      return followUp(tentative, currentItem, current, suggestion, context);
     }
-    Difficulty nextDifficulty = adjust(context.currentDifficulty(), decision.difficultyAdjustment());
-    InterviewPlanItem item = plan.itemFor(decision.targetCompetency());
-    boolean continuingCurrent = same(decision.targetCompetency(), context.currentCompetency());
-    int modeIndex = decision.nextStep() == NextStep.FOLLOW_UP || continuingCurrent
-        ? context.followUpCount() + 1 : 0;
-    String probeFocus = decision.nextStep() == NextStep.FOLLOW_UP || continuingCurrent
-        ? evidenceGap(item, assessment, context.followUpCount())
-        : item.evidenceTargets().getFirst();
+
+    Candidate next = nextCandidate(plan, tentative, currentItem);
+    if (next == null) {
+      return finish("ALL_COMPETENCIES_SETTLED", confidenceOf(suggestion), plan, tentative,
+          context.currentDifficulty());
+    }
+    DifficultyAdjustment adjustment = boundedAdjustment(suggestion, context.currentDifficulty());
+    InterviewDecision decision = new InterviewDecision(
+        NextStep.NEXT_TOPIC, adjustment, next.item().competency(), "", next.reason(),
+        confidenceOf(suggestion));
+    TurnDirective directive = directive(
+        next.item(), adjust(context.currentDifficulty(), adjustment), 0,
+        firstMissing(next.progress()), next.reason(), coveredTopics(tentative));
+    return new StrategyOutcome(decision, directive);
+  }
+
+  private StrategyOutcome followUp(
+      InterviewProgress tentative, InterviewPlanItem item, CompetencyProgress current,
+      InterviewDecision suggestion, DecisionContext context) {
+    DifficultyAdjustment adjustment = boundedAdjustment(suggestion, context.currentDifficulty());
+    String probeFocus = evidenceGap(current, item);
+    InterviewDecision decision = new InterviewDecision(
+        NextStep.FOLLOW_UP, adjustment, item.competency(), probeFocus,
+        "EVIDENCE_GAP_FOLLOW_UP", confidenceOf(suggestion));
+    TurnDirective directive = directive(
+        item, adjust(context.currentDifficulty(), adjustment), current.followUpCount(),
+        probeFocus, "EVIDENCE_GAP_FOLLOW_UP", coveredTopics(tentative));
+    return new StrategyOutcome(decision, directive);
+  }
+
+  private StrategyOutcome finish(
+      String reason, double confidence, InterviewPlan plan, InterviewProgress tentative,
+      Difficulty difficulty) {
     return new StrategyOutcome(
-        decision, directive(item, nextDifficulty, modeIndex, probeFocus, decision.reason(),
-            context.coveredCompetencies()));
+        new InterviewDecision(NextStep.FINISH, DifficultyAdjustment.KEEP, "", "", reason, confidence),
+        TurnDirective.finish(reason, difficulty, tentative.unfinishedSummary(plan)));
+  }
+
+  private record Candidate(InterviewPlanItem item, CompetencyProgress progress, String reason) {}
+
+  /** 按 stage 顺序寻找下一个未充分能力：先同 stage，再后续 stage，最后回查前面的 stage。 */
+  private Candidate nextCandidate(
+      InterviewPlan plan, InterviewProgress progress, InterviewPlanItem currentItem) {
+    List<String> stageOrder = plan.items().stream()
+        .map(InterviewPlanItem::stageId)
+        .distinct()
+        .toList();
+    int currentStageIndex = stageOrder.indexOf(currentItem.stageId());
+
+    Candidate sameStage = firstOpen(plan, progress, currentItem.stageId());
+    if (sameStage != null) {
+      return new Candidate(sameStage.item(), sameStage.progress(),
+          "SWITCH_AFTER_EVIDENCE_SETTLED");
+    }
+
+    String exitReason = stageExitReason(currentItem.stageId(), plan, progress);
+    for (int index = currentStageIndex + 1; index < stageOrder.size(); index++) {
+      Candidate candidate = firstOpen(plan, progress, stageOrder.get(index));
+      if (candidate != null) {
+        return new Candidate(candidate.item(), candidate.progress(), exitReason);
+      }
+    }
+    for (int index = 0; index < currentStageIndex; index++) {
+      Candidate candidate = firstOpen(plan, progress, stageOrder.get(index));
+      if (candidate != null) {
+        return new Candidate(candidate.item(), candidate.progress(), exitReason);
+      }
+    }
+    return null;
+  }
+
+  private Candidate firstOpen(InterviewPlan plan, InterviewProgress progress, String stageId) {
+    for (InterviewPlanItem item : plan.items()) {
+      if (!item.stageId().equals(stageId)) continue;
+      CompetencyProgress candidate = progress.progressOf(item.competencyId());
+      if (candidate != null && candidate.status() == CompetencyStatus.OPEN) {
+        return new Candidate(item, candidate, "");
+      }
+    }
+    return null;
+  }
+
+  private String stageExitReason(String stageId, InterviewPlan plan, InterviewProgress progress) {
+    if (progress.requiredSufficient(stageId, plan)) return "STAGE_COMPLETED_REQUIRED_EVIDENCE";
+    if (progress.stageBudgetExhausted(stageId, plan)) return "STAGE_BUDGET_EXHAUSTED";
+    return "SWITCH_AFTER_LOW_VALUE_FOLLOW_UP";
   }
 
   private TurnDirective directive(
       InterviewPlanItem item, Difficulty difficulty, int modeIndex,
-      String probeFocus, String reason, java.util.List<String> coveredTopics) {
+      String probeFocus, String reason, List<String> coveredTopics) {
     InterviewQuestionMode mode = item.questionModes().get(
         Math.min(modeIndex, item.questionModes().size() - 1));
     return new TurnDirective(
@@ -61,40 +148,15 @@ public final class DefaultInterviewStrategy implements InterviewStrategy {
         item.retrievalPolicy(), coveredTopics);
   }
 
-  private InterviewDecision nextAfterExhaustedItem(
-      InterviewPlan plan, DecisionContext context, InterviewDecision previous) {
-    return plan.competencies().stream()
-        .filter(candidate -> !same(candidate, context.currentCompetency()))
-        .filter(candidate -> context.coveredCompetencies().stream()
-            .noneMatch(covered -> same(candidate, covered)))
-        .findFirst()
-        .map(target -> new InterviewDecision(
-            NextStep.NEXT_TOPIC, previous.difficultyAdjustment(), target, "",
-            "CURRENT_ITEM_BUDGET_EXHAUSTED", previous.confidence()))
-        .orElseGet(() -> context.currentTurn() >= context.totalTurnBudget()
-            ? new InterviewDecision(
-                NextStep.FINISH, DifficultyAdjustment.KEEP, "", "",
-                "TURN_BUDGET_EXHAUSTED", previous.confidence())
-            : new InterviewDecision(
-                NextStep.NEXT_TOPIC, DifficultyAdjustment.KEEP,
-                context.currentCompetency(), "",
-                "LAST_REQUIRED_EVIDENCE_ATTEMPT", previous.confidence()));
+  private String evidenceGap(CompetencyProgress progress, InterviewPlanItem item) {
+    if (progress.missingEvidence().isEmpty()) return "补充可核验的工程证据";
+    String target = progress.missingEvidence().getFirst();
+    return withAxis(target, item, Math.max(0, progress.followUpCount() - 1));
   }
 
-  private String evidenceGap(
-      InterviewPlanItem item, AnswerEvaluation assessment, int followUpCount) {
-    for (String target : item.evidenceTargets()) {
-      if (assessment.missingPoints().stream()
-          .anyMatch(missing -> CompetencyMatcher.related(target, missing))) {
-        return withAxis(target, item, followUpCount);
-      }
-    }
-    if (!item.evidenceTargets().isEmpty()) {
-      String target = item.evidenceTargets().get(
-          Math.min(followUpCount, item.evidenceTargets().size() - 1));
-      return withAxis(target, item, followUpCount);
-    }
-    return "补充可核验的工程证据";
+  private String firstMissing(CompetencyProgress progress) {
+    if (progress.missingEvidence().isEmpty()) return "补充可核验的工程证据";
+    return progress.missingEvidence().getFirst();
   }
 
   private String withAxis(String target, InterviewPlanItem item, int followUpCount) {
@@ -104,13 +166,45 @@ public final class DefaultInterviewStrategy implements InterviewStrategy {
     return target + "；追问角度：" + axis;
   }
 
-  private InterviewDecision trustedSuggestion(InterviewDecision suggestion, InterviewPlan plan) {
-    if (suggestion != null && suggestion.nextStep() == NextStep.NEXT_TOPIC
-        && plan.competencies().stream().noneMatch(
-            allowed -> same(allowed, suggestion.targetCompetency()))) {
+  private List<String> coveredTopics(InterviewProgress progress) {
+    List<String> topics = new ArrayList<>();
+    for (CompetencyProgress candidate : progress.byCompetencyId().values()) {
+      for (String topic : candidate.coveredTopics()) {
+        if (!topics.contains(topic)) topics.add(topic);
+      }
+    }
+    return List.copyOf(topics);
+  }
+
+  /** AI 建议只有合法且置信度达标时才是候选；非法建议被整体忽略。 */
+  private InterviewDecision trustedSuggestion(InterviewDecision suggestion, double minimumConfidence) {
+    if (suggestion == null
+        || suggestion.nextStep() == null
+        || suggestion.difficultyAdjustment() == null
+        || !Double.isFinite(suggestion.confidence())
+        || suggestion.confidence() < minimumConfidence
+        || suggestion.confidence() > 1) {
       return null;
     }
     return suggestion;
+  }
+
+  private double confidenceOf(InterviewDecision suggestion) {
+    return suggestion == null ? 0 : suggestion.confidence();
+  }
+
+  private DifficultyAdjustment boundedAdjustment(
+      InterviewDecision suggestion, Difficulty currentDifficulty) {
+    // FINISH 建议被 Java 否决继续考察时，整体建议（含难度调整）一并忽略。
+    if (suggestion == null || suggestion.nextStep() == NextStep.FINISH) {
+      return DifficultyAdjustment.KEEP;
+    }
+    DifficultyAdjustment adjustment = suggestion.difficultyAdjustment();
+    if ((adjustment == DifficultyAdjustment.INCREASE && currentDifficulty == Difficulty.HARD)
+        || (adjustment == DifficultyAdjustment.DECREASE && currentDifficulty == Difficulty.EASY)) {
+      return DifficultyAdjustment.KEEP;
+    }
+    return adjustment;
   }
 
   private Difficulty adjust(Difficulty current, DifficultyAdjustment adjustment) {
@@ -119,9 +213,5 @@ public final class DefaultInterviewStrategy implements InterviewStrategy {
       case INCREASE -> current == Difficulty.EASY ? Difficulty.MEDIUM : Difficulty.HARD;
       case DECREASE -> current == Difficulty.HARD ? Difficulty.MEDIUM : Difficulty.EASY;
     };
-  }
-
-  private boolean same(String left, String right) {
-    return CompetencyMatcher.same(left, right);
   }
 }

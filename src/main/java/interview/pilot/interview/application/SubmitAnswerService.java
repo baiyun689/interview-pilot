@@ -45,7 +45,9 @@ import interview.pilot.knowledge.retrieval.KnowledgeScopeResolver;
 import interview.pilot.knowledge.retrieval.ValidatedKnowledgeScope;
 import interview.pilot.resume.domain.ResumeProfile;
 import interview.pilot.interview.strategy.DefaultInterviewStrategy;
+import interview.pilot.interview.strategy.InterviewProgress;
 import interview.pilot.interview.strategy.InterviewStrategy;
+import interview.pilot.interview.strategy.TurnAssessment;
 import interview.pilot.interview.strategy.TurnDirective;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 import interview.pilot.common.observability.AiMetrics;
@@ -67,10 +69,9 @@ public class SubmitAnswerService {
   private final QuestionGenerator questionGenerator;
   private final InterviewStrategy strategy = new DefaultInterviewStrategy();
   private final AnswerEvidenceValidator evidenceValidator = new AnswerEvidenceValidator();
+  private final EvidenceAssessmentValidator assessmentValidator = new EvidenceAssessmentValidator();
   private final AnswerGroundingValidator answerGrounding = new AnswerGroundingValidator();
   private final QuestionGroundingValidator questionGrounding = new QuestionGroundingValidator();
-  private final InterviewDecisionContextFactory decisionContexts =
-      new InterviewDecisionContextFactory();
   private final InterviewSessionRepository sessions;
   private final AnswerAttemptRepository attempts;
   private final InterviewTurnRepository turns;
@@ -185,19 +186,22 @@ public class SubmitAnswerService {
       }
       evaluation = evidenceValidator.validate(request.answer(), evaluation);
       evaluation = answerGrounding.validate(evaluation, currentRag, context.currentDirective());
+      evaluation = assessmentValidator.validate(
+          request.answer(), evaluation, context.currentDirective().evidenceTargets());
       log.info("interview session={} turn={} step=evaluate provider={} model={} score={} latency_ms={}",
           sid, claim.turnNo(), context.providerId(), context.modelName(),
           evaluation.score(), evalMs);
 
-      DecisionContext decisionContext = decisionContexts.create(
+      InterviewProgress progress = InterviewProgress.from(context.plan(), context.completedTurns());
+      TurnAssessment assessment = TurnAssessment.of(
+          evaluation, context.plan().itemFor(context.currentCompetency()), claim.turnNo());
+      DecisionContext decisionContext = new DecisionContext(
           context.currentDifficulty(), context.currentCompetency(),
-          context.plan().competencies(), claim.turnNo(), context.plan().totalTurnBudget(),
-          MINIMUM_DECISION_CONFIDENCE, context.completedTurns(), evaluation);
-      var strategyOutcome = strategy.nextTurn(context.plan(), decisionContext, evaluation);
+          claim.turnNo(), context.plan().totalTurnBudget(), MINIMUM_DECISION_CONFIDENCE);
+      var strategyOutcome = strategy.nextTurn(context.plan(), progress, assessment, decisionContext);
       InterviewDecision decision = strategyOutcome.decision();
       TurnDirective nextDirective = strategyOutcome.nextDirective();
-      Difficulty nextDifficulty = nextDirective == null
-          ? context.currentDifficulty() : nextDirective.difficulty();
+      Difficulty nextDifficulty = nextDirective.difficulty();
       boolean finish = decision.nextStep() == NextStep.FINISH
           || claim.turnNo() >= context.plan().totalTurnBudget();
       log.info("interview session={} turn={} step=decision nextStep={} targetCompetency={} nextDifficulty={} confidence={}",
@@ -240,7 +244,9 @@ public class SubmitAnswerService {
       AnswerProcessingResult result = new AnswerProcessingResult(
           sessionId, request.requestId(), claim.turnNo(), evaluation, decision, nextQuestion,
           nextDifficulty, finish ? SessionStatus.EVALUATING : SessionStatus.INTERVIEWING, false,
-          nextRag, finish ? null : nextDirective, context.currentDirective());
+          nextRag, finish ? null : nextDirective, context.currentDirective(),
+          finish ? nextDirective.finishReason() : "",
+          finish ? nextDirective.unfinishedEvidence() : "");
       String snapshot = resultCodec.write(result);
       Long ownerId = requireOwner(user);
       Boolean finalized = requiresNew.execute(
@@ -250,6 +256,8 @@ public class SubmitAnswerService {
       }
       return result;
     } catch (RuntimeException exception) {
+      log.error("interview session={} turn={} step=failed error={}",
+          shortId(sessionId), claim.turnNo(), exception.getMessage(), exception);
       requiresNew.executeWithoutResult(status -> markFailedIfOwner(requireOwner(user), claim));
       if (exception instanceof BusinessException business) {
         throw business;
@@ -330,7 +338,7 @@ public class SubmitAnswerService {
         current.getTargetCompetency(), current.getQuestionText(), current.getAnswerText(),
         plan, requirements, profile, skill, currentDirective,
         historicalEvidence(allTurns, publicSessionId),
-        completedTurns(allTurns, publicSessionId));
+        completedTurns(allTurns, publicSessionId, plan));
   }
 
   private List<String> historicalEvidence(
@@ -347,16 +355,16 @@ public class SubmitAnswerService {
     return List.copyOf(evidence);
   }
 
-  private List<InterviewDecisionContextFactory.CompletedTurnEvidence> completedTurns(
-      List<InterviewTurnEntity> allTurns, UUID publicSessionId) {
-    List<InterviewDecisionContextFactory.CompletedTurnEvidence> completed = new ArrayList<>();
+  private List<InterviewProgress.CompletedTurn> completedTurns(
+      List<InterviewTurnEntity> allTurns, UUID publicSessionId, InterviewPlan plan) {
+    List<InterviewProgress.CompletedTurn> completed = new ArrayList<>();
     for (InterviewTurnEntity turn : allTurns) {
       if (turn.getStatus() == TurnStatus.COMPLETED && turn.getEvaluationSnapshot() != null) {
         AnswerEvaluation evaluation = resultCodec.readCompleted(
             turn.getEvaluationSnapshot(), publicSessionId,
             turn.getRequestId(), turn.getTurnNo()).evaluation();
-        completed.add(new InterviewDecisionContextFactory.CompletedTurnEvidence(
-            turn.getTargetCompetency(), evaluation.score(), evaluation.evidence()));
+        completed.add(new InterviewProgress.CompletedTurn(
+            plan.itemFor(turn.getTargetCompetency()), evaluation, turn.getTurnNo()));
       }
     }
     return List.copyOf(completed);
@@ -589,7 +597,7 @@ public class SubmitAnswerService {
       SkillSnapshot skill,
       TurnDirective currentDirective,
       List<String> priorEvidence,
-      List<InterviewDecisionContextFactory.CompletedTurnEvidence> completedTurns) {
+      List<InterviewProgress.CompletedTurn> completedTurns) {
 
   }
 }

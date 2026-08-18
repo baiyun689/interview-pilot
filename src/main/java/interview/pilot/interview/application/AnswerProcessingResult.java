@@ -23,14 +23,17 @@ public record AnswerProcessingResult(
     boolean replayed,
     RagContextSnapshot nextRagSnapshot,
     TurnDirective nextDirective,
-    TurnDirective currentDirective) {
+    TurnDirective currentDirective,
+    String finishReason,
+    String unfinishedEvidence) {
 
   public AnswerProcessingResult(
       UUID sessionId, UUID requestId, int turnNo, AnswerEvaluation evaluation,
       InterviewDecision decision, GeneratedQuestion nextQuestion,
       Difficulty nextDifficulty, SessionStatus sessionStatus, boolean replayed) {
     this(sessionId, requestId, turnNo, evaluation, decision, nextQuestion,
-        nextDifficulty, sessionStatus, replayed, RagContextSnapshot.notConfigured(), null, null);
+        nextDifficulty, sessionStatus, replayed, RagContextSnapshot.notConfigured(),
+        null, null, "", "");
   }
 
   public AnswerProcessingResult(
@@ -39,7 +42,7 @@ public record AnswerProcessingResult(
       Difficulty nextDifficulty, SessionStatus sessionStatus, boolean replayed,
       RagContextSnapshot nextRagSnapshot) {
     this(sessionId, requestId, turnNo, evaluation, decision, nextQuestion,
-        nextDifficulty, sessionStatus, replayed, nextRagSnapshot, null, null);
+        nextDifficulty, sessionStatus, replayed, nextRagSnapshot, null, null, "", "");
   }
 
   public AnswerProcessingResult(
@@ -48,7 +51,18 @@ public record AnswerProcessingResult(
       Difficulty nextDifficulty, SessionStatus sessionStatus, boolean replayed,
       RagContextSnapshot nextRagSnapshot, TurnDirective nextDirective) {
     this(sessionId, requestId, turnNo, evaluation, decision, nextQuestion,
-        nextDifficulty, sessionStatus, replayed, nextRagSnapshot, nextDirective, null);
+        nextDifficulty, sessionStatus, replayed, nextRagSnapshot, nextDirective, null, "", "");
+  }
+
+  public AnswerProcessingResult(
+      UUID sessionId, UUID requestId, int turnNo, AnswerEvaluation evaluation,
+      InterviewDecision decision, GeneratedQuestion nextQuestion,
+      Difficulty nextDifficulty, SessionStatus sessionStatus, boolean replayed,
+      RagContextSnapshot nextRagSnapshot, TurnDirective nextDirective,
+      TurnDirective currentDirective) {
+    this(sessionId, requestId, turnNo, evaluation, decision, nextQuestion,
+        nextDifficulty, sessionStatus, replayed, nextRagSnapshot, nextDirective,
+        currentDirective, "", "");
   }
 
   public AnswerProcessingResult {
@@ -66,11 +80,14 @@ public record AnswerProcessingResult(
       throw new IllegalArgumentException("nextQuestion does not match session status");
     }
     nextRagSnapshot = nextRagSnapshot == null ? RagContextSnapshot.notConfigured() : nextRagSnapshot;
+    finishReason = finishReason == null ? "" : finishReason.trim();
+    unfinishedEvidence = unfinishedEvidence == null ? "" : unfinishedEvidence.trim();
   }
 
   public AnswerProcessingResult asReplay() {
     return new AnswerProcessingResult(
         sessionId, requestId, turnNo, evaluation, decision, nextQuestion,
-        nextDifficulty, sessionStatus, true, nextRagSnapshot, nextDirective, currentDirective);
+        nextDifficulty, sessionStatus, true, nextRagSnapshot, nextDirective,
+        currentDirective, finishReason, unfinishedEvidence);
   }
 }

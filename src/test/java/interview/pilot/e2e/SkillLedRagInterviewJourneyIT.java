@@ -26,7 +26,6 @@ import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import interview.pilot.interview.application.AnswerGroundingValidator;
-import interview.pilot.interview.application.InterviewDecisionContextFactory;
 import interview.pilot.interview.application.InterviewPlanCompiler;
 import interview.pilot.interview.application.PlanProposal;
 import interview.pilot.interview.application.QuestionGroundingValidator;
@@ -58,7 +57,10 @@ import interview.pilot.interview.grounding.GroundingDirective;
 import interview.pilot.interview.grounding.GroundingStatus;
 import interview.pilot.interview.grounding.KnowledgeRole;
 import interview.pilot.interview.skill.ClasspathInterviewSkillCatalog;
+import interview.pilot.interview.domain.DecisionContext;
 import interview.pilot.interview.strategy.DefaultInterviewStrategy;
+import interview.pilot.interview.strategy.InterviewProgress;
+import interview.pilot.interview.strategy.TurnAssessment;
 import interview.pilot.interview.strategy.TurnDirective;
 import interview.pilot.knowledge.config.KnowledgeProperties;
 import interview.pilot.knowledge.retrieval.KnowledgeChunk;
@@ -167,10 +169,12 @@ class SkillLedRagInterviewJourneyIT {
             List.of(new AnswerEvaluation.ReferenceFact(
                 "source-spring", "REQUIRES_NEW 开启独立事务")), List.of()),
         snapshot.toRagContext().withQuestion(question));
-    var decisionContext = new InterviewDecisionContextFactory().create(
-        directive.difficulty(), directive.competency(), plan.competencies(),
-        1, plan.totalTurnBudget(), 0.55, List.of(), evaluation);
-    var next = strategy.nextTurn(plan, decisionContext, evaluation);
+    var planItem = plan.itemFor(directive.competency());
+    var progress = InterviewProgress.from(plan, List.of());
+    var assessment = TurnAssessment.of(evaluation, planItem, 1);
+    var decisionContext = new DecisionContext(
+        directive.difficulty(), directive.competency(), 1, plan.totalTurnBudget(), 0.55);
+    var next = strategy.nextTurn(plan, progress, assessment, decisionContext);
 
     assertThat(directive.retrievalPolicy().allowedUses()).isNotEmpty();
     assertThat(snapshot.status()).isEqualTo(GroundingStatus.RETRIEVED);

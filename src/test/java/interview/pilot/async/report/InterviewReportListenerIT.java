@@ -141,7 +141,8 @@ class InterviewReportListenerIT {
     when(generator.generate(
         org.mockito.ArgumentMatchers.eq("deepseek"),
         org.mockito.ArgumentMatchers.eq("deepseek-chat"), anyList(),
-        org.mockito.ArgumentMatchers.any()))
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString()))
         .thenAnswer(invocation -> {
           assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
           List<ReportEvidence> evidence = invocation.getArgument(2);
@@ -162,7 +163,8 @@ class InterviewReportListenerIT {
     verify(generator, times(1)).generate(
         org.mockito.ArgumentMatchers.eq("deepseek"),
         org.mockito.ArgumentMatchers.eq("deepseek-chat"), anyList(),
-        org.mockito.ArgumentMatchers.argThat(skill -> "custom".equals(skill.id())));
+        org.mockito.ArgumentMatchers.argThat(skill -> "custom".equals(skill.id())),
+        org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
     assertThat(reports.count()).isEqualTo(1);
     assertThat(sessions.findBySessionId(work.sessionId()).orElseThrow().getStatus())
         .isEqualTo(SessionStatus.COMPLETED);
@@ -177,7 +179,8 @@ class InterviewReportListenerIT {
         "interview_pilot.tasks.failed", "task_type", "interview_evaluation", "status", "failed");
     Work work = completedInterview();
     when(generator.generate(anyString(), anyString(), anyList(),
-        org.mockito.ArgumentMatchers.any()))
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString()))
         .thenThrow(new AiStructuredOutputException("provider output secret"));
 
     send(work.message(), null);
@@ -202,7 +205,8 @@ class InterviewReportListenerIT {
   void exhaustedRetryPublishesDlqBeforeTaskBecomesDead() throws Exception {
     Work work = completedInterview();
     when(generator.generate(anyString(), anyString(), anyList(),
-        org.mockito.ArgumentMatchers.any()))
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString()))
         .thenThrow(new IllegalStateException("provider secret"));
 
     send(work.message(), 3);
@@ -266,7 +270,9 @@ class InterviewReportListenerIT {
     CountDownLatch entered = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
     when(generator.generate(anyString(), anyString(), anyList(),
-        org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString()))
+        .thenAnswer(invocation -> {
       entered.countDown();
       release.await(10, TimeUnit.SECONDS);
       return validReport();
@@ -307,7 +313,9 @@ class InterviewReportListenerIT {
           assertThat(stored.getStatus()).isEqualTo(TurnStatus.COMPLETED);
           assertThat(stored.getEvaluationSnapshot()).isEqualTo("{}");
         });
-    verify(generator, never()).generate(anyString(), anyString(), anyList());
+    verify(generator, never()).generate(anyString(), anyString(), anyList(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
   }
 
   @Test
@@ -339,7 +347,9 @@ class InterviewReportListenerIT {
     tasks.saveAndFlush(task);
 
     assertThat(handler.handle(work.message())).isEqualTo(InterviewReportHandler.Outcome.STALE);
-    verify(generator, never()).generate(anyString(), anyString(), anyList());
+    verify(generator, never()).generate(anyString(), anyString(), anyList(),
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
   }
 
   @Test
@@ -466,7 +476,8 @@ class InterviewReportListenerIT {
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("Interview report business key is invalid");
     verify(generator, never()).generate(anyString(), anyString(), anyList(),
-        org.mockito.ArgumentMatchers.any());
+        org.mockito.ArgumentMatchers.any(),
+        org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
     assertThat(reports.count()).isZero();
   }
 

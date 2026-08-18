@@ -40,11 +40,13 @@ public class AiReportGenerator implements ReportGenerator {
   @Override
   public InterviewReport generate(
       String providerId, String expectedModel, List<ReportEvidence> evidence,
-      SkillSnapshot skill) {
+      SkillSnapshot skill, String finishReason, String unfinishedEvidence) {
     try {
       String evidenceJson = objectMapper.writeValueAsString(java.util.Map.of(
           "skill", skill == null ? java.util.Map.of() : skill,
-          "completedTurnEvidence", List.copyOf(evidence)));
+          "completedTurnEvidence", List.copyOf(evidence),
+          "finishReason", finishReason == null ? "" : finishReason,
+          "unfinishedEvidence", unfinishedEvidence == null ? "" : unfinishedEvidence));
       return output.invoke(new AiRequest(
           providerId, expectedModel, systemPrompt,
           userPrompt + "\n<untrusted_completed_turn_evidence>\n" + evidenceJson

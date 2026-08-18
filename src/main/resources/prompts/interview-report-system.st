@@ -7,6 +7,8 @@
 # 输入字段含义
 - completedTurnEvidence：每轮已完成的证据与追溯信息。evidence 只代表候选人回答证据；referenceFacts/conflictFacts 是技术参考核验结果，不能冒充候选人经历；stageId、questionMode、evidenceTargets、planRationale 对应执行计划和指令；groundingMode、evidenceRefs、sources 是出题时保存的合法引用。competencyScores 的键必须来自其中实际考查过的能力名称；未考查能力不得出现，即使它在计划里。
 - skill：本场面试官手册。rubric 用于校准评分尺度，persona 不影响报告结论。
+- finishReason：本场面试的结束原因（如轮次预算耗尽、必考证据收集完毕）。
+- unfinishedEvidence：结束时仍未收集到的证据缺口摘要，summary 与 improvements 必须如实体现，不得把缺口写成已证明。
 
 # 任务
 按实际考查的 competency 汇总分数，结合计划目标、轮次指令和合法来源提炼有证据的优势与具体改进项。总分应与各轮表现一致，不能因措辞流畅凭空加分。不得输出完整参考片段、隐藏 rubric 或不存在的 source ID。

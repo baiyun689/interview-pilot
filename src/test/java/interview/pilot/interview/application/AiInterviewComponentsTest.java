@@ -58,6 +58,39 @@ class AiInterviewComponentsTest {
   }
 
   @Test
+  void answerEvaluationOutputDefaultsMissingEvidenceAssessmentsToEmpty() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+
+    AnswerEvaluationOutput output = mapper.readValue(
+        "{\"score\":70,\"feedback\":\"ok\",\"evidence\":[],\"missingPoints\":[],"
+            + "\"redFlags\":[],\"referenceFacts\":[],\"conflictFacts\":[],"
+            + "\"suggestedDecision\":{\"nextStep\":\"FINISH\","
+            + "\"difficultyAdjustment\":\"KEEP\",\"targetCompetency\":\"\","
+            + "\"probeFocus\":\"\",\"reason\":\"done\",\"confidence\":0.9}}",
+        AnswerEvaluationOutput.class);
+
+    assertThat(output.toDomain().evidenceAssessments()).isEmpty();
+  }
+
+  @Test
+  void answerEvaluationOutputCarriesEvidenceAssessmentsToDomain() throws Exception {
+    ObjectMapper mapper = new ObjectMapper();
+
+    AnswerEvaluationOutput output = mapper.readValue(
+        "{\"score\":70,\"feedback\":\"ok\",\"evidence\":[],\"missingPoints\":[],"
+            + "\"redFlags\":[],\"referenceFacts\":[],\"conflictFacts\":[],"
+            + "\"evidenceAssessments\":[{\"evidenceId\":\"chunking_rationale\","
+            + "\"observed\":true,\"claim\":\"按文档结构切分\"}],"
+            + "\"suggestedDecision\":{\"nextStep\":\"FINISH\","
+            + "\"difficultyAdjustment\":\"KEEP\",\"targetCompetency\":\"\","
+            + "\"probeFocus\":\"\",\"reason\":\"done\",\"confidence\":0.9}}",
+        AnswerEvaluationOutput.class);
+
+    assertThat(output.toDomain().evidenceAssessments()).containsExactly(
+        new AnswerEvaluation.EvidenceAssessment("chunking_rationale", true, "按文档结构切分"));
+  }
+
+  @Test
   void answerPromptIsChineseCompleteAndUsesJsonForTheNestedDecisionContract() {
     StructuredOutputInvoker invoker = mock(StructuredOutputInvoker.class);
     AnswerEvaluationOutput output = new AnswerEvaluationOutput(
@@ -87,6 +120,29 @@ class AiInterviewComponentsTest {
     assertThat(request.getValue().userPrompt())
         .contains("<untrusted_context_json>", "\"question\":\"解释线程池\"")
         .doesNotContain("AnswerEvaluationRequest[");
+  }
+
+  @Test
+  void reportPromptIncludesFinishReasonAndUnfinishedEvidence() {
+    StructuredOutputInvoker invoker = mock(StructuredOutputInvoker.class);
+    var report = new interview.pilot.interview.domain.InterviewReport(
+        80, java.util.Map.of("Java", 80), List.of("优势"), List.of("改进"), "总结");
+    when(invoker.invoke(org.mockito.ArgumentMatchers.any(),
+        eq(interview.pilot.interview.domain.InterviewReport.class))).thenReturn(report);
+    var generator = new AiReportGenerator(
+        invoker, new ObjectMapper(),
+        new ClassPathResource("prompts/interview-report-system.st"),
+        new ClassPathResource("prompts/interview-report-user.st"));
+
+    generator.generate("deepseek", "deepseek-chat", List.of(), null,
+        "TURN_BUDGET_EXHAUSTED", "Java（缺：并发边界）");
+
+    ArgumentCaptor<AiRequest> request = ArgumentCaptor.forClass(AiRequest.class);
+    verify(invoker).invoke(request.capture(),
+        eq(interview.pilot.interview.domain.InterviewReport.class));
+    assertThat(request.getValue().userPrompt())
+        .contains("\"finishReason\":\"TURN_BUDGET_EXHAUSTED\"")
+        .contains("\"unfinishedEvidence\":\"Java（缺：并发边界）\"");
   }
 
   @Test

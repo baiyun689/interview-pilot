@@ -4,13 +4,15 @@ import java.util.List;
 import java.util.Objects;
 
 import interview.pilot.interview.domain.AnswerEvaluation;
+import interview.pilot.interview.domain.AnswerEvaluation.EvidenceAssessment;
 import interview.pilot.interview.domain.InterviewDecision;
 
 public record AnswerEvaluationOutput(
     Double score, String feedback, List<String> evidence, List<String> missingPoints,
     List<String> redFlags, InterviewDecision suggestedDecision,
     List<AnswerEvaluation.ReferenceFact> referenceFacts,
-    List<AnswerEvaluation.ReferenceFact> conflictFacts) {
+    List<AnswerEvaluation.ReferenceFact> conflictFacts,
+    List<EvidenceAssessment> evidenceAssessments) {
 
   public AnswerEvaluationOutput {
     Objects.requireNonNull(score, "score is required");
@@ -23,14 +25,24 @@ public record AnswerEvaluationOutput(
     Objects.requireNonNull(suggestedDecision, "suggestedDecision is required");
     Objects.requireNonNull(referenceFacts, "referenceFacts is required");
     Objects.requireNonNull(conflictFacts, "conflictFacts is required");
+    evidenceAssessments = evidenceAssessments == null ? List.of() : List.copyOf(evidenceAssessments);
     new AnswerEvaluation(
         score, feedback, evidence, missingPoints, redFlags, suggestedDecision,
-        referenceFacts, conflictFacts);
+        referenceFacts, conflictFacts, evidenceAssessments);
+  }
+
+  public AnswerEvaluationOutput(
+      Double score, String feedback, List<String> evidence, List<String> missingPoints,
+      List<String> redFlags, InterviewDecision suggestedDecision,
+      List<AnswerEvaluation.ReferenceFact> referenceFacts,
+      List<AnswerEvaluation.ReferenceFact> conflictFacts) {
+    this(score, feedback, evidence, missingPoints, redFlags, suggestedDecision,
+        referenceFacts, conflictFacts, List.of());
   }
 
   public AnswerEvaluation toDomain() {
     return new AnswerEvaluation(
         score, feedback, evidence, missingPoints, redFlags, suggestedDecision,
-        referenceFacts, conflictFacts);
+        referenceFacts, conflictFacts, evidenceAssessments);
   }
 }

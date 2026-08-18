@@ -51,4 +51,22 @@ class AnswerEvidenceValidatorTest {
     assertThat(validator.validate("该任务采用并发处理。", evaluation).evidence())
         .containsExactly("采用并发处理");
   }
+
+  @Test
+  void keepsReferenceFactsAndAssessmentsWhenRebuildingEvaluation() {
+    AnswerEvaluation evaluation = new AnswerEvaluation(
+        80, "ok", List.of("使用 Redis Lua 保证原子更新", "通过 Kafka 实现削峰"),
+        List.of(), List.of("缺少容量指标"),
+        new InterviewDecision(NextStep.FOLLOW_UP, DifficultyAdjustment.KEEP,
+            "Redis", "边界", "继续", 0.9),
+        List.of(new AnswerEvaluation.ReferenceFact("point-1", "参考事实")),
+        List.of(),
+        List.of(new AnswerEvaluation.EvidenceAssessment("chunking_rationale", true, "依据")));
+
+    AnswerEvaluation validated = validator.validate(
+        "我使用 Redis Lua 脚本把读取和更新放在一次原子操作里。", evaluation);
+
+    assertThat(validated.referenceFacts()).isEqualTo(evaluation.referenceFacts());
+    assertThat(validated.evidenceAssessments()).isEqualTo(evaluation.evidenceAssessments());
+  }
 }

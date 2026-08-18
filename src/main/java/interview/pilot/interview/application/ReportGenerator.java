@@ -14,4 +14,10 @@ public interface ReportGenerator {
       SkillSnapshot skill) {
     return generate(providerId, expectedModel, completedTurnEvidence);
   }
+
+  default InterviewReport generate(
+      String providerId, String expectedModel, List<ReportEvidence> completedTurnEvidence,
+      SkillSnapshot skill, String finishReason, String unfinishedEvidence) {
+    return generate(providerId, expectedModel, completedTurnEvidence, skill);
+  }
 }
