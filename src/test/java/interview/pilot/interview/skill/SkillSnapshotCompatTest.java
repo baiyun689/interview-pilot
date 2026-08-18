@@ -47,6 +47,30 @@ class SkillSnapshotCompatTest {
   }
 
   @Test
+  void legacyV3SnapshotWithDefaultCompetenciesStillDecodes() throws Exception {
+    String legacyV3 = """
+        {"id":"ai-agent-dev","name":"AI Agent 开发","description":"旧","group":"JOB",
+         "defaultCompetencies":["RAG 设计","Agent 架构"],"persona":"p","rubric":"r",
+         "references":["rag.md"],"version":"v","schemaVersion":3,
+         "stages":[{"id":"architecture","purpose":"p","order":10,
+                    "entryCriteria":["a"],"exitCriteria":["b"]}],
+         "competencySpecs":[{"id":"rag_design","name":"RAG 设计","objective":"o",
+             "requiredEvidence":["e1"],"questionModes":["PROJECT"],
+             "followUpAxes":["a"],"redFlags":["r"],"followUpLimit":2,
+             "retrievalPolicy":{"enabled":true,"scopes":["rag"],
+                                "keywords":["k"],"allowedUses":["VERIFY_FACT"]},
+             "stageId":"architecture"}],
+         "retrievalPolicy":{"enabled":false,"scopes":[],"keywords":[],
+                            "allowedUses":[]}}""";
+
+    SkillSnapshot snapshot = objectMapper.readValue(legacyV3, SkillSnapshot.class);
+    assertThat(snapshot.schemaVersion()).isEqualTo(3);
+    assertThat(snapshot.redFlags()).isEmpty();
+    assertThat(snapshot.competencySpecs()).singleElement()
+        .satisfies(spec -> assertThat(spec.retrievalPolicy().scopes()).containsExactly("rag"));
+  }
+
+  @Test
   void defaultStagesHaveTheThreeStandardPhases() {
     List<SkillStageSpec> stages = SkillStageSpec.DEFAULT_STAGES;
     assertThat(stages)
