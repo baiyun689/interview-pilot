@@ -1,48 +1,60 @@
+schemaVersion: 5
+displayName: 前端开发
+description: 面向前端工程师的证据驱动技术面试。
+group: JOB
+icon: monitor
+
+redFlags:
+  - 声称优化了但无指标或前后对比
+  - 无法说明渲染或事件循环机制
+  - 框架 API 默写无使用场景
+  - 无兼容性或回归验证
+
 competencies:
   - id: project_ownership
     name: 项目深挖
-    stage: project_deep_dive
     objective: 验证个人贡献、用户场景、技术约束和交付结果
     evidence: [个人贡献边界, 用户与业务约束, 技术决策, 结果指标]
     modes: [PROJECT, FAILURE, METRICS, TRADEOFF]
-    probes: [ownership, user, constraint, outcome]
+    probes: [贡献边界, 用户约束, 技术决策, 结果指标]
+
   - id: javascript_runtime
     name: JavaScript
-    stage: technical_depth
     objective: 验证语言语义、事件循环、异步和运行时边界
     evidence: [作用域与对象模型, 异步调度, 错误传播, 实际使用依据]
     modes: [PROJECT, CONCEPT, MECHANISM, FAILURE, CODING]
-    probes: [scope, event-loop, async, error]
+    probes: [作用域与对象模型, 事件循环与异步, 错误传播, 使用依据]
     ragScopes: [javascript, browser]
+
   - id: framework_design
     name: React 与 Vue
-    stage: technical_depth
     objective: 验证组件边界、状态数据流、渲染机制和框架取舍
     evidence: [组件边界, 状态归属, 渲染机制, 框架取舍]
     modes: [PROJECT, MECHANISM, ARCHITECTURE, FAILURE, TRADEOFF]
-    probes: [component, state, render, tradeoff]
+    probes: [组件边界, 状态归属, 渲染机制, 框架取舍]
     ragScopes: [react-vue, javascript]
+
   - id: browser_fundamentals
     name: 浏览器机制
-    stage: technical_depth
     objective: 验证网络、存储、布局绘制和安全边界
     evidence: [请求与缓存, 存储边界, 布局与绘制, 安全机制]
     modes: [CONCEPT, MECHANISM, FAILURE, TRADEOFF]
-    probes: [network, storage, rendering, security]
+    probes: [请求与缓存, 存储边界, 布局绘制, 安全机制]
     ragScopes: [browser, css]
+
   - id: frontend_performance
     name: 性能优化
-    stage: technical_depth
     objective: 验证性能测量、瓶颈定位、优化和回归防护
     evidence: [量化指标, 定位过程, 优化依据, 回归验证]
     modes: [PROJECT, MECHANISM, FAILURE, METRICS, TRADEOFF]
-    probes: [metric, diagnosis, optimization, regression]
+    probes: [量化指标, 定位过程, 优化依据, 回归验证]
     ragScopes: [frontend-performance, browser]
+
   - id: engineering_quality
     name: 工程质量
-    stage: engineering_quality
+    stage: reliability
     objective: 验证构建、测试、监控、发布和回滚能力
     evidence: [构建与依赖治理, 测试策略, 监控诊断, 发布回滚]
     modes: [PROJECT, ARCHITECTURE, FAILURE, METRICS, TRADEOFF]
-    probes: [build, test, monitor, release]
+    probes: [构建与依赖, 测试策略, 监控诊断, 发布回滚]
     ragScopes: [frontend-performance]

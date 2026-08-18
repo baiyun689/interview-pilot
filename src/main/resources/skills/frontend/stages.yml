@@ -1,7 +1,0 @@
-stages:
-  - id: project_deep_dive
-    purpose: 建立前端项目事实和个人贡献基线
-  - id: technical_depth
-    purpose: 验证语言、框架、浏览器机制与性能取舍
-  - id: engineering_quality
-    purpose: 验证测试、监控、发布、回滚和质量演进

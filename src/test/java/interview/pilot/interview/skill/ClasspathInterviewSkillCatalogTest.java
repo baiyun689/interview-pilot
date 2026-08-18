@@ -122,7 +122,7 @@ class ClasspathInterviewSkillCatalogTest {
         .filter(skill -> skill.schemaVersion() == 5)
         .map(InterviewSkill::id)
         .toList();
-    assertThat(migrated).containsExactly("ai-agent-dev", "algorithm", "java-backend");
+    assertThat(migrated).containsExactly("ai-agent-dev", "algorithm", "frontend", "java-backend");
     Map<String, Set<String>> allowedScopes = Map.of(
         "ai-agent-dev", Set.of("ai-agent", "tool-use", "rag", "mcp", "system-design"),
         "algorithm", Set.of("algorithm-data-structures", "complexity", "edge-cases"),
@@ -154,6 +154,10 @@ class ClasspathInterviewSkillCatalogTest {
         .singleElement()
         .satisfies(spec -> assertThat(spec.retrievalPolicy().scopes())
             .containsExactly("algorithm-data-structures", "complexity"));
+    assertThat(catalog.require("frontend").competencySpecs())
+        .filteredOn(spec -> spec.id().equals("project_ownership"))
+        .singleElement()
+        .satisfies(spec -> assertThat(spec.retrievalPolicy().enabled()).isFalse());
   }
 
   private String resource(String filename) throws Exception {
