@@ -41,7 +41,7 @@ class KnowledgeGroundingTest {
   void buildsQueryOnlyFromDirectiveAndCoveredTopics() {
     var grounding = new DefaultKnowledgeGrounding((scope, intent) -> {
       assertThat(intent.query()).isEqualTo(
-          "Java并发 failure HARD 可验证失败边界 线程池；追问角度：failure technical 线程池 已覆盖:Spring事务");
+          "Java并发 failure HARD 可验证失败边界 线程池；追问角度：failure technical 已覆盖:Spring事务");
       assertThat(intent.topK()).isEqualTo(4);
       assertThat(intent.similarityThreshold()).isEqualTo(0.7);
       return RetrievedKnowledge.noMatch(intent.query(), "embed-v1", Duration.ofMillis(3));
@@ -75,7 +75,7 @@ class KnowledgeGroundingTest {
   @Test
   void skillPolicyOverridesConfiguredRetrievalBudget() {
     var policy = new SkillRetrievalPolicy(
-        true, List.of("technical"), List.of(),
+        true, List.of("technical"),
         List.of(interview.pilot.interview.skill.GroundingUse.GENERATE_SCENARIO),
         2, 7, 0.86, 900);
     var turn = new TurnDirective(
@@ -95,7 +95,7 @@ class KnowledgeGroundingTest {
   @Test
   void skillCannotRequestMoreChunksThanThePersistedSnapshotSupports() {
     assertThatThrownBy(() -> new SkillRetrievalPolicy(
-        true, List.of("technical"), List.of(),
+        true, List.of("technical"),
         List.of(interview.pilot.interview.skill.GroundingUse.GENERATE_SCENARIO),
         7, 21, 0.8, 2_000))
         .isInstanceOf(IllegalArgumentException.class)
@@ -110,7 +110,7 @@ class KnowledgeGroundingTest {
     return new TurnDirective(
         "depth", "Java并发", Difficulty.HARD, List.of("可验证失败边界"),
         InterviewQuestionMode.FAILURE, enabled, "线程池；追问角度：failure", "test", "",
-        new SkillRetrievalPolicy(enabled, List.of("technical"), List.of("线程池"),
+        new SkillRetrievalPolicy(enabled, List.of("technical"),
             List.of(interview.pilot.interview.skill.GroundingUse.GENERATE_SCENARIO,
                 interview.pilot.interview.skill.GroundingUse.VERIFY_FACT)), coveredTopics);
   }

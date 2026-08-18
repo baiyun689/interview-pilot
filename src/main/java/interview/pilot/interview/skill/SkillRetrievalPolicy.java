@@ -5,7 +5,6 @@ import java.util.List;
 public record SkillRetrievalPolicy(
     boolean enabled,
     List<String> scopes,
-    List<String> triggerKeywords,
     List<GroundingUse> allowedUses,
     Integer topK,
     Integer candidateCount,
@@ -14,7 +13,6 @@ public record SkillRetrievalPolicy(
 
   public SkillRetrievalPolicy {
     scopes = immutable(scopes);
-    triggerKeywords = immutable(triggerKeywords);
     allowedUses = allowedUses == null ? List.of() : List.copyOf(allowedUses);
     if (topK != null && (topK < 1 || topK > 6)) throw new IllegalArgumentException("topK is invalid");
     if (candidateCount != null && (candidateCount < 1 || candidateCount > 100)) {
@@ -33,14 +31,12 @@ public record SkillRetrievalPolicy(
   }
 
   public SkillRetrievalPolicy(
-      boolean enabled, List<String> scopes, List<String> triggerKeywords,
-      List<GroundingUse> allowedUses) {
-    this(enabled, scopes, triggerKeywords, allowedUses, null, null, null, null);
+      boolean enabled, List<String> scopes, List<GroundingUse> allowedUses) {
+    this(enabled, scopes, allowedUses, null, null, null, null);
   }
 
   public static SkillRetrievalPolicy disabled() {
-    return new SkillRetrievalPolicy(false, List.of(), List.of(), List.of(),
-        null, null, null, null);
+    return new SkillRetrievalPolicy(false, List.of(), List.of());
   }
 
   private static List<String> immutable(List<String> values) {

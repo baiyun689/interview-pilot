@@ -28,7 +28,7 @@ public record GroundingDirective(
     return new GroundingDirective(
         turn.ragEnabled() && policy.enabled(), KnowledgeRole.TECHNICAL_REFERENCE,
         turn.competency(), turn.difficulty(), turn.questionMode(), turn.evidenceTargets(),
-        turn.probeFocus(), turn.coveredTopics(), policy.scopes(), policy.triggerKeywords(), policy);
+        turn.probeFocus(), turn.coveredTopics(), policy.scopes(), List.of(), policy);
   }
 
   private static List<String> copy(List<String> values) {

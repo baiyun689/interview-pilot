@@ -72,7 +72,7 @@ public class JobProfileEntity {
     return create(userAccountId, title, descriptionText, requirementsSnapshot, """
         {"id":"custom","name":"自定义岗位","description":"历史面试兼容快照",
          "group":"CUSTOM","defaultCompetencies":[],"persona":"","rubric":"",
-         "references":[],"version":"legacy"}
+         "version":"legacy"}
         """);
   }
 

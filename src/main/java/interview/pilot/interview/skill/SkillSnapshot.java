@@ -10,16 +10,15 @@ public record SkillSnapshot(
     List<String> defaultCompetencies,
     String persona,
     String rubric,
-    List<String> references,
     String version,
     Integer schemaVersion,
     List<SkillStageSpec> stages,
     List<CompetencySpec> competencySpecs,
-    SkillRetrievalPolicy retrievalPolicy) {
+    SkillRetrievalPolicy retrievalPolicy,
+    List<String> redFlags) {
 
   public SkillSnapshot {
     defaultCompetencies = defaultCompetencies == null ? List.of() : List.copyOf(defaultCompetencies);
-    references = references == null ? List.of() : List.copyOf(references);
     if (schemaVersion == null || schemaVersion <= 0) schemaVersion = 1;
     stages = stages == null || stages.isEmpty()
         ? List.of(new SkillStageSpec("technical_depth", "验证核心技术能力"))
@@ -29,14 +28,14 @@ public record SkillSnapshot(
         : List.copyOf(competencySpecs);
     retrievalPolicy = retrievalPolicy == null
         ? SkillRetrievalPolicy.disabled() : retrievalPolicy;
+    redFlags = redFlags == null ? List.of() : List.copyOf(redFlags);
   }
 
   public SkillSnapshot(
       String id, String name, String description, SkillGroup group,
-      List<String> defaultCompetencies, String persona, String rubric,
-      List<String> references, String version) {
-    this(id, name, description, group, defaultCompetencies, persona, rubric, references, version,
-        1, null, null, SkillRetrievalPolicy.disabled());
+      List<String> defaultCompetencies, String persona, String rubric, String version) {
+    this(id, name, description, group, defaultCompetencies, persona, rubric, version,
+        1, null, null, SkillRetrievalPolicy.disabled(), List.of());
   }
 
   private static List<CompetencySpec> legacyCompetencies(List<String> names) {

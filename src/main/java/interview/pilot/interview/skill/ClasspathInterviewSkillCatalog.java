@@ -24,7 +24,6 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
   private static final Pattern SKILL_PATH =
       Pattern.compile(".*/skills/([^/]+)/skill\\.meta\\.yml$");
   private static final Pattern SAFE_ID = Pattern.compile("[a-z0-9]+(?:-[a-z0-9]+)*");
-  private static final Pattern SAFE_REFERENCE = Pattern.compile("[a-zA-Z0-9._-]+\\.md");
   private static final Pattern SAFE_RESOURCE = Pattern.compile("[a-zA-Z0-9._-]+\\.(?:md|yml)");
 
   private final List<InterviewSkill> skills;
@@ -111,23 +110,16 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
       SkillRetrievalPolicy retrievalPolicy = schemaVersion >= 4
           ? SkillRetrievalPolicy.disabled() : retrievalPolicy(meta);
       validateModel(id, competencies, stages, competencySpecs, schemaVersion);
-      List<String> references = schemaVersion >= 4
-          ? List.of() : strings(meta.get("references"), id, false);
-      references.forEach(reference -> {
-        if (!SAFE_REFERENCE.matcher(reference).matches()) {
-          throw invalid("Skill reference 路径不安全: " + id + "/" + reference);
-        }
-      });
       String persona = readRequired(id, personaFile);
       String rubric = readRequired(id, rubricFile);
       String version = sha256(String.join("\n",
           id, name, description, group.name(), icon,
           String.join("|", competencies), stages.toString(), competencySpecs.toString(),
-          retrievalPolicy.toString(), persona, rubric, String.join("|", references)));
+          retrievalPolicy.toString(), persona, rubric));
       return new InterviewSkill(
           id, name, description, group, new InterviewSkill.Display(icon),
           competencies, stages, competencySpecs, retrievalPolicy,
-          persona, rubric, references, version, schemaVersion);
+          persona, rubric, List.of(), version, schemaVersion);
     } catch (IOException exception) {
       throw new IllegalStateException("无法读取面试 Skill 资源: " + metaResource, exception);
     }
@@ -169,9 +161,7 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
         result.add(new SkillStageSpec(
             required(stage.get("id"), skillId, "stages.id"),
             required(stage.get("purpose"), skillId, "stages.purpose"),
-            integer(stage.get("order"), (result.size() + 1) * 10, skillId, "stages.order"),
-            strings(stage.get("entryCriteria"), skillId, false),
-            strings(stage.get("exitCriteria"), skillId, false)));
+            integer(stage.get("order"), (result.size() + 1) * 10, skillId, "stages.order")));
       }
       return List.copyOf(result);
     }
@@ -212,11 +202,11 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
         List<String> scopes = strings(competency.get("ragScopes"), skillId, false);
         KnowledgeDomains.requireRegistered(skillId, scopes);
         policy = scopes.isEmpty() ? SkillRetrievalPolicy.disabled() : new SkillRetrievalPolicy(
-            true, scopes, List.of(),
+            true, scopes,
             List.of(GroundingUse.GENERATE_SCENARIO, GroundingUse.VERIFY_FACT));
       } else {
         policy = competency.get("rag") instanceof Map<?, ?> rag
-            ? retrievalPolicy((Map<String, Object>) rag, List.of(), List.of())
+            ? retrievalPolicy((Map<String, Object>) rag, List.of())
             : SkillRetrievalPolicy.disabled();
       }
       result.add(new CompetencySpec(
@@ -241,29 +231,25 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
   @SuppressWarnings("unchecked")
   private SkillRetrievalPolicy retrievalPolicy(Map<String, Object> meta) {
     List<String> scopes = strings(meta.get("retrievalScopes"), "retrieval", false);
-    List<String> keywords = strings(meta.get("ragKeywords"), "retrieval", false);
     if (meta.get("retrieval") instanceof Map<?, ?> retrieval) {
-      return retrievalPolicy((Map<String, Object>) retrieval, scopes, keywords);
+      return retrievalPolicy((Map<String, Object>) retrieval, scopes);
     }
     boolean enabled = false;
     if (meta.get("runtime") instanceof Map<?, ?> runtime) {
       enabled = Boolean.TRUE.equals(((Map<String, Object>) runtime).get("ragEnabled"));
     }
     return new SkillRetrievalPolicy(
-        enabled, scopes, keywords,
+        enabled, scopes,
         enabled ? List.of(GroundingUse.GENERATE_SCENARIO, GroundingUse.VERIFY_FACT) : List.of());
   }
 
   private SkillRetrievalPolicy retrievalPolicy(
-      Map<String, Object> configured, List<String> fallbackScopes,
-      List<String> fallbackKeywords) {
+      Map<String, Object> configured, List<String> fallbackScopes) {
     boolean enabled = Boolean.TRUE.equals(configured.get("enabled"));
     List<String> scopes = strings(configured.get("scopes"), "retrieval", false);
     if (scopes.isEmpty()) scopes = fallbackScopes;
-    List<String> keywords = strings(configured.get("triggerKeywords"), "retrieval", false);
-    if (keywords.isEmpty()) keywords = fallbackKeywords;
     return new SkillRetrievalPolicy(
-        enabled, scopes, keywords,
+        enabled, scopes,
         groundingUses(configured.get("allowedUses"), "retrieval"),
         optionalInteger(configured.get("topK"), "retrieval.topK"),
         optionalInteger(configured.get("candidateCount"), "retrieval.candidateCount"),
@@ -341,10 +327,6 @@ public class ClasspathInterviewSkillCatalog implements InterviewSkillCatalog {
     if (requireStageReferences
         && stages.stream().map(SkillStageSpec::order).distinct().count() != stages.size()) {
       throw invalid("Skill stage order 重复: " + skillId);
-    }
-    if (schemaVersion == 3 && stages.stream().anyMatch(stage ->
-        stage.order() <= 0 || stage.entryCriteria().isEmpty() || stage.exitCriteria().isEmpty())) {
-      throw invalid("Skill stage 缺少顺序或流转条件: " + skillId);
     }
     if (competencies.stream().map(CompetencySpec::id).map(String::toLowerCase).distinct().count()
         != competencies.size()) {

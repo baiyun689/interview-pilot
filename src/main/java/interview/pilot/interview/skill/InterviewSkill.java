@@ -14,7 +14,7 @@ public record InterviewSkill(
     SkillRetrievalPolicy retrievalPolicy,
     String persona,
     String rubric,
-    List<String> references,
+    List<String> redFlags,
     String version,
     int schemaVersion) {
 
@@ -24,14 +24,14 @@ public record InterviewSkill(
     competencySpecs = List.copyOf(competencySpecs);
     retrievalPolicy = retrievalPolicy == null
         ? SkillRetrievalPolicy.disabled() : retrievalPolicy;
-    references = List.copyOf(references);
+    redFlags = redFlags == null ? List.of() : List.copyOf(redFlags);
   }
 
   public SkillSnapshot snapshot() {
     return new SkillSnapshot(
         id, name, description, group, defaultCompetencies,
-        persona, rubric, references, version,
-        schemaVersion, stages, competencySpecs, retrievalPolicy);
+        persona, rubric, version,
+        schemaVersion, stages, competencySpecs, retrievalPolicy, redFlags);
   }
 
   public record Display(String icon) {}

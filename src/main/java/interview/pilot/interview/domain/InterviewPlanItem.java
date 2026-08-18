@@ -43,7 +43,7 @@ public record InterviewPlanItem(
     }
     resumeEntryPoint = resumeEntryPoint == null ? "" : resumeEntryPoint.trim();
     retrievalPolicy = retrievalPolicy == null
-        ? (ragEnabled ? new SkillRetrievalPolicy(true, List.of(), List.of(),
+        ? (ragEnabled ? new SkillRetrievalPolicy(true, List.of(),
             List.of(GroundingUse.GENERATE_SCENARIO, GroundingUse.VERIFY_FACT))
             : SkillRetrievalPolicy.disabled())
         : retrievalPolicy;

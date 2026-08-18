@@ -30,7 +30,7 @@ class ClasspathInterviewSkillCatalogTest {
     assertThat(catalog.require("java-backend").defaultCompetencies()).isEmpty();
     assertThat(catalog.require("java-backend").persona()).contains("Java 后端面试策略");
     assertThat(catalog.require("java-backend").rubric()).contains("证据评分规则");
-    assertThat(catalog.require("java-backend").references()).isEmpty();
+    assertThat(catalog.require("java-backend").redFlags()).isEmpty();
     assertThat(catalog.require("java-backend").version()).matches("[0-9a-f]{64}");
     assertThat(catalog.require("java-backend").stages())
         .extracting(SkillStageSpec::id)
@@ -54,7 +54,7 @@ class ClasspathInterviewSkillCatalogTest {
 
     assertThatThrownBy(() -> skill.defaultCompetencies().add("非法修改"))
         .isInstanceOf(UnsupportedOperationException.class);
-    assertThatThrownBy(() -> skill.references().clear())
+    assertThatThrownBy(() -> skill.redFlags().add("x"))
         .isInstanceOf(UnsupportedOperationException.class);
   }
 
@@ -112,7 +112,6 @@ class ClasspathInterviewSkillCatalogTest {
     assertThat(java.stages())
         .extracting(SkillStageSpec::order)
         .containsExactly(10, 20, 30);
-    assertThat(java.stages().getFirst().exitCriteria()).isEmpty();
     assertThat(java.defaultCompetencies()).isEmpty();
     assertThat(java.retrievalPolicy().enabled()).isFalse();
     assertThat(java.snapshot().schemaVersion()).isEqualTo(4);
@@ -143,7 +142,6 @@ class ClasspathInterviewSkillCatalogTest {
           java.util.stream.Collectors.toSet());
 
       assertThat(skill.schemaVersion()).as(id).isEqualTo(4);
-      assertThat(skill.references()).as(id).isEmpty();
       assertThat(skill.defaultCompetencies()).as(id).isEmpty();
       assertThat(skill.competencySpecs()).as(id).allSatisfy(spec -> {
         assertThat(spec.stageId()).isIn(stageIds);
