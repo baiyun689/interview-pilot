@@ -1,3 +1,23 @@
+schemaVersion: 5
+displayName: 系统设计
+description: 面向系统设计方向的约束驱动架构面试。
+group: JOB
+icon: diagram
+
+redFlags:
+  - 无约束的组件罗列
+  - 选型无替代方案与代价
+  - 无失败模式设计
+  - 容量与推导无依据
+
+stages:
+  - id: requirement_clarification
+    purpose: 澄清功能范围、访问模式、规模目标和核心约束
+  - id: architecture_design
+    purpose: 验证模块、数据、接口和关键链路的设计取舍
+  - id: failure_analysis
+    purpose: 验证瓶颈、故障恢复、可观测性和系统演进
+
 competencies:
   - id: requirements_clarification
     name: 需求澄清
@@ -5,45 +25,50 @@ competencies:
     objective: 验证功能范围、访问模式、质量目标和约束识别
     evidence: [核心用例, 范围边界, 访问模式, SLO 与约束]
     modes: [ARCHITECTURE, TRADEOFF]
-    probes: [use-case, scope, access, slo]
+    probes: [核心用例, 范围边界, 访问模式, SLO 与约束]
     ragScopes: [system-design-scenarios]
+
   - id: scale_estimation
     name: 规模估算
     stage: requirement_clarification
     objective: 验证流量、数据量、带宽、存储和容量假设
     evidence: [流量估算, 数据规模, 峰值假设, 容量推导]
     modes: [ARCHITECTURE, METRICS, TRADEOFF]
-    probes: [traffic, data, peak, capacity]
+    probes: [流量, 数据规模, 峰值假设, 容量推导]
     ragScopes: [system-design-scenarios, high-availability]
+
   - id: architecture_decomposition
     name: 架构分解
     stage: architecture_design
     objective: 验证模块边界、接口、数据流和关键链路设计
     evidence: [模块职责, 接口边界, 主数据流, 选型依据]
     modes: [ARCHITECTURE, FAILURE, TRADEOFF]
-    probes: [component, interface, flow, rationale]
+    probes: [模块职责, 接口边界, 主数据流, 选型依据]
     ragScopes: [system-design-scenarios, distributed]
+
   - id: data_consistency
     name: 数据与一致性
     stage: architecture_design
     objective: 验证数据模型、分区复制、一致性和消息语义取舍
-    evidence: [数据模型, 分区与复制, 一致性选择, 重复与顺序处理]
+    evidence: [数据模型, 分区与复制, 一致性选择, 消息语义]
     modes: [MECHANISM, ARCHITECTURE, FAILURE, TRADEOFF]
-    probes: [model, partition, consistency, messaging]
+    probes: [数据模型, 分区与复制, 一致性选择, 消息语义]
     ragScopes: [database, distributed, mq]
+
   - id: availability_recovery
     name: 可用性与恢复
     stage: failure_analysis
     objective: 验证故障检测、隔离、降级、恢复和事故响应
     evidence: [故障模型, 检测与隔离, 降级恢复, SLO 与演练]
     modes: [ARCHITECTURE, FAILURE, METRICS, TRADEOFF]
-    probes: [failure, detection, degradation, recovery]
+    probes: [故障模型, 检测与隔离, 降级恢复, SLO 与演练]
     ragScopes: [high-availability, distributed]
+
   - id: architecture_evolution
     name: 方案演进
     stage: failure_analysis
     objective: 验证瓶颈治理、迁移发布、成本和持续演进
     evidence: [瓶颈识别, 演进路径, 迁移回滚, 成本取舍]
     modes: [ARCHITECTURE, FAILURE, METRICS, TRADEOFF]
-    probes: [bottleneck, evolution, migration, cost]
+    probes: [瓶颈识别, 演进路径, 迁移回滚, 成本取舍]
     ragScopes: [system-design-scenarios, high-availability]

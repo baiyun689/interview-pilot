@@ -123,7 +123,8 @@ class ClasspathInterviewSkillCatalogTest {
         .map(InterviewSkill::id)
         .toList();
     assertThat(migrated).containsExactly(
-        "ai-agent-dev", "algorithm", "frontend", "java-backend", "python-backend");
+        "ai-agent-dev", "algorithm", "frontend", "java-backend", "python-backend",
+        "system-design");
     Map<String, Set<String>> allowedScopes = Map.of(
         "ai-agent-dev", Set.of("ai-agent", "tool-use", "rag", "mcp", "system-design"),
         "algorithm", Set.of("algorithm-data-structures", "complexity", "edge-cases"),
