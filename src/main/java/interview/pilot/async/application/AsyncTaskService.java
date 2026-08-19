@@ -105,6 +105,7 @@ public class AsyncTaskService {
       resume.setStatus(ResumeStatus.PENDING);
       resume.setFailureReason(null);
       resume.setSkillsSnapshot(null);
+      resume.setEvaluationSnapshot(null);
     } else if (task.getTaskType() == AsyncTaskType.KNOWLEDGE_DOCUMENT_INDEX
         || task.getTaskType() == AsyncTaskType.KNOWLEDGE_DOCUMENT_DELETE) {
       UUID documentId = parseKnowledgeDocumentId(task.getBizKey());

@@ -119,7 +119,8 @@ public class JwtTokenServiceImpl implements JwtTokenService {
 
     String usedKey = USED_PREFIX + stored.tokenFamily();
     RBucket<String> usedBucket = redisson.getBucket(usedKey);
-    if (usedBucket.get() != null) {
+    String previouslyUsed = usedBucket.get();
+    if (rawToken.equals(previouslyUsed)) {
       log.warn("Refresh token replay detected for userId={} family={}",
           stored.userId(), stored.tokenFamily());
       throw new JwtException("Token replay detected; all sessions revoked");

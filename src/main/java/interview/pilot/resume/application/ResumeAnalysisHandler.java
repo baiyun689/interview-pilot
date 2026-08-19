@@ -13,7 +13,7 @@ import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.async.messaging.TaskMessage;
-import interview.pilot.resume.domain.ResumeProfile;
+import interview.pilot.resume.domain.ResumeAnalysisResult;
 import interview.pilot.resume.domain.ResumeStatus;
 import interview.pilot.resume.infrastructure.ResumeEntity;
 import interview.pilot.resume.infrastructure.ResumeRepository;
@@ -69,10 +69,11 @@ public class ResumeAnalysisHandler {
     }
 
     try {
-      ResumeProfile profile = profiler.profile(work.resumeText());
-      validate(profile);
-      String profileJson = objectMapper.writeValueAsString(profile);
-      return transactions.execute(status -> complete(work, profileJson));
+      ResumeAnalysisResult result = profiler.analyze(work.resumeText());
+      validate(result);
+      String profileJson = objectMapper.writeValueAsString(result.profile());
+      String evaluationJson = objectMapper.writeValueAsString(result.evaluation());
+      return transactions.execute(status -> complete(work, profileJson, evaluationJson));
     } catch (AiStructuredOutputException | ConstraintViolationException | JacksonException exception) {
       return transactions.execute(status -> fail(work));
     } catch (RuntimeException exception) {
@@ -177,7 +178,7 @@ public class ResumeAnalysisHandler {
         task.getTaskId(), resume.getId(), requireOwner(task), resume.getParsedText(), attemptGeneration);
   }
 
-  private Outcome complete(AnalysisWork work, String profileJson) {
+  private Outcome complete(AnalysisWork work, String profileJson, String evaluationJson) {
     AsyncTaskEntity task = requireTask(work.taskId());
     ResumeEntity resume = resumeRepository.findByIdAndUserAccountId(
         work.resumeId(), requireOwner(task)).orElseThrow();
@@ -185,6 +186,7 @@ public class ResumeAnalysisHandler {
       return Outcome.STALE;
     }
     resume.setSkillsSnapshot(profileJson);
+    resume.setEvaluationSnapshot(evaluationJson);
     resume.setFailureReason(null);
     resume.setStatus(ResumeStatus.READY);
     task.setStatus(AsyncTaskStatus.COMPLETED);
@@ -201,6 +203,7 @@ public class ResumeAnalysisHandler {
       return Outcome.STALE;
     }
     resume.setSkillsSnapshot(null);
+    resume.setEvaluationSnapshot(null);
     resume.setFailureReason(INVALID_PROFILE_ERROR);
     resume.setStatus(ResumeStatus.FAILED);
     task.setStatus(AsyncTaskStatus.FAILED);
@@ -220,11 +223,11 @@ public class ResumeAnalysisHandler {
     return true;
   }
 
-  private void validate(ResumeProfile profile) {
-    if (profile == null) {
+  private void validate(ResumeAnalysisResult result) {
+    if (result == null) {
       throw new ConstraintViolationException(java.util.Set.of());
     }
-    var violations = validator.validate(profile);
+    var violations = validator.validate(result);
     if (!violations.isEmpty()) {
       throw new ConstraintViolationException(violations);
     }

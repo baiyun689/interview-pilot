@@ -32,6 +32,7 @@ import interview.pilot.resume.application.ResumeDeleteService;
 import interview.pilot.resume.application.ResumeQueryService;
 import interview.pilot.resume.application.ResumeUploadService;
 import interview.pilot.resume.application.ResumeUploadService.UploadResumeResult;
+import interview.pilot.resume.domain.ResumeEvaluation;
 import interview.pilot.resume.domain.ResumeStatus;
 
 class ResumeControllerTest {
@@ -87,7 +88,7 @@ class ResumeControllerTest {
   void listsResumesWithAnalysisTaskId() throws Exception {
     long resumeId = 103L;
     UUID taskId = UUID.randomUUID();
-    when(queryService.list(user)).thenReturn(List.of(response(resumeId, taskId)));
+    when(queryService.list(user)).thenReturn(List.of(response(resumeId, taskId, null)));
 
     mockMvc.perform(get("/api/resumes"))
         .andExpect(status().isOk())
@@ -99,13 +100,34 @@ class ResumeControllerTest {
   void returnsResumeDetailWithNullProfileBeforeAnalysis() throws Exception {
     long resumeId = 104L;
     UUID taskId = UUID.randomUUID();
-    when(queryService.get(user, resumeId)).thenReturn(response(resumeId, taskId));
+    when(queryService.get(user, resumeId)).thenReturn(response(resumeId, taskId, null));
 
     mockMvc.perform(get("/api/resumes/{id}", resumeId))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.id").value(resumeId))
         .andExpect(jsonPath("$.analysisTaskId").value(taskId.toString()))
-        .andExpect(jsonPath("$.profile").value(org.hamcrest.Matchers.nullValue()));
+        .andExpect(jsonPath("$.profile").value(org.hamcrest.Matchers.nullValue()))
+        .andExpect(jsonPath("$.evaluation").value(org.hamcrest.Matchers.nullValue()));
+  }
+
+  @Test
+  void returnsResumeDetailWithEvaluationWhenReady() throws Exception {
+    long resumeId = 106L;
+    UUID taskId = UUID.randomUUID();
+    ResumeEvaluation evaluation = new ResumeEvaluation(
+        78,
+        new ResumeEvaluation.ScoreDetail(30, 14, 12, 13, 9),
+        List.of(new ResumeEvaluation.Suggestion(
+            "项目", "高", "项目描述缺少量化结果", "补充 QPS 或 RT 等指标")));
+    when(queryService.get(user, resumeId)).thenReturn(response(resumeId, taskId, evaluation));
+
+    mockMvc.perform(get("/api/resumes/{id}", resumeId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.evaluation.overallScore").value(78))
+        .andExpect(jsonPath("$.evaluation.scoreDetail.projectScore").value(30))
+        .andExpect(jsonPath("$.evaluation.scoreDetail.skillMatchScore").value(14))
+        .andExpect(jsonPath("$.evaluation.suggestions[0].priority").value("高"))
+        .andExpect(jsonPath("$.evaluation.suggestions[0].category").value("项目"));
   }
 
   @Test
@@ -164,7 +186,7 @@ class ResumeControllerTest {
             "[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")));
   }
 
-  private static ResumeResponse response(long resumeId, UUID taskId) {
+  private static ResumeResponse response(long resumeId, UUID taskId, Object evaluation) {
     return new ResumeResponse(
         resumeId,
         "resume.txt",
@@ -173,6 +195,7 @@ class ResumeControllerTest {
         taskId,
         Instant.parse("2026-07-13T00:00:00Z"),
         null,
+        evaluation,
         null);
   }
 

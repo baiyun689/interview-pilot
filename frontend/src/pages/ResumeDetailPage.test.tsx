@@ -19,6 +19,7 @@ const base = {
   analysisTaskId: '9d84fe79-476d-47dc-a4ab-5c6871fa65f4',
   createdAt: '2026-07-14T01:00:00Z',
   profile: null,
+  evaluation: null,
   analysisError: null,
 }
 
@@ -47,6 +48,14 @@ describe('简历分析详情', () => {
         strengths: ['工程基础扎实'],
         risks: [],
       },
+      evaluation: {
+        overallScore: 78,
+        scoreDetail: { projectScore: 30, skillMatchScore: 14, contentScore: 12, structureScore: 13, expressionScore: 9 },
+        suggestions: [
+          { category: '项目', priority: '高', issue: '项目描述缺少量化结果', recommendation: '补充 QPS 或 RT 等指标' },
+          { category: '格式', priority: '低', issue: '技术名词大小写不统一', recommendation: '统一为官方写法' },
+        ],
+      },
     })))
     renderDetail()
 
@@ -55,7 +64,34 @@ describe('简历分析详情', () => {
     expect(screen.getByText('订单平台')).toBeInTheDocument()
     expect(screen.getByText('工程基础扎实')).toBeInTheDocument()
     expect(screen.getByText('暂无风险提示')).toBeInTheDocument()
+    expect(screen.getByText('78')).toBeInTheDocument()
+    expect(screen.getByText('/ 100')).toBeInTheDocument()
+    expect(screen.getByText('项目经验')).toBeInTheDocument()
+    expect(screen.getByText('30 / 40')).toBeInTheDocument()
+    expect(screen.getByText('高优先级建议')).toBeInTheDocument()
+    expect(screen.getByText('低优先级建议')).toBeInTheDocument()
+    expect(screen.getByText('项目描述缺少量化结果')).toBeInTheDocument()
+    expect(screen.getByText('补充 QPS 或 RT 等指标')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '重新分析' })).not.toBeInTheDocument()
+  })
+
+  it('旧数据无评测报告时只渲染画像', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({
+      ...base,
+      status: 'READY',
+      profile: {
+        summary: '旧数据画像',
+        technicalSkills: [],
+        projects: [],
+        strengths: [],
+        risks: [],
+      },
+    })))
+    renderDetail()
+
+    expect(await screen.findByText('旧数据画像')).toBeInTheDocument()
+    expect(screen.queryByLabelText('简历评测报告')).not.toBeInTheDocument()
+    expect(screen.queryByText('高优先级建议')).not.toBeInTheDocument()
   })
 
   it('轮询不重叠，终态后停止，卸载后不再请求', async () => {

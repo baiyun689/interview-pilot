@@ -220,7 +220,6 @@ export function KnowledgeBasePage({ pollIntervalMs = 3000 }: KnowledgeBasePagePr
   return (
     <section>
       <header className="page-header">
-        <p className="eyebrow">Knowledge base</p>
         <h1>知识库</h1>
         <p>上传文档建立知识库，面试时 AI 将基于你的资料进行针对性提问。</p>
       </header>

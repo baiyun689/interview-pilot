@@ -13,4 +13,5 @@ public record ResumeResponse(
     UUID analysisTaskId,
     Instant createdAt,
     Object profile,
+    Object evaluation,
     String analysisError) {}

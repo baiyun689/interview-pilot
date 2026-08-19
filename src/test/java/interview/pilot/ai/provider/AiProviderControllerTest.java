@@ -33,7 +33,8 @@ class AiProviderControllerTest {
             SECRET,
             "disabled-model",
             false,
-            Duration.ofSeconds(3))),
+            Duration.ofSeconds(3),
+            Map.of())),
         2);
     var service = new AiProviderService(
         properties,

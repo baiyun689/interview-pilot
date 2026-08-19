@@ -31,7 +31,6 @@ export function LoginPage() {
   return (
     <main className="auth-page">
       <section className="auth-card" aria-labelledby="login-title">
-        <p className="eyebrow">WELCOME BACK</p>
         <h1 id="login-title">登录</h1>
         <p>登录后继续准备下一场面试。</p>
         <form className="auth-form" onSubmit={submit}>

@@ -62,7 +62,7 @@ export function InterviewReportPage({ pollIntervalMs = 1500 }: { pollIntervalMs?
   }
 
   return <section><Link className="back-link" to={`/interviews/${sessionId}`}>← 返回面试</Link>
-    <header className="page-header"><p className="eyebrow">Capability report</p><h1>能力评估报告</h1>{session && <p>{providerSnapshot(session.providerId, session.modelName)}</p>}</header>
+    <header className="page-header"><h1>能力评估报告</h1>{session && <p>{providerSnapshot(session.providerId, session.modelName)}</p>}</header>
     <ErrorNotice error={error} />
     {!result && !error && (!status || !status.retryable) && <div className="state-card report-pending" role="status"><h2>报告生成中</h2><p>系统正在汇总各轮证据，无需刷新页面。</p></div>}
     {status?.retryable && <div className="state-card"><h2>报告生成未完成</h2><p>可以安全地重新触发报告任务。</p>{status.taskId && <button className="button button-primary" type="button" disabled={retrying} onClick={retry}>{retrying ? '重试中…' : '重试生成报告'}</button>}</div>}

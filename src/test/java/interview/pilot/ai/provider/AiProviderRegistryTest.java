@@ -2,6 +2,8 @@ package interview.pilot.ai.provider;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.anyUrl;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
@@ -51,7 +53,8 @@ class AiProviderRegistryTest {
         "test-key",
         "test-model",
         true,
-        Duration.ofSeconds(1));
+        Duration.ofSeconds(1),
+        Map.of());
     var registry = registry(
         new AiProviderProperties("blank-name", Map.of("blank-name", provider), 2));
 
@@ -92,7 +95,8 @@ class AiProviderRegistryTest {
         "test-key",
         "test-model",
         true,
-        Duration.ofSeconds(1));
+        Duration.ofSeconds(1),
+        Map.of());
     var registry = registry(
         new AiProviderProperties("test", Map.of("test", provider), 2));
 
@@ -104,10 +108,38 @@ class AiProviderRegistryTest {
   }
 
   @Test
+  void providerExtraBodyFlattensIntoTheChatCompletionRequest() {
+    wireMock.stubFor(post(urlPathEqualTo("/v1/chat/completions"))
+        .willReturn(aResponse()
+            .withHeader("Content-Type", "application/json")
+            .withBody("""
+                {"id":"chatcmpl-test","object":"chat.completion","created":1720000000,
+                 "model":"test-model","choices":[{"index":0,"message":{"role":"assistant",
+                 "content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,
+                 "completion_tokens":1,"total_tokens":2}}
+                """)));
+    var provider = new AiProviderProperties.Provider(
+        "Test Provider",
+        URI.create(wireMock.baseUrl()),
+        "test-key",
+        "test-model",
+        true,
+        Duration.ofSeconds(1),
+        Map.of("enable_thinking", false));
+    var registry = registry(
+        new AiProviderProperties("test", Map.of("test", provider), 2));
+
+    registry.generate("test", "system", "user");
+
+    wireMock.verify(1, postRequestedFor(urlPathEqualTo("/v1/chat/completions"))
+        .withRequestBody(matchingJsonPath("$.enable_thinking", equalTo("false"))));
+  }
+
+  @Test
   void rejectsAServerSideSessionModelSnapshotThatNoLongerMatchesConfiguration() {
     var provider = new AiProviderProperties.Provider(
         "Test Provider", URI.create(wireMock.baseUrl()), "test-key", "new-model", true,
-        Duration.ofSeconds(1));
+        Duration.ofSeconds(1), Map.of());
     var registry = registry(
         new AiProviderProperties("test", Map.of("test", provider), 2));
 
@@ -124,7 +156,7 @@ class AiProviderRegistryTest {
         .willReturn(aResponse().withHeader("Content-Type", "application/json").withBody("{}")));
     var provider = new AiProviderProperties.Provider(
         "Test Provider", URI.create(wireMock.baseUrl()), "test-key", "test-model", true,
-        Duration.ofSeconds(1));
+        Duration.ofSeconds(1), Map.of());
     var properties = new AiProviderProperties("test", Map.of("test", provider), 2);
     var admission = mock(LlmConcurrencyAdmission.class);
     when(admission.acquire()).thenReturn("owned-token");
@@ -178,7 +210,7 @@ class AiProviderRegistryTest {
   private AiProviderProperties.Provider provider() {
     return new AiProviderProperties.Provider(
         "Test Provider", URI.create(wireMock.baseUrl()), "test-key", "test-model", true,
-        Duration.ofSeconds(1));
+        Duration.ofSeconds(1), Map.of());
   }
 
   private void stubSuccessfulCompletion() {

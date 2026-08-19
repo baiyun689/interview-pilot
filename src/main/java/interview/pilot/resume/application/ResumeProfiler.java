@@ -1,7 +1,7 @@
 package interview.pilot.resume.application;
 
-import interview.pilot.resume.domain.ResumeProfile;
+import interview.pilot.resume.domain.ResumeAnalysisResult;
 
 public interface ResumeProfiler {
-  ResumeProfile profile(String resumeText);
+  ResumeAnalysisResult analyze(String resumeText);
 }

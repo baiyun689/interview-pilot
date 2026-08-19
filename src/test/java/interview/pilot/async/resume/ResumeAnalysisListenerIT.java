@@ -43,6 +43,8 @@ import interview.pilot.async.application.AsyncTaskService;
 import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.resume.application.ResumeProfiler;
 import interview.pilot.resume.application.ResumeAnalysisHandler;
+import interview.pilot.resume.domain.ResumeAnalysisResult;
+import interview.pilot.resume.domain.ResumeEvaluation;
 import interview.pilot.resume.domain.ResumeProfile;
 import interview.pilot.resume.domain.ResumeStatus;
 import interview.pilot.resume.infrastructure.ResumeEntity;
@@ -123,13 +125,14 @@ class ResumeAnalysisListenerIT {
   @Test
   void consumesMainQueuePersistsProfileThenCompletesOwnedClaim() throws Exception {
     Work work = pendingWork();
-    when(profiler.profile(work.resume().getParsedText())).thenReturn(validProfile());
+    when(profiler.analyze(work.resume().getParsedText())).thenReturn(validResult());
 
     send(work.message());
 
     await(() -> taskStatus(work) == AsyncTaskStatus.COMPLETED, Duration.ofSeconds(10));
-    assertThat(resumeRepository.findById(work.resume().getId()).orElseThrow().getStatus())
-        .isEqualTo(ResumeStatus.READY);
+    ResumeEntity completed = resumeRepository.findById(work.resume().getId()).orElseThrow();
+    assertThat(completed.getStatus()).isEqualTo(ResumeStatus.READY);
+    assertThat(completed.getEvaluationSnapshot()).contains("overallScore");
     assertThat(redis.getBucket(claimKey(work.resume().getId()), StringCodec.INSTANCE).get())
         .asString().startsWith("done:");
   }
@@ -151,7 +154,7 @@ class ResumeAnalysisListenerIT {
         RabbitTopologyConfig.RESUME_ANALYSIS_MAIN_QUEUE).getMessageCount() == 0,
         Duration.ofSeconds(5));
 
-    verify(profiler, never()).profile(org.mockito.ArgumentMatchers.anyString());
+    verify(profiler, never()).analyze(org.mockito.ArgumentMatchers.anyString());
     assertThat(redis.getBucket(claimKey(work.resume().getId()), StringCodec.INSTANCE).get())
         .isEqualTo(otherOwner);
   }
@@ -159,7 +162,7 @@ class ResumeAnalysisListenerIT {
   @Test
   void retryableFailureReleasesOwnedClaimAndEntersSharedRetryPipeline() throws Exception {
     Work work = pendingWork();
-    when(profiler.profile(work.resume().getParsedText()))
+    when(profiler.analyze(work.resume().getParsedText()))
         .thenThrow(new AiGatewayException("do-not-log-this-provider-output"));
 
     send(work.message());
@@ -177,7 +180,7 @@ class ResumeAnalysisListenerIT {
   @Test
   void occupiedClaimExpiresAndTheDelayedDeliveryEventuallyCompletesTheWork() throws Exception {
     Work work = pendingWork();
-    when(profiler.profile(work.resume().getParsedText())).thenReturn(validProfile());
+    when(profiler.analyze(work.resume().getParsedText())).thenReturn(validResult());
     processingClaim.acquire(
         "resume-analysis:" + work.resume().getId(), Duration.ofSeconds(2)).orElseThrow();
 
@@ -244,9 +247,9 @@ class ResumeAnalysisListenerIT {
   @Test
   void retryDeliveryRecoversAnAnalyzingResumeAfterTheFirstAiAttemptFails() throws Exception {
     Work work = pendingWork();
-    when(profiler.profile(work.resume().getParsedText()))
+    when(profiler.analyze(work.resume().getParsedText()))
         .thenThrow(new AiGatewayException("transient"))
-        .thenReturn(validProfile());
+        .thenReturn(validResult());
 
     send(work.message());
 
@@ -260,7 +263,7 @@ class ResumeAnalysisListenerIT {
   @Test
   void exhaustedRetryPublishesDeadLetterThenMarksTaskAndResumeDead() throws Exception {
     Work work = pendingWork();
-    when(profiler.profile(work.resume().getParsedText()))
+    when(profiler.analyze(work.resume().getParsedText()))
         .thenThrow(new AiGatewayException("provider secret"));
 
     rabbitTemplate.convertAndSend(
@@ -288,6 +291,7 @@ class ResumeAnalysisListenerIT {
     resume.setStatus(ResumeStatus.FAILED);
     resume.setFailureReason("Resume analysis retries exhausted");
     resume.setSkillsSnapshot("{\"unsafe\":true}");
+    resume.setEvaluationSnapshot("{\"unsafe\":true}");
     resumeRepository.saveAndFlush(resume);
     AsyncTaskEntity task = taskRepository.findById(work.task().getId()).orElseThrow();
     task.setStatus(AsyncTaskStatus.DEAD);
@@ -310,6 +314,7 @@ class ResumeAnalysisListenerIT {
     assertThat(resetResume.getStatus()).isEqualTo(ResumeStatus.PENDING);
     assertThat(resetResume.getFailureReason()).isNull();
     assertThat(resetResume.getSkillsSnapshot()).isNull();
+    assertThat(resetResume.getEvaluationSnapshot()).isNull();
   }
 
   @Test
@@ -359,7 +364,7 @@ class ResumeAnalysisListenerIT {
     Object retry = rabbitTemplate.receiveAndConvert(
         RabbitTopologyConfig.RESUME_ANALYSIS_MAIN_QUEUE + ".retry.1", 10_000);
     assertThat(retry).isEqualTo(tampered);
-    verify(profiler, never()).profile(org.mockito.ArgumentMatchers.anyString());
+    verify(profiler, never()).analyze(org.mockito.ArgumentMatchers.anyString());
     assertThat(taskStatus(work)).isEqualTo(AsyncTaskStatus.PENDING);
   }
 
@@ -394,6 +399,17 @@ class ResumeAnalysisListenerIT {
             "Payments API", "Built an API", List.of("Spring Boot"))),
         List.of("Backend engineering"),
         List.of("Scale not stated"));
+  }
+
+  private ResumeEvaluation validEvaluation() {
+    return new ResumeEvaluation(
+        78,
+        new ResumeEvaluation.ScoreDetail(30, 14, 12, 13, 9),
+        List.of());
+  }
+
+  private ResumeAnalysisResult validResult() {
+    return new ResumeAnalysisResult(validProfile(), validEvaluation());
   }
 
   private static CurrentUser owner() {

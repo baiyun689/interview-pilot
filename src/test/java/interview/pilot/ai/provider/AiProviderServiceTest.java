@@ -171,6 +171,7 @@ class AiProviderServiceTest {
         SECRET,
         model,
         enabled,
-        Duration.ofSeconds(3));
+        Duration.ofSeconds(3),
+        Map.of());
   }
 }

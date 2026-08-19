@@ -16,6 +16,8 @@
   --white: #fff;
   --success: #047857;
   --success-soft: #d1fae5;
+  --warning: #b45309;
+  --warning-soft: #fef3c7;
   --danger: #b42318;
   --danger-soft: #fef3f2;
 }
@@ -196,7 +198,7 @@ a:focus-visible {
 }
 
 .auth-card h1 { margin: 0; color: var(--slate-950); font-size: 34px; letter-spacing: -0.035em; }
-.auth-card > p:not(.eyebrow):not(.auth-switch) { margin: 12px 0 24px; color: var(--slate-500); line-height: 1.7; }
+.auth-card > p:not(.auth-switch) { margin: 12px 0 24px; color: var(--slate-500); line-height: 1.7; }
 .auth-form { display: grid; gap: 17px; }
 .auth-form label { display: grid; gap: 7px; color: var(--slate-700); font-size: 13px; font-weight: 700; }
 .auth-form input { width: 100%; padding: 11px 12px; color: var(--slate-950); background: var(--white); border: 1px solid var(--slate-300); border-radius: 10px; font: inherit; }
@@ -214,15 +216,6 @@ a:focus-visible {
 .placeholder-page {
   max-width: 760px;
   margin-bottom: 30px;
-}
-
-.eyebrow {
-  margin: 0 0 10px;
-  color: var(--indigo-600);
-  font-size: 13px;
-  font-weight: 750;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
 }
 
 .page-header h1,
@@ -868,12 +861,18 @@ a:focus-visible {
     grid-column: auto;
   }
 
+  .evaluation-overview {
+    grid-template-columns: 1fr;
+  }
+
   .form-row,
   .report-grid { grid-template-columns: 1fr; }
   .score-hero,
   .score-chart { grid-column: auto; }
   .history-card { grid-template-columns: 1fr; }
   .history-card dl { flex-wrap: wrap; }
+  .history-card-side,
+  .provider-actions { justify-items: start; }
 }
 
 .kb-create-form { display: flex; gap: 12px; max-width: 760px; margin-bottom: 22px; }
@@ -936,3 +935,60 @@ a:focus-visible {
 .kb-select legend { font-weight: 600; margin-bottom: 0.5rem; }
 .checkbox-label { display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0; cursor: pointer; }
 .button-small { font-size: 0.85rem; padding: 0.2rem 0.6rem; }
+
+/* Resume Evaluation Report */
+.evaluation-panel { display: grid; gap: 16px; margin-bottom: 26px; }
+.evaluation-overview { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 34px; align-items: center; }
+.overall-score { display: flex; align-items: baseline; gap: 5px; padding-right: 34px; border-right: 1px solid var(--slate-100); }
+.overall-score-number { color: var(--indigo-700); font-size: 48px; font-weight: 750; letter-spacing: -0.03em; line-height: 1; }
+.overall-score-total { color: var(--slate-500); font-size: 16px; }
+.score-list { display: grid; gap: 12px; }
+.score-row { display: grid; grid-template-columns: 84px minmax(0, 1fr) 72px; gap: 10px; align-items: center; }
+.score-label { color: var(--slate-700); font-size: 14px; }
+.score-bar { height: 8px; background: var(--slate-100); border-radius: 999px; overflow: hidden; }
+.score-bar-fill { height: 100%; background: linear-gradient(90deg, var(--indigo-600), #818cf8); border-radius: 999px; }
+.score-value { color: var(--slate-500); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+.suggestion-card { margin-bottom: 12px; padding: 14px 16px; background: var(--white); border: 1px solid var(--slate-200); border-radius: 10px; }
+.suggestion-card:last-child { margin-bottom: 0; }
+.suggestion-meta { display: flex; gap: 8px; margin-bottom: 8px; }
+.priority-badge,
+.category-badge { padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 650; }
+.priority-high { color: var(--danger); background: var(--danger-soft); }
+.priority-medium { color: var(--indigo-700); background: var(--indigo-100); }
+.priority-low { color: var(--slate-500); background: var(--slate-100); }
+.category-badge { color: var(--slate-700); background: var(--slate-100); }
+.suggestion-issue { margin: 0 0 6px; color: var(--slate-950); font-weight: 650; }
+.suggestion-recommendation { margin: 0; color: var(--slate-700); }
+
+/* Interview History */
+.history-loading { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 64px 0; color: var(--slate-500); font-weight: 650; }
+.history-loading p { margin: 0; }
+.history-spinner { width: 22px; height: 22px; border: 3px solid var(--indigo-100); border-top-color: var(--indigo-600); border-radius: 50%; animation: history-spin 0.8s linear infinite; }
+@keyframes history-spin { to { transform: rotate(360deg); } }
+
+.history-empty { max-width: 680px; padding: 54px 32px; background: rgb(255 255 255 / 92%); border: 1px solid var(--slate-200); border-radius: 18px; box-shadow: 0 14px 35px rgb(15 23 42 / 6%); text-align: center; }
+.history-empty-icon { display: grid; place-items: center; width: 76px; height: 76px; margin: 0 auto 20px; color: var(--indigo-600); background: linear-gradient(135deg, #e0e7ff, #eef2ff); border-radius: 24px; }
+.history-empty h2 { margin: 0 0 8px; color: var(--slate-950); font-size: 22px; }
+.history-empty > p { margin: 0 0 24px; color: var(--slate-500); }
+.history-empty-cta { display: inline-flex; align-items: center; padding: 0 22px; text-decoration: none; }
+
+.history-card { grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 24px; }
+.history-card-main { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.history-status-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 13px; flex-shrink: 0; }
+.history-tone-interviewing { color: var(--indigo-700); background: var(--indigo-100); }
+.history-tone-evaluating { color: var(--warning); background: var(--warning-soft); }
+.history-tone-completed { color: var(--success); background: var(--success-soft); }
+.history-tone-failed { color: var(--danger); background: var(--danger-soft); }
+.history-tone-created { color: var(--slate-500); background: var(--slate-100); }
+.history-card-heading { min-width: 0; }
+.history-meta { display: flex; flex-wrap: wrap; margin: 6px 0 0; }
+.history-meta span + span::before { content: '·'; margin: 0 9px; color: var(--slate-300); }
+.history-stats { display: flex; align-items: center; gap: 24px; margin: 0; }
+.history-stats dd { display: flex; }
+.history-progress { display: flex; align-items: center; gap: 9px; }
+.history-progress-bar { width: 88px; height: 6px; background: var(--slate-100); border-radius: 999px; overflow: hidden; }
+.history-progress-fill { height: 100%; background: linear-gradient(90deg, var(--indigo-600), #818cf8); border-radius: 999px; }
+.history-progress span { color: var(--slate-700); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.history-card-side { display: grid; gap: 4px; align-content: center; justify-items: end; }
+.history-card-side p { margin: 0; }
+.provider-actions { display: grid; gap: 8px; justify-items: end; align-content: center; }

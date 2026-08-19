@@ -119,7 +119,6 @@ export function ModelSettingsPage() {
   return (
     <section className="settings-page">
       <header className="page-header">
-        <p className="eyebrow">模型设置</p>
         <h1>选择面试使用的模型</h1>
         <p>模型已由后端安全配置。你可以测试连接，并选择之后新面试使用的默认模型。</p>
       </header>

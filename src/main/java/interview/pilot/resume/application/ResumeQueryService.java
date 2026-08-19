@@ -11,6 +11,7 @@ import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.common.exception.BusinessException;
 import interview.pilot.resume.api.ResumeResponse;
+import interview.pilot.resume.domain.ResumeEvaluation;
 import interview.pilot.resume.domain.ResumeProfile;
 import interview.pilot.resume.infrastructure.ResumeEntity;
 import interview.pilot.resume.infrastructure.ResumeRepository;
@@ -66,6 +67,7 @@ public class ResumeQueryService {
         task.getTaskId(),
         resume.getCreatedAt(),
         readProfile(resume.getSkillsSnapshot()),
+        readEvaluation(resume.getEvaluationSnapshot()),
         resume.getFailureReason());
   }
 
@@ -88,6 +90,21 @@ public class ResumeQueryService {
       return profile;
     } catch (JacksonException exception) {
       throw new IllegalStateException("Stored resume profile is invalid");
+    }
+  }
+
+  private ResumeEvaluation readEvaluation(String snapshot) {
+    if (snapshot == null) {
+      return null;
+    }
+    try {
+      ResumeEvaluation evaluation = objectMapper.readValue(snapshot, ResumeEvaluation.class);
+      if (evaluation == null || !validator.validate(evaluation).isEmpty()) {
+        throw new IllegalStateException("Stored resume evaluation is invalid");
+      }
+      return evaluation;
+    } catch (JacksonException exception) {
+      throw new IllegalStateException("Stored resume evaluation is invalid");
     }
   }
 }

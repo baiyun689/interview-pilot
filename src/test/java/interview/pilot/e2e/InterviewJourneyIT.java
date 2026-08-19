@@ -74,7 +74,7 @@ import interview.pilot.interview.infrastructure.JobProfileRepository;
 import interview.pilot.resume.application.ResumeAnalysisHandler;
 import interview.pilot.resume.application.ResumeUploadService;
 import interview.pilot.resume.domain.ResumeStatus;
-import interview.pilot.resume.domain.ResumeProfile;
+import interview.pilot.resume.domain.ResumeAnalysisResult;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -234,7 +234,7 @@ class InterviewJourneyIT {
         .isEqualTo(AsyncTaskStatus.COMPLETED);
     assertThat(reports.count()).isEqualTo(1);
 
-    verifyPromptContract(ResumeProfile.class, "严谨的中文简历分析师", 1);
+    verifyPromptContract(ResumeAnalysisResult.class, "严谨的中文简历分析师", 1);
     verifyPromptContract(JobRequirements.class, "资深招聘需求分析师", 1);
     verifyPromptContract(PlanProposal.class, "资深技术面试负责人", 1);
     verifyPromptContract(GeneratedQuestionOutput.class, "中文技术面试官", 3);
@@ -244,8 +244,8 @@ class InterviewJourneyIT {
 
   private static void stubJourneyResponses() {
     List<Fixture> responses = List.of(
-        new Fixture(ResumeProfile.class, "严谨的中文简历分析师",
-            "{\"summary\":\"Java backend engineer\",\"technicalSkills\":[\"Java\",\"Spring Boot\",\"Redis\"],\"projects\":[{\"name\":\"InterviewPilot\",\"description\":\"Reliable adaptive interviews\",\"technologies\":[\"Spring Boot\"]}],\"strengths\":[\"Idempotency\"],\"risks\":[\"Scale not measured\"]}"),
+        new Fixture(ResumeAnalysisResult.class, "严谨的中文简历分析师",
+            "{\"profile\":{\"summary\":\"Java backend engineer\",\"technicalSkills\":[\"Java\",\"Spring Boot\",\"Redis\"],\"projects\":[{\"name\":\"InterviewPilot\",\"description\":\"Reliable adaptive interviews\",\"technologies\":[\"Spring Boot\"]}],\"strengths\":[\"Idempotency\"],\"risks\":[\"Scale not measured\"]},\"evaluation\":{\"overallScore\":78,\"scoreDetail\":{\"projectScore\":30,\"skillMatchScore\":14,\"contentScore\":12,\"structureScore\":13,\"expressionScore\":9},\"suggestions\":[]}}"),
         new Fixture(JobRequirements.class, "资深招聘需求分析师",
             "{\"competencies\":[\"Java\",\"System Design\",\"Observability\"],\"preferredSkills\":[\"Redis\"]}"),
         new Fixture(PlanProposal.class, "资深技术面试负责人",

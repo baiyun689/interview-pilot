@@ -91,9 +91,12 @@ public class AiProviderRegistry {
         .apiKey(provider.apiKey())
         .restClientBuilder(restClientBuilder)
         .build();
-    OpenAiChatOptions options = OpenAiChatOptions.builder()
-        .model(provider.model())
-        .build();
+    var optionsBuilder = OpenAiChatOptions.builder()
+        .model(provider.model());
+    if (!provider.extraBody().isEmpty()) {
+      optionsBuilder.extraBody(provider.extraBody());
+    }
+    OpenAiChatOptions options = optionsBuilder.build();
     OpenAiChatModel model = OpenAiChatModel.builder()
         .openAiApi(api)
         .defaultOptions(options)

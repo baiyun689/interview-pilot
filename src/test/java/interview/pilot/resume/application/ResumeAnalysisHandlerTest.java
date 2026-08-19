@@ -38,6 +38,8 @@ import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.auth.infrastructure.UserAccountEntity;
 import interview.pilot.auth.infrastructure.UserAccountRepository;
 import interview.pilot.async.messaging.TaskMessage;
+import interview.pilot.resume.domain.ResumeAnalysisResult;
+import interview.pilot.resume.domain.ResumeEvaluation;
 import interview.pilot.resume.domain.ResumeProfile;
 import interview.pilot.resume.domain.ResumeStatus;
 import interview.pilot.resume.infrastructure.ResumeEntity;
@@ -94,7 +96,7 @@ class ResumeAnalysisHandlerTest {
   @Test
   void profilesPendingResumeAndCompletesTask() {
     Work work = pendingWork();
-    when(profiler.profile(work.resume().getParsedText())).thenReturn(validProfile());
+    when(profiler.analyze(work.resume().getParsedText())).thenReturn(validResult());
 
     handler.handle(work.task().getTaskId());
 
@@ -103,11 +105,15 @@ class ResumeAnalysisHandlerTest {
     assertThat(resume.getStatus()).isEqualTo(ResumeStatus.READY);
     assertThat(resume.getSkillsSnapshot())
         .contains("Java", "Payments API", "Spring Boot");
+    assertThat(resume.getEvaluationSnapshot())
+        .contains("overallScore", "suggestions");
     assertThat(resume.getFailureReason()).isNull();
     assertThat(task.getStatus()).isEqualTo(AsyncTaskStatus.COMPLETED);
     assertThat(task.getAttemptCount()).isEqualTo(1);
     assertThat(task.getLastError()).isNull();
-    assertThat(queryService.get(LEGACY_USER, resume.getId()).profile()).isEqualTo(validProfile());
+    var response = queryService.get(LEGACY_USER, resume.getId());
+    assertThat(response.profile()).isEqualTo(validProfile());
+    assertThat(response.evaluation()).isEqualTo(validEvaluation());
   }
 
   @Test
@@ -121,7 +127,7 @@ class ResumeAnalysisHandlerTest {
 
     handler.handle(work.task().getTaskId());
 
-    verify(profiler, never()).profile(org.mockito.ArgumentMatchers.anyString());
+    verify(profiler, never()).analyze(org.mockito.ArgumentMatchers.anyString());
     assertThat(taskRepository.findById(work.task().getId()).orElseThrow().getAttemptCount())
         .isZero();
   }
@@ -135,13 +141,13 @@ class ResumeAnalysisHandlerTest {
         work.task().getTaskId(), work.task().getTaskType(), work.task().getBizKey(), 0);
 
     assertThat(handler.handle(old)).isEqualTo(ResumeAnalysisHandler.Outcome.STALE);
-    verify(profiler, never()).profile(org.mockito.ArgumentMatchers.anyString());
+    verify(profiler, never()).analyze(org.mockito.ArgumentMatchers.anyString());
   }
 
   @Test
   void retryableGatewayFailureLeavesWorkIncompleteAndStoresOnlySafeError() {
     Work work = pendingWork();
-    when(profiler.profile(work.resume().getParsedText()))
+    when(profiler.analyze(work.resume().getParsedText()))
         .thenThrow(new AiGatewayException("provider rejected secret-token-123"));
 
     assertThatThrownBy(() -> handler.handle(work.task().getTaskId()))
@@ -153,6 +159,7 @@ class ResumeAnalysisHandlerTest {
     AsyncTaskEntity task = taskRepository.findById(work.task().getId()).orElseThrow();
     assertThat(resume.getStatus()).isEqualTo(ResumeStatus.ANALYZING);
     assertThat(resume.getSkillsSnapshot()).isNull();
+    assertThat(resume.getEvaluationSnapshot()).isNull();
     assertThat(task.getStatus()).isEqualTo(AsyncTaskStatus.PUBLISHED);
     assertThat(task.getAttemptCount()).isEqualTo(1);
     assertThat(task.getLastError()).isEqualTo("Resume analysis temporarily unavailable");
@@ -161,7 +168,7 @@ class ResumeAnalysisHandlerTest {
   @Test
   void terminalStructuredOutputFailureMarksBothRecordsFailedWithSanitizedReason() {
     Work work = pendingWork();
-    when(profiler.profile(work.resume().getParsedText()))
+    when(profiler.analyze(work.resume().getParsedText()))
         .thenThrow(new AiStructuredOutputException("model-output-secret"));
 
     handler.handle(work.task().getTaskId());
@@ -169,6 +176,8 @@ class ResumeAnalysisHandlerTest {
     ResumeEntity resume = resumeRepository.findById(work.resume().getId()).orElseThrow();
     AsyncTaskEntity task = taskRepository.findById(work.task().getId()).orElseThrow();
     assertThat(resume.getStatus()).isEqualTo(ResumeStatus.FAILED);
+    assertThat(resume.getSkillsSnapshot()).isNull();
+    assertThat(resume.getEvaluationSnapshot()).isNull();
     assertThat(resume.getFailureReason()).isEqualTo("Resume profile response was invalid");
     assertThat(task.getStatus()).isEqualTo(AsyncTaskStatus.FAILED);
     assertThat(task.getLastError()).isEqualTo("Resume profile response was invalid");
@@ -178,32 +187,104 @@ class ResumeAnalysisHandlerTest {
   @Test
   void invalidProfileFieldsAreTerminalAndNeverPersisted() {
     Work work = pendingWork();
-    when(profiler.profile(work.resume().getParsedText()))
-        .thenReturn(new ResumeProfile(" ", null, List.of(), List.of(), List.of()));
+    when(profiler.analyze(work.resume().getParsedText()))
+        .thenReturn(new ResumeAnalysisResult(
+            new ResumeProfile(" ", null, List.of(), List.of(), List.of()), validEvaluation()));
 
     handler.handle(work.task().getTaskId());
 
     ResumeEntity resume = resumeRepository.findById(work.resume().getId()).orElseThrow();
     assertThat(resume.getStatus()).isEqualTo(ResumeStatus.FAILED);
     assertThat(resume.getSkillsSnapshot()).isNull();
+    assertThat(resume.getEvaluationSnapshot()).isNull();
     assertThat(resume.getFailureReason()).isEqualTo("Resume profile response was invalid");
   }
 
   @Test
   void nullProjectElementIsTerminalAndNeverPersisted() {
     Work work = pendingWork();
-    when(profiler.profile(work.resume().getParsedText())).thenReturn(new ResumeProfile(
-        "Java engineer",
-        List.of("Java"),
-        Arrays.asList((ResumeProfile.ProjectEvidence) null),
-        List.of(),
-        List.of()));
+    when(profiler.analyze(work.resume().getParsedText())).thenReturn(new ResumeAnalysisResult(
+        new ResumeProfile(
+            "Java engineer",
+            List.of("Java"),
+            Arrays.asList((ResumeProfile.ProjectEvidence) null),
+            List.of(),
+            List.of()),
+        validEvaluation()));
 
     handler.handle(work.task().getTaskId());
 
     ResumeEntity resume = resumeRepository.findById(work.resume().getId()).orElseThrow();
     assertThat(resume.getStatus()).isEqualTo(ResumeStatus.FAILED);
     assertThat(resume.getSkillsSnapshot()).isNull();
+    assertThat(resume.getEvaluationSnapshot()).isNull();
+    assertThat(resume.getFailureReason()).isEqualTo("Resume profile response was invalid");
+  }
+
+  @Test
+  void invalidEvaluationFieldsAreTerminalAndNeverPersisted() {
+    Work work = pendingWork();
+    when(profiler.analyze(work.resume().getParsedText()))
+        .thenReturn(new ResumeAnalysisResult(validProfile(), new ResumeEvaluation(
+            78,
+            new ResumeEvaluation.ScoreDetail(30, 14, 12, 13, 9),
+            List.of(new ResumeEvaluation.Suggestion("项目", "紧急", "issue", "recommendation")))));
+
+    handler.handle(work.task().getTaskId());
+
+    ResumeEntity resume = resumeRepository.findById(work.resume().getId()).orElseThrow();
+    assertThat(resume.getStatus()).isEqualTo(ResumeStatus.FAILED);
+    assertThat(resume.getSkillsSnapshot()).isNull();
+    assertThat(resume.getEvaluationSnapshot()).isNull();
+    assertThat(resume.getFailureReason()).isEqualTo("Resume profile response was invalid");
+  }
+
+  @Test
+  void nullEvaluationIsTerminalAndNeverPersisted() {
+    Work work = pendingWork();
+    when(profiler.analyze(work.resume().getParsedText()))
+        .thenReturn(new ResumeAnalysisResult(validProfile(), null));
+
+    handler.handle(work.task().getTaskId());
+
+    ResumeEntity resume = resumeRepository.findById(work.resume().getId()).orElseThrow();
+    assertThat(resume.getStatus()).isEqualTo(ResumeStatus.FAILED);
+    assertThat(resume.getSkillsSnapshot()).isNull();
+    assertThat(resume.getEvaluationSnapshot()).isNull();
+    assertThat(resume.getFailureReason()).isEqualTo("Resume profile response was invalid");
+  }
+
+  @Test
+  void scoreSumMismatchIsTerminalAndNeverPersisted() {
+    Work work = pendingWork();
+    when(profiler.analyze(work.resume().getParsedText()))
+        .thenReturn(new ResumeAnalysisResult(validProfile(), new ResumeEvaluation(
+            77,
+            new ResumeEvaluation.ScoreDetail(30, 14, 12, 13, 9),
+            List.of())));
+
+    handler.handle(work.task().getTaskId());
+
+    ResumeEntity resume = resumeRepository.findById(work.resume().getId()).orElseThrow();
+    assertThat(resume.getStatus()).isEqualTo(ResumeStatus.FAILED);
+    assertThat(resume.getEvaluationSnapshot()).isNull();
+    assertThat(resume.getFailureReason()).isEqualTo("Resume profile response was invalid");
+  }
+
+  @Test
+  void missingScoreFieldIsTerminalAndNeverPersisted() {
+    Work work = pendingWork();
+    when(profiler.analyze(work.resume().getParsedText()))
+        .thenReturn(new ResumeAnalysisResult(validProfile(), new ResumeEvaluation(
+            78,
+            new ResumeEvaluation.ScoreDetail(null, 14, 12, 13, 9),
+            List.of())));
+
+    handler.handle(work.task().getTaskId());
+
+    ResumeEntity resume = resumeRepository.findById(work.resume().getId()).orElseThrow();
+    assertThat(resume.getStatus()).isEqualTo(ResumeStatus.FAILED);
+    assertThat(resume.getEvaluationSnapshot()).isNull();
     assertThat(resume.getFailureReason()).isEqualTo("Resume profile response was invalid");
   }
 
@@ -263,6 +344,57 @@ class ResumeAnalysisHandlerTest {
   }
 
   @Test
+  void malformedStoredEvaluationRaisesOnlyASanitizedServiceError() {
+    Work work = pendingWork();
+    work.resume().setEvaluationSnapshot("""
+        {"overallScore":{"secretModelOutput":true},"scoreDetail":null,"suggestions":[]}
+        """);
+    resumeRepository.saveAndFlush(work.resume());
+
+    assertThatThrownBy(() -> queryService.get(LEGACY_USER, work.resume().getId()))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("Stored resume evaluation is invalid")
+        .hasNoCause()
+        .hasMessageNotContaining("secretModelOutput");
+  }
+
+  @Test
+  void contractInvalidStoredEvaluationRaisesOnlyASanitizedServiceError() {
+    Work work = pendingWork();
+    work.resume().setEvaluationSnapshot("""
+        {"overallScore":78,"scoreDetail":{"projectScore":30,"skillMatchScore":14,
+        "contentScore":12,"structureScore":13,"expressionScore":9},
+        "suggestions":[null]}
+        """);
+    resumeRepository.saveAndFlush(work.resume());
+
+    assertThatThrownBy(() -> queryService.get(LEGACY_USER, work.resume().getId()))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("Stored resume evaluation is invalid")
+        .hasNoCause();
+  }
+
+  @Test
+  void readyResumeWithoutEvaluationSnapshotReadsProfileOnly() {
+    Work work = pendingWork();
+    work.resume().setStatus(ResumeStatus.READY);
+    work.resume().setSkillsSnapshot("""
+        {"summary":"Java backend engineer","technicalSkills":["Java","Spring Boot","MySQL"],
+        "projects":[{"name":"Payments API","description":"Implemented transaction APIs",
+        "technologies":["Spring Boot"]}],"strengths":["Backend development"],
+        "risks":["Scale is not stated"]}
+        """);
+    work.task().setStatus(AsyncTaskStatus.COMPLETED);
+    resumeRepository.saveAndFlush(work.resume());
+    taskRepository.saveAndFlush(work.task());
+
+    var response = queryService.get(LEGACY_USER, work.resume().getId());
+
+    assertThat(response.profile()).isInstanceOf(ResumeProfile.class);
+    assertThat(response.evaluation()).isNull();
+  }
+
+  @Test
   void staleSuccessCannotOverwriteANewerAttempt() throws Exception {
     assertStaleAttemptIsFenced(OldAttemptResult.SUCCESS);
   }
@@ -286,22 +418,25 @@ class ResumeAnalysisHandlerTest {
     var releaseNew = new CountDownLatch(1);
     ResumeProfile newerProfile = new ResumeProfile(
         "New owner profile", List.of("Java 21"), List.of(), List.of(), List.of());
+    ResumeAnalysisResult newerResult = new ResumeAnalysisResult(newerProfile, validEvaluation());
     doAnswer(invocation -> {
       int attempt = call.incrementAndGet();
       if (attempt == 1) {
         oldEntered.countDown();
         assertThat(releaseOld.await(10, TimeUnit.SECONDS)).isTrue();
         return switch (oldResult) {
-          case SUCCESS -> new ResumeProfile(
-              "Stale owner profile", List.of("Java 8"), List.of(), List.of(), List.of());
+          case SUCCESS -> new ResumeAnalysisResult(
+              new ResumeProfile(
+                  "Stale owner profile", List.of("Java 8"), List.of(), List.of(), List.of()),
+              validEvaluation());
           case INVALID_OUTPUT -> throw new AiStructuredOutputException("stale-model-output");
           case RUNTIME_FAILURE -> throw new AiGatewayException("stale-provider-error");
         };
       }
       newEntered.countDown();
       assertThat(releaseNew.await(10, TimeUnit.SECONDS)).isTrue();
-      return newerProfile;
-    }).when(profiler).profile(work.resume().getParsedText());
+      return newerResult;
+    }).when(profiler).analyze(work.resume().getParsedText());
 
     var executor = Executors.newFixedThreadPool(2);
     try {
@@ -328,7 +463,9 @@ class ResumeAnalysisHandlerTest {
       releaseNew.countDown();
       assertThat(newOwner.get(10, TimeUnit.SECONDS))
           .isEqualTo(ResumeAnalysisHandler.Outcome.TERMINAL);
-      assertThat(queryService.get(LEGACY_USER, work.resume().getId()).profile()).isEqualTo(newerProfile);
+      var response = queryService.get(LEGACY_USER, work.resume().getId());
+      assertThat(response.profile()).isEqualTo(newerProfile);
+      assertThat(response.evaluation()).isEqualTo(validEvaluation());
       assertThat(taskRepository.findById(work.task().getId()).orElseThrow().getAttemptCount())
           .isEqualTo(2);
     } finally {
@@ -360,6 +497,18 @@ class ResumeAnalysisHandlerTest {
             "Payments API", "Implemented transaction APIs", List.of("Spring Boot"))),
         List.of("Backend development"),
         List.of("Scale is not stated"));
+  }
+
+  private ResumeEvaluation validEvaluation() {
+    return new ResumeEvaluation(
+        78,
+        new ResumeEvaluation.ScoreDetail(30, 14, 12, 13, 9),
+        List.of(new ResumeEvaluation.Suggestion(
+            "项目", "高", "项目描述缺少量化结果", "补充 QPS 或 RT 等指标")));
+  }
+
+  private ResumeAnalysisResult validResult() {
+    return new ResumeAnalysisResult(validProfile(), validEvaluation());
   }
 
   private record Work(ResumeEntity resume, AsyncTaskEntity task) {}

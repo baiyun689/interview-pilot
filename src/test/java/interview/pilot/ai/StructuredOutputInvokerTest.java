@@ -44,7 +44,8 @@ class StructuredOutputInvokerTest {
             "test-key",
             "deepseek-chat",
             true,
-            Duration.ofSeconds(3))),
+            Duration.ofSeconds(3),
+            Map.of())),
         2);
     invoker = new StructuredOutputInvoker(
         gateway, new ObjectMapper(), properties, meterRegistry, new AiMetrics(meterRegistry));

@@ -104,7 +104,7 @@ export function ResumeDetailPage() {
       {resume && (
         <>
           <header className="resume-detail-header">
-            <div><p className="eyebrow">ANALYSIS RESULT</p><h1>{resume.originalFilename}</h1><time dateTime={resume.createdAt}>{new Date(resume.createdAt).toLocaleString('zh-CN')}</time></div>
+            <div><h1>{resume.originalFilename}</h1><time dateTime={resume.createdAt}>{new Date(resume.createdAt).toLocaleString('zh-CN')}</time></div>
             <ResumeStatusBadge status={resume.status} />
           </header>
 
@@ -114,6 +114,51 @@ export function ResumeDetailPage() {
 
           {resume.status === 'FAILED' && (
             <div className="state-card analysis-failed"><h2>分析失败</h2><p>{sanitizedAnalysisError(resume.analysisError)}</p><button className="button button-primary" disabled={retrying} onClick={() => void retry()}>{retrying ? '正在重试' : '重新分析'}</button></div>
+          )}
+
+          {resume.status === 'READY' && resume.evaluation && (
+            <section className="evaluation-panel" aria-label="简历评测报告">
+              <article className="profile-card evaluation-overview">
+                <div className="overall-score">
+                  <span className="overall-score-number">{resume.evaluation.overallScore}</span>
+                  <span className="overall-score-total">/ 100</span>
+                </div>
+                <div className="score-list">
+                  {([
+                    ['项目经验', resume.evaluation.scoreDetail.projectScore, 40],
+                    ['技能匹配', resume.evaluation.scoreDetail.skillMatchScore, 20],
+                    ['内容完整', resume.evaluation.scoreDetail.contentScore, 15],
+                    ['结构清晰', resume.evaluation.scoreDetail.structureScore, 15],
+                    ['表达专业', resume.evaluation.scoreDetail.expressionScore, 10],
+                  ] as const).map(([label, score, max]) => (
+                    <div className="score-row" key={label}>
+                      <span className="score-label">{label}</span>
+                      <div className="score-bar"><div className="score-bar-fill" style={{ width: `${Math.min(100, (score / max) * 100)}%` }} /></div>
+                      <span className="score-value">{score} / {max}</span>
+                    </div>
+                  ))}
+                </div>
+              </article>
+              {(['高', '中', '低'] as const).map((priority) => {
+                const items = resume.evaluation!.suggestions.filter((suggestion) => suggestion.priority === priority)
+                if (!items.length) return null
+                return (
+                  <article className="profile-card suggestion-group" key={priority}>
+                    <h2>{priority === '高' ? '高优先级建议' : priority === '中' ? '中优先级建议' : '低优先级建议'}</h2>
+                    {items.map((suggestion, index) => (
+                      <section className="suggestion-card" key={`${suggestion.category}-${index}`}>
+                        <div className="suggestion-meta">
+                          <span className={`priority-badge priority-${priority === '高' ? 'high' : priority === '中' ? 'medium' : 'low'}`}>{suggestion.priority}</span>
+                          <span className="category-badge">{suggestion.category}</span>
+                        </div>
+                        <p className="suggestion-issue">{suggestion.issue}</p>
+                        <p className="suggestion-recommendation">{suggestion.recommendation}</p>
+                      </section>
+                    ))}
+                  </article>
+                )
+              })}
+            </section>
           )}
 
           {resume.status === 'READY' && resume.profile && (

@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 import interview.pilot.ai.StructuredOutputInvoker;
 import interview.pilot.ai.model.AiRequest;
 import interview.pilot.ai.provider.AiProviderService;
-import interview.pilot.resume.domain.ResumeProfile;
+import interview.pilot.resume.domain.ResumeAnalysisResult;
 
 @Component
 public class AiResumeProfiler implements ResumeProfiler {
@@ -31,7 +31,7 @@ public class AiResumeProfiler implements ResumeProfiler {
   }
 
   @Override
-  public ResumeProfile profile(String resumeText) {
+  public ResumeAnalysisResult analyze(String resumeText) {
     if (resumeText == null || resumeText.isBlank()) {
       throw new IllegalArgumentException("Resume text is required for analysis");
     }
@@ -39,8 +39,8 @@ public class AiResumeProfiler implements ResumeProfiler {
         providers.currentDefaultProviderId(),
         systemPrompt,
         userPrompt + "\n\n<resume_text>\n" + resumeText + "\n</resume_text>",
-        ResumeProfile.class);
-    return structuredOutput.invoke(request, ResumeProfile.class);
+        ResumeAnalysisResult.class);
+    return structuredOutput.invoke(request, ResumeAnalysisResult.class);
   }
 
   private static String read(Resource resource) {

@@ -32,7 +32,6 @@ export function RegisterPage() {
   return (
     <main className="auth-page">
       <section className="auth-card" aria-labelledby="register-title">
-        <p className="eyebrow">GET STARTED</p>
         <h1 id="register-title">创建账户</h1>
         <p>保存你的简历、练习记录和模型设置。</p>
         <form className="auth-form" onSubmit={submit}>

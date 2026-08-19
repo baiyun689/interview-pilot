@@ -53,7 +53,7 @@ class InterviewV7MigrationIT {
     latest.migrate();
     assertThat(jdbc.queryForObject(
         "select count(*) from flyway_schema_history where success=true", Integer.class))
-        .isEqualTo(16);
+        .isEqualTo(18);
   }
 
   private JdbcTemplate jdbc() {

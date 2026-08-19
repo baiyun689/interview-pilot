@@ -293,6 +293,8 @@ describe('面试历史', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(json([])))
     const empty = renderRoute('/interviews', <InterviewHistoryPage />, '/interviews')
     expect(await screen.findByText('还没有面试')).toBeInTheDocument()
+    expect(screen.getByText('上传简历或直接选择面试方向，开启第一场 AI 自适应面试。')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '开始第一场面试' })).toHaveAttribute('href', '/interviews/new')
     empty.unmount()
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(json({ message: '历史加载失败', traceId: 'trace-history' }, 503)))

@@ -140,6 +140,87 @@ class JwtTokenServiceImplTest {
   }
 
   @Test
+  void rapidRotationWithinReplayWindowStaysValid() {
+    AtomicReference<String> storedJson = new AtomicReference<>();
+    RBucket<String> refreshBucket = mock(RBucket.class);
+    when(redisson.<String>getBucket(anyString())).thenReturn(refreshBucket);
+    when(refreshBucket.get()).thenAnswer(invocation -> storedJson.get());
+    doAnswer(invocation -> {
+      storedJson.set(invocation.getArgument(0));
+      return null;
+    }).when(refreshBucket).set(anyString(), any(Duration.class));
+
+    RefreshToken issued = service.issueRefreshToken(user);
+    String family = issued.tokenFamily();
+
+    AtomicReference<String> usedValue = new AtomicReference<>();
+    RBucket<String> usedBucket = mock(RBucket.class);
+    when(redisson.<String>getBucket("interview-pilot:used_refresh:" + family))
+        .thenReturn(usedBucket);
+    when(usedBucket.get()).thenAnswer(invocation -> usedValue.get());
+    doAnswer(invocation -> {
+      usedValue.set(invocation.getArgument(0));
+      return null;
+    }).when(usedBucket).set(anyString(), any(Duration.class));
+
+    UserAccountEntity account = mock(UserAccountEntity.class);
+    when(account.getId()).thenReturn(1L);
+    when(account.getUserId()).thenReturn(user.userId());
+    when(account.getEmail()).thenReturn(user.email());
+    when(account.getDisplayName()).thenReturn(user.displayName());
+    when(account.getStatus()).thenReturn(UserStatus.ACTIVE);
+    when(accountRepository.findByUserId(user.userId())).thenReturn(Optional.of(account));
+
+    TokenPair first = service.refresh(issued.value());
+    TokenPair second = service.refresh(first.refreshToken().value());
+
+    assertThat(first.refreshToken().tokenFamily()).isEqualTo(family);
+    assertThat(second.refreshToken().tokenFamily()).isEqualTo(family);
+    assertThat(second.accessToken()).isNotBlank();
+  }
+
+  @Test
+  void refreshRejectsAnImmediatelyReplayedSameToken() {
+    AtomicReference<String> storedJson = new AtomicReference<>();
+    RBucket<String> refreshBucket = mock(RBucket.class);
+    when(redisson.<String>getBucket(anyString())).thenReturn(refreshBucket);
+    when(refreshBucket.get()).thenAnswer(invocation -> storedJson.get());
+    doAnswer(invocation -> {
+      storedJson.set(invocation.getArgument(0));
+      return null;
+    }).when(refreshBucket).set(anyString(), any(Duration.class));
+
+    RefreshToken issued = service.issueRefreshToken(user);
+    String family = issued.tokenFamily();
+
+    AtomicReference<String> usedValue = new AtomicReference<>();
+    RBucket<String> usedBucket = mock(RBucket.class);
+    when(redisson.<String>getBucket("interview-pilot:used_refresh:" + family))
+        .thenReturn(usedBucket);
+    when(usedBucket.get()).thenAnswer(invocation -> usedValue.get());
+    doAnswer(invocation -> {
+      usedValue.set(invocation.getArgument(0));
+      return null;
+    }).when(usedBucket).set(anyString(), any(Duration.class));
+
+    UserAccountEntity account = mock(UserAccountEntity.class);
+    when(account.getId()).thenReturn(1L);
+    when(account.getUserId()).thenReturn(user.userId());
+    when(account.getEmail()).thenReturn(user.email());
+    when(account.getDisplayName()).thenReturn(user.displayName());
+    when(account.getStatus()).thenReturn(UserStatus.ACTIVE);
+    when(accountRepository.findByUserId(user.userId())).thenReturn(Optional.of(account));
+
+    TokenPair first = service.refresh(issued.value());
+    // 同一 token 在窗口内再次出现才算 replay(轮换后的新 token 不算)
+    usedValue.set(first.refreshToken().value());
+
+    assertThatThrownBy(() -> service.refresh(first.refreshToken().value()))
+        .isInstanceOf(JwtException.class)
+        .hasMessageContaining("replay");
+  }
+
+  @Test
   void refreshRejectsDisabledAccount() {
     AtomicReference<String> storedJson = new AtomicReference<>();
     RBucket<String> refreshBucket = mock(RBucket.class);

@@ -29,7 +29,12 @@ public record AiProviderProperties(
       String apiKey,
       String model,
       boolean enabled,
-      Duration timeout) {
+      Duration timeout,
+      Map<String, Object> extraBody) {
+
+    public Provider {
+      extraBody = extraBody == null ? Map.of() : Map.copyOf(extraBody);
+    }
 
     public boolean isComplete() {
       return hasText(displayName)

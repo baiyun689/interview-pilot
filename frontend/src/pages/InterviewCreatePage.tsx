@@ -74,7 +74,7 @@ export function InterviewCreatePage() {
   }
 
   return <section>
-    <header className="page-header"><p className="eyebrow">Adaptive interview</p><h1>开始一场面试</h1><p>基于求职方向和知识库创建自适应文字面试，也可选择简历以获得更个性化的体验。</p></header>
+    <header className="page-header"><h1>开始一场面试</h1><p>基于求职方向和知识库创建自适应文字面试，也可选择简历以获得更个性化的体验。</p></header>
     <form className="interview-form" onSubmit={submit}>
       <label>候选人简历（可选）<select value={values.resumeId} onChange={(e) => setValues({ ...values, resumeId: e.target.value })}><option value="">不使用简历，自由出题</option>{resumes.map((r) => <option key={r.id} value={r.id}>{r.originalFilename}</option>)}</select></label>
       {!resumesLoaded && <p className="empty-copy" role="status">正在加载简历…</p>}

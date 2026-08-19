@@ -138,7 +138,6 @@ export function ResumeListPage() {
   return (
     <section>
       <header className="page-header">
-        <p className="eyebrow">RESUME PROFILE</p>
         <h1>简历</h1>
         <p>上传一份简历，生成面试所需的结构化候选人画像。</p>
       </header>

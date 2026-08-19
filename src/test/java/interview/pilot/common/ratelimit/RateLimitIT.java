@@ -154,7 +154,7 @@ class RateLimitIT {
   private AiProviderProperties aiProperties(WireMockServer wireMock) {
     var provider = new AiProviderProperties.Provider(
         "Test", URI.create(wireMock.baseUrl()), "test-key", "test-model", true,
-        Duration.ofSeconds(1));
+        Duration.ofSeconds(1), Map.of());
     return new AiProviderProperties("test", Map.of("test", provider), 2);
   }
 

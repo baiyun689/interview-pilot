@@ -79,7 +79,7 @@ class LlmConcurrencyAdmissionTest {
   private AiProviderProperties providers(Duration timeout) {
     var provider = new AiProviderProperties.Provider(
         "Test", URI.create("https://example.invalid"), "key", "model", true,
-        timeout);
+        timeout, Map.of());
     return new AiProviderProperties("test", Map.of("test", provider), 2);
   }
 }

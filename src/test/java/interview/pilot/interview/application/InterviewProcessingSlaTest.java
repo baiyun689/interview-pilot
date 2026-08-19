@@ -14,7 +14,7 @@ class InterviewProcessingSlaTest {
   void coversTwoSequentialStructuredCallsAndKeepsSseBeyondProcessing() {
     var provider = new AiProviderProperties.Provider(
         "P", URI.create("https://example.invalid"), "key", "model", true,
-        Duration.ofSeconds(30));
+        Duration.ofSeconds(30), Map.of());
     var sla = new InterviewProcessingSla(
         new AiProviderProperties("p", Map.of("p", provider), 2),
         Duration.ofSeconds(15), Duration.ofSeconds(15));
@@ -28,7 +28,7 @@ class InterviewProcessingSlaTest {
   void ignoresDisabledProvidersAndRejectsUnsafeConfigurationAtConstruction() {
     var disabled = new AiProviderProperties.Provider(
         "P", URI.create("https://example.invalid"), "key", "model", false,
-        Duration.ofHours(10));
+        Duration.ofHours(10), Map.of());
     var safe = new InterviewProcessingSla(
         new AiProviderProperties("p", Map.of("p", disabled), 1),
         Duration.ofSeconds(15), Duration.ofSeconds(15));
@@ -43,7 +43,7 @@ class InterviewProcessingSlaTest {
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> new InterviewProcessingSla(
             new AiProviderProperties("p", Map.of("p", new AiProviderProperties.Provider(
                 "P", URI.create("https://example.invalid"), "key", "model", true,
-                Duration.ofHours(10))), 2), Duration.ZERO, Duration.ofSeconds(1)))
+                Duration.ofHours(10), Map.of())), 2), Duration.ZERO, Duration.ofSeconds(1)))
         .isInstanceOf(IllegalStateException.class)
         .hasMessage("Interview processing SLA is outside safe bounds");
   }

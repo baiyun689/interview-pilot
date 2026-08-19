@@ -55,6 +55,10 @@ public class ResumeEntity {
   @Column(name = "skills_snapshot", columnDefinition = "json")
   private String skillsSnapshot;
 
+  @JdbcTypeCode(SqlTypes.JSON)
+  @Column(name = "evaluation_snapshot", columnDefinition = "json")
+  private String evaluationSnapshot;
+
   @Enumerated(EnumType.STRING)
   @Column(nullable = false, length = 32)
   private ResumeStatus status;
