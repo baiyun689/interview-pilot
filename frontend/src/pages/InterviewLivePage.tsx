@@ -19,6 +19,7 @@ interface Progressive {
 
 export function InterviewLivePage() {
   const { sessionId = '' } = useParams()
+  const draftKey = `interview-answer-draft:${sessionId}`
   const owner = useRef(0)
   const streamController = useRef<AbortController | null>(null)
   const [session, setSession] = useState<InterviewSession>()
@@ -31,7 +32,7 @@ export function InterviewLivePage() {
 
   useEffect(() => {
     const id = ++owner.current, controller = new AbortController()
-    setSession(undefined); setLoadingError(undefined); setAnswer(''); setSubmitting(false); setProgressive({}); setStreamError(undefined); setRetryable(false)
+    setSession(undefined); setLoadingError(undefined); setAnswer(sessionStorage.getItem(draftKey) ?? ''); setSubmitting(false); setProgressive({}); setStreamError(undefined); setRetryable(false)
     getInterview(sessionId, controller.signal).then((value) => { if (owner.current === id) setSession(value) })
       .catch((error) => { if (owner.current === id && !(error instanceof DOMException && error.name === 'AbortError')) setLoadingError(error) })
     return () => { owner.current++; controller.abort(); streamController.current?.abort(); streamController.current = null }
@@ -79,11 +80,11 @@ export function InterviewLivePage() {
       if (owner.current !== id) return
       if (terminal) {
         const recovered = await refresh(id, controller.signal)
-        if (owner.current === id && persistedAttemptFinished(recovered)) setAnswer('')
+        if (owner.current === id && persistedAttemptFinished(recovered)) { setAnswer(''); sessionStorage.removeItem(draftKey) }
       }
       else {
         const recovered = await refresh(id, controller.signal)
-        if (owner.current === id && persistedAttemptFinished(recovered)) setAnswer('')
+        if (owner.current === id && persistedAttemptFinished(recovered)) { setAnswer(''); sessionStorage.removeItem(draftKey) }
         else if (owner.current === id) { setStreamError(new ApiClientError(0, 'STREAM_DISCONNECTED', '连接中断，已恢复最新面试状态', null)); setRetryable(true) }
       }
     } catch (error) {
@@ -91,7 +92,7 @@ export function InterviewLivePage() {
       try {
         const recovered = await refresh(id, controller.signal)
         const persisted = persistedAttemptFinished(recovered)
-        if (persisted && owner.current === id) setAnswer('')
+        if (persisted && owner.current === id) { setAnswer(''); sessionStorage.removeItem(draftKey) }
         if (!persisted && owner.current === id) {
           setStreamError(error)
           setRetryable(error instanceof ApiClientError && error.code === 'STREAM_DISCONNECTED')
@@ -104,7 +105,7 @@ export function InterviewLivePage() {
   if (!session) return <p className="page-status" role="status">正在加载面试…</p>
   const canAnswer = session.status === 'INTERVIEWING'
   return <section className="live-page">
-    <header className="interview-session-header"><div><p className="eyebrow">Live interview</p><h1>{session.jobTitle}</h1>{session.skillName && <p>面试方向：{session.skillName}</p>}<p>{providerSnapshot(session.providerId, session.modelName)}</p></div><span className="status-chip status-enabled">{sessionStatusLabel[session.status]}</span></header>
+    <header className="interview-session-header"><div><h1>{session.jobTitle}</h1>{session.skillName && <p>面试方向：{session.skillName}</p>}<p>{providerSnapshot(session.providerId, session.modelName)}</p></div><span className="status-chip status-enabled">{sessionStatusLabel[session.status]}</span></header>
     <p className="interview-progress">进度 {session.currentTurnNo} / {session.totalTurnBudget}</p>
     <div className="conversation" aria-label="面试对话">
       {session.turns.map((turn) => <article className="turn-card" key={turn.turnNo}>
@@ -120,7 +121,7 @@ export function InterviewLivePage() {
         {progressive.nextQuestion && <p><strong>下一题：</strong>{progressive.nextQuestion.question}<br /><span>{progressive.nextQuestion.targetCompetency} · {difficultyLabel[progressive.nextQuestion.difficulty]}</span></p>}
       </article>}
     </div>
-    {canAnswer ? <div className="answer-panel"><label>你的回答<textarea rows={7} maxLength={20_000} value={answer} disabled={submitting} onChange={(e) => setAnswer(e.target.value)} /></label><ErrorNotice error={streamError} /><button type="button" className="button button-primary" disabled={submitting || !answer.trim()} onClick={submitAttempt}>{submitting ? '处理中…' : retryable ? '重新提交' : '提交回答'}</button></div> : <div className="state-card"><p>面试已进入{sessionStatusLabel[session.status]}阶段。</p></div>}
+    {canAnswer ? <div className="answer-panel"><label>你的回答<textarea rows={7} maxLength={20_000} value={answer} disabled={submitting} onChange={(e) => { setAnswer(e.target.value); sessionStorage.setItem(draftKey, e.target.value) }} /></label><ErrorNotice error={streamError} /><button type="button" className="button button-primary" disabled={submitting || !answer.trim()} onClick={submitAttempt}>{submitting ? '处理中…' : retryable ? '重新提交' : '提交回答'}</button></div> : <div className="state-card"><p>面试已进入{sessionStatusLabel[session.status]}阶段。</p></div>}
     {(session.status === 'EVALUATING' || session.status === 'COMPLETED') && <Link className="button button-primary report-link" to={`/interviews/${session.sessionId}/report`}>查看能力报告</Link>}
   </section>
 }

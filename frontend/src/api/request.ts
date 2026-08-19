@@ -51,6 +51,7 @@ export interface ApiResponse<T> {
 const unauthorizedHandlers = new Set<() => void>()
 
 let accessToken: string | null = null
+let refreshInFlight: Promise<boolean> | null = null
 
 export function setAccessToken(token: string | null) {
   accessToken = token
@@ -73,10 +74,45 @@ export function authenticatedInit(init: RequestInit = {}): RequestInit {
   return { ...init, headers }
 }
 
-export async function requestWithMeta<T>(path: string, init?: RequestInit): Promise<ApiResponse<T>> {
+async function refreshAccessToken(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = fetch('/api/auth/refresh', { method: 'POST' })
+      .then(async (response) => {
+        if (!response.ok) return false
+        try {
+          const body = await response.json() as { accessToken?: unknown }
+          if (typeof body.accessToken !== 'string' || !body.accessToken) return false
+          setAccessToken(body.accessToken)
+          return true
+        } catch {
+          return false
+        }
+      })
+      .catch(() => false)
+      .finally(() => { refreshInFlight = null })
+  }
+  return refreshInFlight
+}
+
+export async function fetchWithAuthRetry(path: string, init?: RequestInit): Promise<Response> {
   let response: Response
   try {
     response = await fetch(path, authenticatedInit(init))
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    throw new ApiClientError(0, 'NETWORK_ERROR', '网络连接失败，请检查网络后重试', null)
+  }
+  if (response.status !== 401 || !(await refreshAccessToken())) {
+    if (response.status === 401) notifyUnauthorized()
+    return response
+  }
+  return fetch(path, authenticatedInit(init))
+}
+
+export async function requestWithMeta<T>(path: string, init?: RequestInit): Promise<ApiResponse<T>> {
+  let response: Response
+  try {
+    response = await fetchWithAuthRetry(path, init)
   } catch {
     throw new ApiClientError(0, 'NETWORK_ERROR', '网络连接失败，请检查网络后重试', null)
   }

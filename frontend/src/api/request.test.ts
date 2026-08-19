@@ -31,6 +31,25 @@ describe('request', () => {
     expect(new Headers(init?.headers).get('Authorization')).toBeNull()
   })
 
+  it('401 时刷新 accessToken 后重试原请求', async () => {
+    setAccessToken('expired-token')
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ accessToken: 'refreshed-token' }), {
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await request('/api/example')
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(new Headers(fetchMock.mock.calls[2][1]?.headers).get('Authorization'))
+      .toBe('Bearer refreshed-token')
+  })
+
   it('调用方已提供 Authorization 头时不覆盖', async () => {
     setAccessToken('module-level-token')
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
