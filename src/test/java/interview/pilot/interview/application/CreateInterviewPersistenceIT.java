@@ -33,6 +33,7 @@ import interview.pilot.interview.domain.InterviewPlan;
 import interview.pilot.interview.domain.JobRequirements;
 import interview.pilot.interview.domain.SessionStatus;
 import interview.pilot.interview.domain.TurnStatus;
+import interview.pilot.interview.skill.ClasspathInterviewSkillCatalog;
 import interview.pilot.interview.infrastructure.InterviewSessionRepository;
 import interview.pilot.interview.infrastructure.InterviewTurnRepository;
 import interview.pilot.interview.infrastructure.JobProfileRepository;
@@ -65,7 +66,6 @@ class CreateInterviewPersistenceIT {
   @MockitoBean private RedissonClient redissonClient;
   @MockitoBean private AiProviderService providers;
   @MockitoBean private JobProfileExtractor extractor;
-  @MockitoBean private InterviewPlanner planner;
   @MockitoBean private QuestionGenerator questions;
 
   @Autowired private CreateInterviewService service;
@@ -89,7 +89,9 @@ class CreateInterviewPersistenceIT {
     profile = new ResumeProfile(
         "Java engineer", List.of("Java"), List.of(), List.of("Reliable APIs"), List.of());
     requirements = new JobRequirements(List.of("Java", "Spring"), List.of("MySQL"));
-    plan = new InterviewPlan(List.of("Java", "Spring"), 8);
+    plan = new InterviewPlanCompiler().compile(
+        profile, requirements, Difficulty.MEDIUM, 8,
+        new ClasspathInterviewSkillCatalog().require("java-backend").snapshot());
     ResumeEntity resume = ResumeEntity.pending(1L,
         "candidate.txt", UUID.randomUUID().toString().replace("-", "")
             + UUID.randomUUID().toString().replace("-", ""),
@@ -205,13 +207,6 @@ class CreateInterviewPersistenceIT {
       assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
       return requirements;
     });
-    when(planner.plan(org.mockito.ArgumentMatchers.eq(providerId),
-        org.mockito.ArgumentMatchers.eq(profile), org.mockito.ArgumentMatchers.eq(requirements),
-        org.mockito.ArgumentMatchers.eq(Difficulty.MEDIUM), org.mockito.ArgumentMatchers.eq(8),
-        org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
-      assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
-      return plan;
-    });
     when(questions.firstQuestion(org.mockito.ArgumentMatchers.eq(providerId),
         org.mockito.ArgumentMatchers.eq(plan), org.mockito.ArgumentMatchers.eq(profile),
         org.mockito.ArgumentMatchers.eq(requirements), org.mockito.ArgumentMatchers.any(),
@@ -225,6 +220,6 @@ class CreateInterviewPersistenceIT {
   private CreateInterviewRequest request(String providerId) {
     return new CreateInterviewRequest(
         resumeId, "Backend Engineer", "Build reliable Java services",
-        Difficulty.MEDIUM, 8, providerId);
+        Difficulty.MEDIUM, 8, providerId, "java-backend");
   }
 }

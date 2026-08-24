@@ -209,7 +209,7 @@ evaluationSnapshot
 重放规则：
 
 - 相同 requestId 直接返回第一次持久化结果。
-- 不重新调用 Planner、Question Generator、Evaluator 或 RAG。
+- 不重新调用 Question Generator、Evaluator 或 RAG；运行时 Plan 只从持久化快照恢复。
 - 发生并发提交时只能产生一个后继 Directive。
 - 旧会话没有 Progress/Directive 时使用 legacy decoder。
 
@@ -217,7 +217,6 @@ evaluationSnapshot
 
 修改：
 
-- `src/main/resources/prompts/interview-plan-system.st`
 - `src/main/resources/prompts/question-system.st`
 - `src/main/java/interview/pilot/interview/skill/SkillSnapshot.java`
 - `src/main/java/interview/pilot/interview/skill/InterviewSkill.java`

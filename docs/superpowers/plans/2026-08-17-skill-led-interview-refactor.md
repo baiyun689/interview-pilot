@@ -202,8 +202,7 @@ competencies:
 - Modify: `src/main/java/interview/pilot/interview/domain/InterviewPlan.java`
 - Create: `src/main/java/interview/pilot/interview/application/InterviewPlanCompiler.java`
 - Create: `src/main/java/interview/pilot/interview/application/PlanCompilationRequest.java`
-- Modify: `src/main/java/interview/pilot/interview/application/AiInterviewPlanner.java`
-- Modify: `src/main/resources/prompts/interview-plan-system.st`
+- Modify: `src/main/java/interview/pilot/interview/application/InterviewPlanCompiler.java`
 - Modify: `src/main/java/interview/pilot/interview/application/CreateInterviewService.java`
 - Test: `src/test/java/interview/pilot/interview/application/CreateInterviewServiceTest.java`
 - Test: `src/test/java/interview/pilot/interview/application/AiInterviewComponentsTest.java`
@@ -212,7 +211,7 @@ competencies:
 
 - [ ] 引入 `InterviewExecutionPlan`，包含阶段、能力、轮次分配、证据目标、问题模式和 RAG 指令。
 - [ ] Java 先合并 Skill 能力池与 JD 必考项，建立硬约束。
-- [ ] AI 规划器改为输出 `PlanProposal`，只负责优先级、简历切入点和选择理由，不直接产出最终 Plan。
+- [x] 由确定性编译器直接根据 Skill、JD、简历和预算生成最终 Plan，不再设置独立的模型决策阶段。
 - [ ] 编译器校验总轮次、必考覆盖、能力合法性和每项能力至少一个证据目标。
 - [ ] 禁止“默认保留全部 defaultCompetencies”；轮次不足时按明确规则舍弃低优先级非必考项。
 - [ ] 为旧 `plan_snapshot` 增加 legacy decoder，使历史会话仍可查询和生成报告。

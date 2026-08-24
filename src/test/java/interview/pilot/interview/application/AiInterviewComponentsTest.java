@@ -174,24 +174,16 @@ class AiInterviewComponentsTest {
   }
 
   @Test
-  void plannerAndQuestionGeneratorKeepExplicitProviderAndGroundQuestionsInResumeEvidence() {
+  void questionGeneratorKeepsExplicitProviderAndGroundsQuestionsInResumeEvidence() {
     StructuredOutputInvoker invoker = mock(StructuredOutputInvoker.class);
     ResumeProfile resume = profile();
     JobRequirements job = new JobRequirements(List.of("Java"), List.of("MySQL"));
     InterviewPlan plan = new InterviewPlan(List.of("Java"), 8);
-    PlanProposal proposal = new PlanProposal(List.of(
-        new PlanProposal.Item("Java", 90, "payments project", "JD required")));
     GeneratedQuestionOutput question = new GeneratedQuestionOutput(
         "Explain your Java design.", "Java",
         interview.pilot.interview.domain.GroundingMode.SKILL_GENERAL, List.of());
-    when(invoker.invoke(org.mockito.ArgumentMatchers.any(), eq(PlanProposal.class))).thenReturn(proposal);
     when(invoker.invoke(org.mockito.ArgumentMatchers.any(), eq(GeneratedQuestionOutput.class)))
         .thenReturn(question);
-    var planner = new AiInterviewPlanner(
-        invoker,
-        new PromptJsonEncoder(new ObjectMapper()),
-        new ClassPathResource("prompts/interview-plan-system.st"),
-        new ClassPathResource("prompts/interview-plan-user.st"));
     var generator = new AiQuestionGenerator(
         invoker,
         new PromptJsonEncoder(new ObjectMapper()),
@@ -199,7 +191,6 @@ class AiInterviewComponentsTest {
         new ClassPathResource("prompts/first-question-user.st"),
         new ClassPathResource("prompts/next-question-user.st"));
 
-    assertThat(planner.plan("qwen", resume, job, Difficulty.HARD, 8)).isEqualTo(plan);
     var directive = new TurnDirective(
         "technical_depth", "Java", Difficulty.HARD, List.of("机制理解"),
         InterviewQuestionMode.MECHANISM, false, "PLAN_FIRST_TURN");
@@ -208,22 +199,16 @@ class AiInterviewComponentsTest {
         .isEqualTo(question.toDomain());
 
     ArgumentCaptor<AiRequest> requests = ArgumentCaptor.forClass(AiRequest.class);
-    verify(invoker, org.mockito.Mockito.times(2)).invoke(requests.capture(), org.mockito.ArgumentMatchers.any());
-    assertThat(requests.getAllValues().get(0).systemPrompt())
-        .contains("\"items\"")
-        .contains("\"priorityScore\"")
-        .contains("\"resumeEntryPoint\"");
-    assertThat(requests.getAllValues().get(1).userPrompt())
+    verify(invoker).invoke(requests.capture(), org.mockito.ArgumentMatchers.any());
+    assertThat(requests.getValue().userPrompt())
         .contains("\"turnDirective\"")
         .contains("\"evidenceTargets\":[\"机制理解\"]")
         .contains("\"questionMode\":\"MECHANISM\"");
-    assertThat(requests.getAllValues()).allSatisfy(request -> {
-      assertThat(request.providerId()).isEqualTo("qwen");
-      assertThat(request.systemPrompt())
-          .contains("不可信")
-          .contains("不得")
-          .containsIgnoringCase("JSON");
-    });
+    assertThat(requests.getValue().providerId()).isEqualTo("qwen");
+    assertThat(requests.getValue().systemPrompt())
+        .contains("不可信")
+        .contains("不得")
+        .containsIgnoringCase("JSON");
   }
 
   private static ResumeProfile profile() {

@@ -41,7 +41,7 @@ public class CreateInterviewService {
   private final ResumeRepository resumes;
   private final AiProviderService providers;
   private final JobProfileExtractor extractor;
-  private final InterviewPlanner planner;
+  private final InterviewPlanCompiler planCompiler;
   private final QuestionGenerator questions;
   private final InterviewCreationStore store;
   private final ObjectMapper objectMapper;
@@ -57,7 +57,7 @@ public class CreateInterviewService {
       ResumeRepository resumes,
       AiProviderService providers,
       JobProfileExtractor extractor,
-      InterviewPlanner planner,
+      InterviewPlanCompiler planCompiler,
       QuestionGenerator questions,
       InterviewCreationStore store,
       ObjectMapper objectMapper,
@@ -69,7 +69,7 @@ public class CreateInterviewService {
     this.resumes = resumes;
     this.providers = providers;
     this.extractor = extractor;
-    this.planner = planner;
+    this.planCompiler = planCompiler;
     this.questions = questions;
     this.store = store;
     this.objectMapper = objectMapper;
@@ -127,23 +127,8 @@ public class CreateInterviewService {
       log.warn("createInterview failed: AI job-profile extractor returned null for skill={}", request.skillId());
       throw invalidAiOutput();
     }
-    InterviewPlan plan = planner.plan(
-        providerId, profile, requirements, request.difficulty(), request.totalTurnBudget(),
-        skill.snapshot());
-    if (plan == null) {
-      log.warn("createInterview failed: AI planner returned null plan for skill={}", request.skillId());
-      throw invalidAiOutput();
-    }
-    if (plan.totalTurnBudget() != request.totalTurnBudget()) {
-      log.warn("createInterview failed: AI planner budget mismatch expected={} actual={}",
-          request.totalTurnBudget(), plan.totalTurnBudget());
-      throw invalidAiOutput();
-    }
-    if (!containsAllCompetencies(plan.competencies(), requirements.competencies())) {
-      log.warn("createInterview failed: AI planner competencies {} don't cover required {}",
-          plan.competencies(), requirements.competencies());
-      throw invalidAiOutput();
-    }
+    InterviewPlan plan = planCompiler.compile(
+        profile, requirements, request.difficulty(), request.totalTurnBudget(), skill.snapshot());
     log.info("createInterview plan competencies={} budget={}", plan.competencies(), plan.totalTurnBudget());
 
     ValidatedKnowledgeScope scope = null;
@@ -214,12 +199,6 @@ public class CreateInterviewService {
 
   private String normalize(String value) {
     return value == null ? "" : value.trim();
-  }
-
-  private boolean containsAllCompetencies(
-      java.util.List<String> allowed, java.util.List<String> required) {
-    return required.stream().allMatch(item -> allowed.stream()
-        .anyMatch(candidate -> candidate.equalsIgnoreCase(item)));
   }
 
   private static Long requireOwner(CurrentUser user) {

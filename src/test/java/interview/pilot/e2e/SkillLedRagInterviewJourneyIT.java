@@ -27,13 +27,11 @@ import org.testcontainers.utility.DockerImageName;
 
 import interview.pilot.interview.application.AnswerGroundingValidator;
 import interview.pilot.interview.application.InterviewPlanCompiler;
-import interview.pilot.interview.application.PlanProposal;
 import interview.pilot.interview.application.QuestionGroundingValidator;
 import interview.pilot.interview.application.CreateInterviewService;
 import interview.pilot.interview.application.SubmitAnswerService;
 import interview.pilot.interview.application.InterviewReportHandler;
 import interview.pilot.interview.application.JobProfileExtractor;
-import interview.pilot.interview.application.InterviewPlanner;
 import interview.pilot.interview.application.QuestionGenerator;
 import interview.pilot.interview.application.AnswerEvaluator;
 import interview.pilot.interview.application.ReportGenerator;
@@ -136,8 +134,6 @@ class SkillLedRagInterviewJourneyIT {
   void skillPlanStrategyGroundingQuestionEvaluationAndNextTurnRemainTraceable() {
     var skill = new ClasspathInterviewSkillCatalog().require("java-backend").snapshot();
     var plan = new InterviewPlanCompiler().compile(
-        new PlanProposal(List.of(new PlanProposal.Item(
-            "Spring 与事务", 95, "", "JD 核心能力"))),
         ResumeProfile.empty(), new JobRequirements(List.of("Spring 与事务"), List.of()),
         Difficulty.MEDIUM, 5, skill);
     var strategy = new DefaultInterviewStrategy();
@@ -192,7 +188,6 @@ class SkillLedRagInterviewJourneyIT {
         KnowledgeProperties.testDefaults(4, 12, 0.72, 2_000));
     var skill = new ClasspathInterviewSkillCatalog().require("java-backend").snapshot();
     var plan = new InterviewPlanCompiler().compile(
-        new PlanProposal(List.of(new PlanProposal.Item("Spring 与事务", 90, "", "核心"))),
         ResumeProfile.empty(), new JobRequirements(List.of("Spring 与事务"), List.of()),
         Difficulty.MEDIUM, 5, skill);
     var directive = new DefaultInterviewStrategy().firstTurn(plan, Difficulty.MEDIUM);
@@ -259,28 +254,6 @@ class SkillLedRagInterviewJourneyIT {
     @Bean @Primary
     JobProfileExtractor deterministicJobProfileExtractor() {
       return (provider, jd) -> new JobRequirements(List.of("Spring 与事务"), List.of());
-    }
-
-    @Bean @Primary
-    InterviewPlanner deterministicPlanner(InterviewPlanCompiler compiler) {
-      return new InterviewPlanner() {
-        @Override
-        public interview.pilot.interview.domain.InterviewPlan plan(
-            String providerId, ResumeProfile resume, JobRequirements job,
-            Difficulty difficulty, int turns) {
-          throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public interview.pilot.interview.domain.InterviewPlan plan(
-            String providerId, ResumeProfile resume, JobRequirements job,
-            Difficulty difficulty, int turns,
-            interview.pilot.interview.skill.SkillSnapshot skill) {
-          return compiler.compile(new PlanProposal(List.of(
-              new PlanProposal.Item("Spring 与事务", 100, "", "JD 核心能力"))),
-              resume, job, difficulty, turns, skill);
-        }
-      };
     }
 
     @Bean @Primary

@@ -22,31 +22,17 @@ import interview.pilot.interview.skill.InterviewQuestionMode;
 import interview.pilot.interview.skill.SkillSnapshot;
 import interview.pilot.resume.domain.ResumeProfile;
 
-/** Compiles model suggestions and hard interview constraints into an executable plan. */
+/** Compiles Skill, JD, resume evidence and hard interview constraints into an executable plan. */
 @Component
 public final class InterviewPlanCompiler {
 
   public InterviewPlan compile(
-      InterviewPlan proposal,
       ResumeProfile resume,
       JobRequirements job,
       Difficulty difficulty,
       int totalTurnBudget,
       SkillSnapshot skill) {
-    PlanProposal adapted = new PlanProposal(proposal.competencies().stream()
-        .map(value -> new PlanProposal.Item(value, 50, "", "旧规划器建议"))
-        .toList());
-    return compile(adapted, resume, job, difficulty, totalTurnBudget, skill);
-  }
-
-  public InterviewPlan compile(
-      PlanProposal proposal,
-      ResumeProfile resume,
-      JobRequirements job,
-      Difficulty difficulty,
-      int totalTurnBudget,
-      SkillSnapshot skill) {
-    if (skill == null) return new InterviewPlan(proposal.competencies(), totalTurnBudget);
+    if (skill == null) throw new IllegalArgumentException("skill must not be null");
     if (job.competencies().size() > totalTurnBudget) {
       throw new IllegalArgumentException(
           "turn budget cannot cover every required competency");
@@ -58,16 +44,14 @@ public final class InterviewPlanCompiler {
     for (String required : job.competencies()) {
       requiredKeys.add(key(required));
       CompetencySpec spec = bestSpec(required, skill.competencySpecs());
-      PlanProposal.Item proposed = proposal == null ? null : proposal.itemFor(required);
       add(selected, candidate(required, spec, PlanPriority.REQUIRED,
           10_000, "JD 明确要求的必考能力",
-          validatedEntryPoint(proposed, resumeTerms)));
+          resumeEntryPoint(spec, resume)));
     }
 
     int targetCount = Math.max(requiredKeys.size(), Math.max(2, totalTurnBudget / 2));
     targetCount = Math.min(totalTurnBudget, targetCount);
 
-    List<String> proposalOrder = proposal == null ? List.of() : proposal.competencies();
     List<Candidate> optional = new ArrayList<>();
     for (int index = 0; index < skill.competencySpecs().size(); index++) {
       CompetencySpec spec = skill.competencySpecs().get(index);
@@ -75,20 +59,17 @@ public final class InterviewPlanCompiler {
           same(value.spec().id(), spec.id()) || related(value.name(), spec.name()))) continue;
       int resumeScore = relevance(spec, resumeTerms);
       int jobScore = relevance(spec, job.preferredSkills());
-      int proposalScore = proposalPosition(spec, proposalOrder);
-      PlanProposal.Item proposed = proposal == null ? null : proposal.itemFor(spec.name());
-      int score = resumeScore * 100 + jobScore * 50 + proposalScore * 10
-          + (proposed == null ? 0 : proposed.priorityScore())
+      int score = resumeScore * 100 + jobScore * 50
           + (skill.competencySpecs().size() - index);
       PlanPriority priority = resumeScore > 0
           ? PlanPriority.RESUME_RELEVANT : PlanPriority.SKILL_BASELINE;
       String rationale = resumeScore > 0
           ? "候选人简历存在相关技术或项目证据"
           : jobScore > 0 ? "JD 加分项与该能力相关"
-              : proposed != null ? proposed.rationale() : "Skill 基线能力补充";
+              : "Skill 基线能力补充";
       optional.add(candidate(
           spec.name(), spec, priority, score, rationale,
-          validatedEntryPoint(proposed, resumeTerms)));
+          resumeEntryPoint(spec, resume)));
     }
     optional.sort(Comparator.comparingInt(Candidate::score).reversed());
 
@@ -174,17 +155,21 @@ public final class InterviewPlanCompiler {
     return score;
   }
 
-  private int proposalPosition(CompetencySpec spec, List<String> proposal) {
-    for (int index = 0; index < proposal.size(); index++) {
-      if (related(spec.name(), proposal.get(index))) return proposal.size() - index;
+  private String resumeEntryPoint(CompetencySpec spec, ResumeProfile resume) {
+    if (spec == null) {
+      return "";
     }
-    return 0;
-  }
-
-  private String validatedEntryPoint(PlanProposal.Item proposed, List<String> resumeTerms) {
-    if (proposed == null || proposed.resumeEntryPoint().isBlank()) return "";
-    return resumeTerms.stream()
-        .filter(term -> related(proposed.resumeEntryPoint(), term))
+    return resume.projects().stream()
+        .filter(project -> {
+          List<String> terms = new ArrayList<>();
+          terms.add(project.name());
+          terms.add(project.description());
+          terms.addAll(project.technologies());
+          return terms.stream().anyMatch(term -> related(spec.name(), term)
+              || related(spec.objective(), term)
+              || spec.requiredEvidence().stream().anyMatch(evidence -> related(evidence, term)));
+        })
+        .map(ResumeProfile.ProjectEvidence::name)
         .findFirst()
         .orElse("");
   }

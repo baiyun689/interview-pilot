@@ -54,7 +54,6 @@ import interview.pilot.interview.api.SubmitAnswerRequest;
 import interview.pilot.interview.application.CreateInterviewService;
 import interview.pilot.interview.application.InterviewQueryService;
 import interview.pilot.interview.application.InterviewReportHandler;
-import interview.pilot.interview.application.PlanProposal;
 import interview.pilot.interview.application.GeneratedQuestionOutput;
 import interview.pilot.interview.application.AnswerEvaluationOutput;
 import interview.pilot.interview.application.SubmitAnswerService;
@@ -236,7 +235,6 @@ class InterviewJourneyIT {
 
     verifyPromptContract(ResumeAnalysisResult.class, "严谨的中文简历分析师", 1);
     verifyPromptContract(JobRequirements.class, "资深招聘需求分析师", 1);
-    verifyPromptContract(PlanProposal.class, "资深技术面试负责人", 1);
     verifyPromptContract(GeneratedQuestionOutput.class, "中文技术面试官", 3);
     verifyPromptContract(AnswerEvaluationOutput.class, "中文技术面试评审官", 3);
     verifyPromptContract(InterviewReport.class, "资深面试委员会评审", 1);
@@ -248,8 +246,6 @@ class InterviewJourneyIT {
             "{\"profile\":{\"summary\":\"Java backend engineer\",\"technicalSkills\":[\"Java\",\"Spring Boot\",\"Redis\"],\"projects\":[{\"name\":\"InterviewPilot\",\"description\":\"Reliable adaptive interviews\",\"technologies\":[\"Spring Boot\"]}],\"strengths\":[\"Idempotency\"],\"risks\":[\"Scale not measured\"]},\"evaluation\":{\"overallScore\":78,\"scoreDetail\":{\"projectScore\":30,\"skillMatchScore\":14,\"contentScore\":12,\"structureScore\":13,\"expressionScore\":9},\"suggestions\":[]}}"),
         new Fixture(JobRequirements.class, "资深招聘需求分析师",
             "{\"competencies\":[\"Java\",\"System Design\",\"Observability\"],\"preferredSkills\":[\"Redis\"]}"),
-        new Fixture(PlanProposal.class, "资深技术面试负责人",
-            "{\"items\":[{\"competency\":\"Java\",\"priorityScore\":95,\"resumeEntryPoint\":\"InterviewPilot\",\"rationale\":\"JD required\"},{\"competency\":\"System Design\",\"priorityScore\":90,\"resumeEntryPoint\":\"Reliable adaptive interviews\",\"rationale\":\"JD required\"},{\"competency\":\"Observability\",\"priorityScore\":85,\"resumeEntryPoint\":\"\",\"rationale\":\"JD required\"}]}"),
         new Fixture(GeneratedQuestionOutput.class, "中文技术面试官",
             question("How do you make answer submission idempotent?", "Java")),
         new Fixture(AnswerEvaluationOutput.class, "中文技术面试评审官",

@@ -46,7 +46,6 @@ class CreateInterviewServiceTest {
     ResumeRepository resumes = mock(ResumeRepository.class);
     AiProviderService providers = mock(AiProviderService.class);
     JobProfileExtractor extractor = mock(JobProfileExtractor.class);
-    InterviewPlanner planner = mock(InterviewPlanner.class);
     QuestionGenerator questions = mock(QuestionGenerator.class);
     InterviewCreationStore store = mock(InterviewCreationStore.class);
     ObjectMapper objectMapper = new ObjectMapper();
@@ -54,15 +53,15 @@ class CreateInterviewServiceTest {
     ResumeEntity resume = readyResume();
     ResumeProfile profile = profile();
     JobRequirements job = new JobRequirements(List.of("Java", "Spring"), List.of("MySQL"));
-    InterviewPlan plan = new InterviewPlan(List.of("Java", "Spring"), 8);
+    InterviewPlanCompiler planCompiler = new InterviewPlanCompiler();
+    InterviewPlan plan = planCompiler.compile(profile, job, Difficulty.MEDIUM, 8,
+        new ClasspathInterviewSkillCatalog().require("java-backend").snapshot());
     GeneratedQuestion first = new GeneratedQuestion("Explain optimistic locking.", "Java");
 
     when(resumes.findByIdAndUserAccountId(7L, 1L)).thenReturn(java.util.Optional.of(resume));
     when(providers.resolveEnabled("deepseek"))
         .thenReturn(new AiProviderDescriptor("deepseek", "DeepSeek", "deepseek-chat", true, false));
     when(extractor.extract(eq("deepseek"), eq("Build reliable Java services"), any())).thenReturn(job);
-    when(planner.plan(eq("deepseek"), eq(profile), eq(job), eq(Difficulty.MEDIUM), eq(8), any()))
-        .thenReturn(plan);
     when(questions.firstQuestion(eq("deepseek"), eq(plan), eq(profile), eq(job), any(), any(), any()))
         .thenReturn(first);
     when(validator.validate(any(ResumeProfile.class))).thenReturn(Set.of());
@@ -71,7 +70,7 @@ class CreateInterviewServiceTest {
     var scopeResolver = mock(interview.pilot.knowledge.retrieval.KnowledgeScopeResolver.class);
     var retriever = disabledGrounding();
     CreateInterviewService service = new CreateInterviewService(
-        resumes, providers, extractor, planner, questions, store, objectMapper, validator,
+        resumes, providers, extractor, planCompiler, questions, store, objectMapper, validator,
         new ClasspathInterviewSkillCatalog(), scopeResolver, retriever,
         mock(interview.pilot.common.observability.AiMetrics.class));
 
@@ -84,7 +83,6 @@ class CreateInterviewServiceTest {
     assertThat(result.jobTitle()).isEqualTo("Backend Engineer");
     verify(providers).resolveEnabled("deepseek");
     verify(extractor).extract(eq("deepseek"), eq("Build reliable Java services"), any());
-    verify(planner).plan(eq("deepseek"), eq(profile), eq(job), eq(Difficulty.MEDIUM), eq(8), any());
     verify(questions).firstQuestion(eq("deepseek"), eq(plan), eq(profile), eq(job), any(), any(), any());
     verify(store).create(org.mockito.ArgumentMatchers.argThat(creation ->
         creation.skillSnapshot().id().equals("java-backend")
@@ -96,7 +94,6 @@ class CreateInterviewServiceTest {
     ResumeRepository resumes = mock(ResumeRepository.class);
     AiProviderService providers = mock(AiProviderService.class);
     JobProfileExtractor extractor = mock(JobProfileExtractor.class);
-    InterviewPlanner planner = mock(InterviewPlanner.class);
     QuestionGenerator questions = mock(QuestionGenerator.class);
     InterviewCreationStore store = mock(InterviewCreationStore.class);
     ObjectMapper objectMapper = new ObjectMapper();
@@ -107,7 +104,7 @@ class CreateInterviewServiceTest {
     var scopeResolver = mock(interview.pilot.knowledge.retrieval.KnowledgeScopeResolver.class);
     var retriever = disabledGrounding();
     CreateInterviewService service = new CreateInterviewService(
-        resumes, providers, extractor, planner, questions, store, objectMapper, validator,
+        resumes, providers, extractor, new InterviewPlanCompiler(), questions, store, objectMapper, validator,
         new ClasspathInterviewSkillCatalog(), scopeResolver, retriever,
         mock(interview.pilot.common.observability.AiMetrics.class));
 
@@ -119,74 +116,6 @@ class CreateInterviewServiceTest {
         });
     verify(providers, never()).resolveEnabled(any());
     verify(extractor, never()).extract(any(), any());
-  }
-
-  @Test
-  void rejectsPlanThatChangesTheRequestedBudgetBeforePersistence() {
-    ResumeRepository resumes = mock(ResumeRepository.class);
-    AiProviderService providers = mock(AiProviderService.class);
-    JobProfileExtractor extractor = mock(JobProfileExtractor.class);
-    InterviewPlanner planner = mock(InterviewPlanner.class);
-    QuestionGenerator questions = mock(QuestionGenerator.class);
-    InterviewCreationStore store = mock(InterviewCreationStore.class);
-    Validator validator = mock(Validator.class);
-    JobRequirements job = new JobRequirements(List.of("Java"), List.of());
-    when(resumes.findByIdAndUserAccountId(7L, 1L))
-        .thenReturn(java.util.Optional.of(readyResume()));
-    when(validator.validate(any(ResumeProfile.class))).thenReturn(Set.of());
-    when(providers.resolveEnabled(null)).thenReturn(
-        new AiProviderDescriptor("qwen", "Qwen", "qwen-plus", true, true));
-    when(extractor.extract(eq("qwen"), eq("Build reliable Java services"), any())).thenReturn(job);
-    when(planner.plan(eq("qwen"), eq(profile()), eq(job), eq(Difficulty.MEDIUM), eq(8), any()))
-        .thenReturn(new InterviewPlan(List.of("Java"), 9));
-    var scopeResolver = mock(interview.pilot.knowledge.retrieval.KnowledgeScopeResolver.class);
-    var retriever = disabledGrounding();
-    var service = new CreateInterviewService(
-        resumes, providers, extractor, planner, questions, store, new ObjectMapper(), validator,
-        new ClasspathInterviewSkillCatalog(), scopeResolver, retriever,
-        mock(interview.pilot.common.observability.AiMetrics.class));
-
-    assertThatThrownBy(() -> service.create(LEGACY_USER,new CreateInterviewRequest(
-        7L, "Backend Engineer", "Build reliable Java services", Difficulty.MEDIUM, 8, null)))
-        .isInstanceOfSatisfying(BusinessException.class, exception -> {
-          assertThat(exception.status()).isEqualTo(HttpStatus.BAD_GATEWAY);
-          assertThat(exception.code()).isEqualTo("INVALID_AI_OUTPUT");
-        });
-    verify(store, never()).create(any());
-    verify(questions, never()).firstQuestion(any(), any(), any(), any());
-  }
-
-  @Test
-  void rejectsPlanThatOmitsARequiredJobCompetencyBeforeQuestionOrPersistence() {
-    ResumeRepository resumes = mock(ResumeRepository.class);
-    AiProviderService providers = mock(AiProviderService.class);
-    JobProfileExtractor extractor = mock(JobProfileExtractor.class);
-    InterviewPlanner planner = mock(InterviewPlanner.class);
-    QuestionGenerator questions = mock(QuestionGenerator.class);
-    InterviewCreationStore store = mock(InterviewCreationStore.class);
-    Validator validator = mock(Validator.class);
-    var scopeResolver = mock(interview.pilot.knowledge.retrieval.KnowledgeScopeResolver.class);
-    var retriever = disabledGrounding();
-    JobRequirements job = new JobRequirements(List.of("Java", "Spring"), List.of());
-    when(resumes.findByIdAndUserAccountId(7L, 1L))
-        .thenReturn(java.util.Optional.of(readyResume()));
-    when(validator.validate(any(ResumeProfile.class))).thenReturn(Set.of());
-    when(providers.resolveEnabled(null)).thenReturn(
-        new AiProviderDescriptor("qwen", "Qwen", "qwen-plus", true, true));
-    when(extractor.extract(eq("qwen"), eq("Build reliable Java services"), any())).thenReturn(job);
-    when(planner.plan(eq("qwen"), eq(profile()), eq(job), eq(Difficulty.MEDIUM), eq(8), any()))
-        .thenReturn(new InterviewPlan(List.of("Java"), 8));
-    var service = new CreateInterviewService(
-        resumes, providers, extractor, planner, questions, store, new ObjectMapper(), validator,
-        new ClasspathInterviewSkillCatalog(), scopeResolver, retriever,
-        mock(interview.pilot.common.observability.AiMetrics.class));
-
-    assertThatThrownBy(() -> service.create(LEGACY_USER,new CreateInterviewRequest(
-        7L, "Backend Engineer", "Build reliable Java services", Difficulty.MEDIUM, 8, null)))
-        .isInstanceOfSatisfying(BusinessException.class, exception ->
-            assertThat(exception.code()).isEqualTo("INVALID_AI_OUTPUT"));
-    verify(questions, never()).firstQuestion(any(), any(), any(), any());
-    verify(store, never()).create(any());
   }
 
   private static ResumeEntity readyResume() {
