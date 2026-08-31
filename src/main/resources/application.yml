@@ -96,3 +96,11 @@ app:
       api-key: ${DASHSCOPE_EMBEDDING_API_KEY:}
       model: ${DASHSCOPE_EMBEDDING_MODEL:text-embedding-v3}
       dimensions: 1024
+  voice:
+    enabled: ${VOICE_INTERVIEW_ENABLED:false}
+    qwen:
+      api-key: ${DASHSCOPE_API_KEY:}
+      asr-model: ${VOICE_ASR_MODEL:qwen3-asr-flash-realtime}
+      asr-url: ${VOICE_ASR_URL:wss://dashscope.aliyuncs.com/api-ws/v1/realtime}
+      tts-model: ${VOICE_TTS_MODEL:qwen-tts-realtime}
+      voice: ${VOICE_TTS_VOICE:Cherry}

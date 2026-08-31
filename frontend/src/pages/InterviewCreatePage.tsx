@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { createInterview, listInterviewSkills } from '../api/interviews'
+import { createInterview, listInterviewPresets } from '../api/interviews'
 import { listKnowledgeBases } from '../api/knowledgeBases'
 import { listProviders } from '../api/providers'
 import { listResumes } from '../api/resumes'
 import { ErrorNotice } from '../components/InterviewUi'
 import type { AiProvider } from '../types/provider'
 import type { ResumeDetail } from '../types/resume'
-import type { Difficulty, InterviewSkill } from '../types/interview'
+import type { Difficulty, InterviewPreset } from '../types/interview'
 import type { KnowledgeBase } from '../types/knowledge'
 
 export function InterviewCreatePage() {
@@ -16,7 +16,7 @@ export function InterviewCreatePage() {
   const submitController = useRef<AbortController | null>(null)
   const [resumes, setResumes] = useState<ResumeDetail[]>([])
   const [providers, setProviders] = useState<AiProvider[]>([])
-  const [skills, setSkills] = useState<InterviewSkill[]>([])
+  const [presets, setPresets] = useState<InterviewPreset[]>([])
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([])
   const [selectedKbIds, setSelectedKbIds] = useState<string[]>([])
   const [resumesLoaded, setResumesLoaded] = useState(false)
@@ -37,7 +37,9 @@ export function InterviewCreatePage() {
     listProviders(controller.signal).then((rows) => { if (owner.current === id) setProviders(rows.filter((row) => row.enabled)) })
       .catch((error) => { if (owner.current === id) setProviderError(error) })
       .finally(() => { if (owner.current === id) setProvidersLoaded(true) })
-    listInterviewSkills(controller.signal).then((rows) => { if (owner.current === id) setSkills(rows) })
+    listInterviewPresets(controller.signal).then((rows) => {
+      if (owner.current === id) setPresets(rows.filter((row) => row.id !== 'custom'))
+    })
       .catch((error) => { if (owner.current === id) setSkillError(error) })
     listKnowledgeBases(controller.signal).then((rows) => {
       if (owner.current === id) setKnowledgeBases(rows.filter((kb) => kb.readyDocumentCount > 0))
@@ -81,15 +83,14 @@ export function InterviewCreatePage() {
       <ErrorNotice error={resumeError} />
       <label>面试方向<select value={values.skillId} onChange={(e) => {
         const skillId = e.target.value
-        const selected = skills.find((skill) => skill.id === skillId)
-        setValues({ ...values, skillId, jobTitle: selected && selected.group !== 'CUSTOM' ? selected.displayName : '' })
+        const selected = presets.find((preset) => preset.id === skillId)
+        setValues({ ...values, skillId, jobTitle: selected?.displayName ?? '' })
       }} required><option value="">请选择</option>
-        <optgroup label="固定岗位">{skills.filter((s) => s.group === 'JOB').map((s) => <option key={s.id} value={s.id}>{s.displayName}</option>)}</optgroup>
-        <optgroup label="专项面试">{skills.filter((s) => s.group === 'SPECIALTY').map((s) => <option key={s.id} value={s.id}>{s.displayName}</option>)}</optgroup>
-        {skills.filter((s) => s.group === 'CUSTOM').map((s) => <option key={s.id} value={s.id}>{s.displayName}</option>)}
+        <optgroup label="固定岗位">{presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.displayName}</option>)}</optgroup>
+        <option value="custom">自定义岗位</option>
       </select></label>
       <ErrorNotice error={skillError} />
-      {values.skillId && <p className="empty-copy">{skills.find((s) => s.id === values.skillId)?.description}</p>}
+      {values.skillId && values.skillId !== 'custom' && <p className="empty-copy">{presets.find((preset) => preset.id === values.skillId)?.description}</p>}
       <label>岗位名称<input value={values.jobTitle} maxLength={200} onChange={(e) => setValues({ ...values, jobTitle: e.target.value })} required /></label>
       <label>岗位描述{values.skillId !== 'custom' && '（可选补充）'}<textarea value={values.jdText} maxLength={20_000} rows={8} onChange={(e) => setValues({ ...values, jdText: e.target.value })} required={values.skillId === 'custom'} /></label>
       <div className="form-row"><label>难度<select value={values.difficulty} onChange={(e) => setValues({ ...values, difficulty: e.target.value as Difficulty })}><option value="EASY">简单</option><option value="MEDIUM">中等</option><option value="HARD">困难</option></select></label>

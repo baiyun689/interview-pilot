@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ApiClientError } from '../api/request'
 import { getInterview } from '../api/interviews'
+import { VoiceInterviewPanel } from '../components/VoiceInterviewPanel'
 import { postInterviewAnswerStream } from '../api/interviewStream'
 import { adjustmentLabel, difficultyLabel, ErrorNotice, nextStepLabel, providerSnapshot, sessionStatusLabel } from '../components/InterviewUi'
 import type { InterviewDecision, InterviewSession, InterviewStreamEvent } from '../types/interview'
@@ -107,6 +108,7 @@ export function InterviewLivePage() {
   return <section className="live-page">
     <header className="interview-session-header"><div><h1>{session.jobTitle}</h1>{session.skillName && <p>面试方向：{session.skillName}</p>}<p>{providerSnapshot(session.providerId, session.modelName)}</p></div><span className="status-chip status-enabled">{sessionStatusLabel[session.status]}</span></header>
     <p className="interview-progress">进度 {session.currentTurnNo} / {session.totalTurnBudget}</p>
+    {canAnswer && <VoiceInterviewPanel sessionId={session.sessionId} onTurnCompleted={() => refresh(owner.current)} />}
     <div className="conversation" aria-label="面试对话">
       {session.turns.map((turn) => <article className="turn-card" key={turn.turnNo}>
         <div className="message interviewer"><strong>面试官 · {turn.targetCompetency}</strong><p>{turn.question}</p></div>

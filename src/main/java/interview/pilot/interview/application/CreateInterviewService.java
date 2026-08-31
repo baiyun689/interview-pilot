@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import interview.pilot.ai.provider.AiProviderDescriptor;
 import interview.pilot.ai.provider.AiProviderService;
@@ -15,12 +16,15 @@ import interview.pilot.interview.api.InterviewSessionResponse;
 import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.domain.GeneratedQuestion;
 import interview.pilot.interview.domain.InterviewPlan;
+import interview.pilot.interview.domain.QuestionDeck;
 import interview.pilot.interview.rag.RagContextSnapshot;
 import interview.pilot.interview.grounding.GroundingDirective;
 import interview.pilot.interview.grounding.KnowledgeGrounding;
 import interview.pilot.interview.grounding.GroundingUsePolicy;
 import interview.pilot.interview.skill.InterviewSkillCatalog;
 import interview.pilot.interview.skill.SkillGroup;
+import interview.pilot.interview.preset.ClasspathInterviewPresetCatalog;
+import interview.pilot.interview.preset.InterviewPresetCatalog;
 import interview.pilot.knowledge.retrieval.KnowledgeScopeResolver;
 import interview.pilot.knowledge.retrieval.ValidatedKnowledgeScope;
 import interview.pilot.resume.domain.ResumeProfile;
@@ -42,6 +46,7 @@ public class CreateInterviewService {
   private final AiProviderService providers;
   private final JobProfileExtractor extractor;
   private final InterviewPlanCompiler planCompiler;
+  private final FixedInterviewPlanCompiler fixedPlanCompiler;
   private final QuestionGenerator questions;
   private final InterviewCreationStore store;
   private final ObjectMapper objectMapper;
@@ -50,8 +55,62 @@ public class CreateInterviewService {
   private final KnowledgeScopeResolver scopeResolver;
   private final KnowledgeGrounding grounding;
   private final AiMetrics metrics;
+  private final InterviewPresetCatalog presets;
+  private final boolean fixedFlow;
   private final InterviewStrategy strategy = new DefaultInterviewStrategy();
   private final QuestionGroundingValidator questionGrounding = new QuestionGroundingValidator();
+
+  @Autowired
+  public CreateInterviewService(
+      ResumeRepository resumes,
+      AiProviderService providers,
+      JobProfileExtractor extractor,
+      InterviewPlanCompiler planCompiler,
+      QuestionGenerator questions,
+      InterviewCreationStore store,
+      ObjectMapper objectMapper,
+      Validator validator,
+      InterviewSkillCatalog skills,
+      KnowledgeScopeResolver scopeResolver,
+      KnowledgeGrounding grounding,
+      AiMetrics metrics,
+      InterviewPresetCatalog presets) {
+    this(resumes, providers, extractor, planCompiler, new FixedInterviewPlanCompiler(), questions,
+        store, objectMapper, validator, skills, scopeResolver, grounding, metrics, presets, true);
+  }
+
+  private CreateInterviewService(
+      ResumeRepository resumes,
+      AiProviderService providers,
+      JobProfileExtractor extractor,
+      InterviewPlanCompiler planCompiler,
+      FixedInterviewPlanCompiler fixedPlanCompiler,
+      QuestionGenerator questions,
+      InterviewCreationStore store,
+      ObjectMapper objectMapper,
+      Validator validator,
+      InterviewSkillCatalog skills,
+      KnowledgeScopeResolver scopeResolver,
+      KnowledgeGrounding grounding,
+      AiMetrics metrics,
+      InterviewPresetCatalog presets,
+      boolean fixedFlow) {
+    this.resumes = resumes;
+    this.providers = providers;
+    this.extractor = extractor;
+    this.planCompiler = planCompiler;
+    this.fixedPlanCompiler = fixedPlanCompiler;
+    this.questions = questions;
+    this.store = store;
+    this.objectMapper = objectMapper;
+    this.validator = validator;
+    this.skills = skills;
+    this.scopeResolver = scopeResolver;
+    this.grounding = grounding;
+    this.metrics = metrics;
+    this.presets = presets;
+    this.fixedFlow = fixedFlow;
+  }
 
   public CreateInterviewService(
       ResumeRepository resumes,
@@ -66,18 +125,9 @@ public class CreateInterviewService {
       KnowledgeScopeResolver scopeResolver,
       KnowledgeGrounding grounding,
       AiMetrics metrics) {
-    this.resumes = resumes;
-    this.providers = providers;
-    this.extractor = extractor;
-    this.planCompiler = planCompiler;
-    this.questions = questions;
-    this.store = store;
-    this.objectMapper = objectMapper;
-    this.validator = validator;
-    this.skills = skills;
-    this.scopeResolver = scopeResolver;
-    this.grounding = grounding;
-    this.metrics = metrics;
+    this(resumes, providers, extractor, planCompiler, new FixedInterviewPlanCompiler(), questions,
+        store, objectMapper, validator, skills, scopeResolver, grounding, metrics,
+        new ClasspathInterviewPresetCatalog(), false);
   }
 
   /** Orchestrates remote calls without opening a database transaction. */
@@ -101,6 +151,11 @@ public class CreateInterviewService {
     }
     String title = normalize(request.jobTitle());
     String jdText = normalize(request.jdText());
+    if (!"custom".equals(request.presetId()) && jdText.isBlank()) {
+      var preset = presets.require(request.presetId());
+      jdText = preset.jobDescription();
+      if (title.isBlank()) title = preset.displayName();
+    }
     var skill = skills.require(request.skillId());
     if (title.isBlank() && skill.group() != SkillGroup.CUSTOM) title = skill.name();
     if (skill.group() == SkillGroup.CUSTOM && title.isBlank()) {
@@ -127,9 +182,13 @@ public class CreateInterviewService {
       log.warn("createInterview failed: AI job-profile extractor returned null for skill={}", request.skillId());
       throw invalidAiOutput();
     }
-    InterviewPlan plan = planCompiler.compile(
-        profile, requirements, request.difficulty(), request.totalTurnBudget(), skill.snapshot());
-    log.info("createInterview plan competencies={} budget={}", plan.competencies(), plan.totalTurnBudget());
+    InterviewPlan plan = fixedFlow
+        ? fixedPlanCompiler.compile(profile, requirements, request.difficulty(),
+            request.totalTurnBudget())
+        : planCompiler.compile(profile, requirements, request.difficulty(),
+            request.totalTurnBudget(), skill.snapshot());
+    log.info("createInterview fixedFlow={} phases={} budget={}", fixedFlow,
+        plan.competencies(), plan.totalTurnBudget());
 
     ValidatedKnowledgeScope scope = null;
     TurnDirective firstDirective = strategy.firstTurn(plan, request.difficulty());
@@ -138,17 +197,23 @@ public class CreateInterviewService {
       scope = scopeResolver.resolveForCreation(user, request.knowledgeBaseIds());
     }
     var groundingSnapshot = grounding.ground(
-        scope, GroundingDirective.from(firstDirective));
+        scope, fixedFlow
+            ? GroundingDirective.forQuestionDeck(request.difficulty(), plan)
+            : GroundingDirective.from(firstDirective));
     RagContextSnapshot firstRagSnapshot = groundingSnapshot.toRagContext();
     log.info("createInterview grounding status={} chunks={} scores={}",
         groundingSnapshot.status(), groundingSnapshot.chunks().size(),
         groundingSnapshot.chunks().stream().map(c -> String.format("%.2f", c.score())).toList());
 
-    GeneratedQuestion first = questions.firstQuestion(
-        providerId, plan, profile, requirements, skill.snapshot(),
-        GroundingUsePolicy.allowsQuestionGeneration(firstDirective)
-            ? firstRagSnapshot : firstRagSnapshot.hiddenForDisallowedUse(),
-        firstDirective);
+    GeneratedQuestion first = fixedFlow
+        ? new GeneratedQuestion(
+            "请先做一个简短的自我介绍，重点说明与你应聘的 Java 后端岗位最相关的经历。",
+            "自我介绍")
+        : questions.firstQuestion(
+            providerId, plan, profile, requirements, skill.snapshot(),
+            GroundingUsePolicy.allowsQuestionGeneration(firstDirective)
+                ? firstRagSnapshot : firstRagSnapshot.hiddenForDisallowedUse(),
+            firstDirective);
     if (first == null) {
       log.warn("createInterview failed: AI question generator returned null skill={}", request.skillId());
       throw invalidAiOutput();
@@ -166,9 +231,22 @@ public class CreateInterviewService {
     }
     log.info("createInterview success firstQuestion competency={}", first.targetCompetency());
 
+    QuestionDeck questionDeck;
+    try {
+      questionDeck = questions.generatePrimaryQuestions(
+          providerId, plan, profile, requirements, skill.snapshot(), firstRagSnapshot, firstDirective)
+          .withFirst(first);
+      log.info("createInterview primaryQuestionDeck size={}", questionDeck.questions().size());
+    } catch (RuntimeException exception) {
+      // The first question is already valid. Keep creation available when the optional
+      // batch call is unavailable; later turns retain the existing online fallback.
+      log.warn("createInterview primary question deck unavailable; using first question only", exception);
+      questionDeck = QuestionDeck.of(first);
+    }
+
     return store.create(new InterviewCreation(
         ownerId, resumeId, title, jdText, request.difficulty(), request.totalTurnBudget(),
-        providerId, provider.model(), skill.snapshot(), requirements, plan, first,
+        providerId, provider.model(), skill.snapshot(), requirements, plan, questionDeck, first,
         scope, firstRagSnapshot, firstDirective));
   }
 

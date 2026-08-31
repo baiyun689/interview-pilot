@@ -88,6 +88,13 @@ export interface InterviewSkill {
   version: string
 }
 
+export interface InterviewPreset {
+  id: string
+  displayName: string
+  description: string
+  version: string
+}
+
 export type InterviewEventType = 'ACCEPTED' | 'FEEDBACK' | 'DECISION' | 'NEXT_QUESTION' | 'COMPLETED' | 'ERROR'
 interface StreamEvent<T extends InterviewEventType, P> { type: T; sessionId: string; turnNo: number; payload: P }
 export type InterviewStreamEvent =

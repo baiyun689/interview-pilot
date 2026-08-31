@@ -85,6 +85,10 @@ public class InterviewSessionEntity {
   @Column(name = "knowledge_scope_snapshot", columnDefinition = "json")
   private String knowledgeScopeSnapshot;
 
+  @JdbcTypeCode(SqlTypes.JSON)
+  @Column(name = "question_deck_snapshot", nullable = false, columnDefinition = "json")
+  private String questionDeckSnapshot;
+
   @CreationTimestamp
   @Column(name = "created_at", nullable = false, updatable = false)
   private Instant createdAt;
@@ -121,6 +125,7 @@ public class InterviewSessionEntity {
     session.providerId = providerId;
     session.modelName = modelName;
     session.planSnapshot = planSnapshot;
+    session.questionDeckSnapshot = "{\"questions\":[]}";
     return session;
   }
 

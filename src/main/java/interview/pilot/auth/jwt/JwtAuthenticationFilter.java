@@ -46,10 +46,10 @@ public class JwtAuthenticationFilter extends GenericFilterBean {
 
   private Optional<String> extractToken(HttpServletRequest request) {
     String header = request.getHeader("Authorization");
-    if (header == null || !header.startsWith("Bearer ")) {
-      return Optional.empty();
+    if (header != null && header.startsWith("Bearer ")) {
+      return Optional.of(header.substring(7));
     }
-    return Optional.of(header.substring(7));
+    return Optional.empty();
   }
 
   private void setAuthentication(CurrentUser user) {

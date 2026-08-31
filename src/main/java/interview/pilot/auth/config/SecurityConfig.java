@@ -25,7 +25,8 @@ public class SecurityConfig {
         .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
         .authorizeHttpRequests(auth -> auth
             .requestMatchers("/api/auth/register", "/api/auth/login",
-                "/api/auth/refresh", "/api/auth/logout", "/actuator/health").permitAll()
+                "/api/auth/refresh", "/api/auth/logout", "/actuator/health",
+                "/ws/voice-interviews/**").permitAll()
             .anyRequest().authenticated())
         .exceptionHandling(errors -> errors
             .authenticationEntryPoint((request, response, exception) ->
