@@ -26,9 +26,12 @@ export interface QuestionSpeechPlayerProps {
 }
 
 /** 读取自动播放偏好：localStorage 值为 'off' 时关闭，其余情况默认开启。 */
-export function readAutoplayPreference(storage: Pick<Storage, 'getItem'> = window.localStorage): boolean {
+export function readAutoplayPreference(storage?: Pick<Storage, 'getItem'>): boolean {
   try {
-    return storage.getItem(AUTOPLAY_STORAGE_KEY) !== 'off'
+    // 评审 M6：window.localStorage 的属性访问本身也可能抛 SecurityError，
+    // 必须放在 try 内部
+    const source = storage ?? window.localStorage
+    return source.getItem(AUTOPLAY_STORAGE_KEY) !== 'off'
   } catch {
     return true // 隐私模式等读取失败时按默认开启处理
   }

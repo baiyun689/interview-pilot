@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FakeAudioContext, FakeMediaRecorder, recorderTestEnv } from '../test/voiceFakes'
+import { useVoiceRecorder } from '../voice/useVoiceRecorder'
 import { VoiceRecorder } from './VoiceRecorder'
 
 beforeEach(() => {
@@ -154,5 +155,28 @@ describe('VoiceRecorder', () => {
 
     rerender(<VoiceRecorder env={fake.env} uploadError={new Error('上传失败，请重试')} onUpload={vi.fn()} />)
     expect(screen.getByRole('alert')).toHaveTextContent('上传失败，请重试')
+  })
+
+  // 评审 M9：受控模式（Task 10 面试页将传入父级持有的 controller）渲染父级状态
+  it('受控模式：传入 recorder controller 时渲染其状态并可操作', async () => {
+    const fake = recorderTestEnv()
+    function Harness() {
+      const recorder = useVoiceRecorder({ env: fake.env })
+      return (
+        <>
+          <button type="button" onClick={() => void recorder.start()}>外部开始</button>
+          <VoiceRecorder recorder={recorder} onUpload={vi.fn()} />
+        </>
+      )
+    }
+    render(<Harness />)
+
+    fireEvent.click(screen.getByRole('button', { name: '外部开始' }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+
+    expect(screen.getByRole('timer', { name: '录音时长' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '停止录音' }))
+    expect(screen.getByRole('button', { name: '上传录音' })).toBeInTheDocument()
+    expect(screen.getByLabelText('录音试听')).toHaveAttribute('src', 'blob:mock-url')
   })
 })
