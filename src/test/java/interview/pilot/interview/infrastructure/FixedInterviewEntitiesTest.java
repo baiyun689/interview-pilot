@@ -64,6 +64,16 @@ class FixedInterviewEntitiesTest {
   }
 
   @Test
+  void voiceSessionRequiresAVoiceSnapshot() {
+    assertThatThrownBy(() -> InterviewSessionEntity.preparing(
+        7L, null, Difficulty.MEDIUM, InterviewSize.STANDARD,
+        JobSourceType.CUSTOM, "Java 后端", "dashscope", "qwen", "{}", null,
+        InterviewMode.VOICE, null))
+        .isInstanceOf(NullPointerException.class)
+        .hasMessageContaining("voiceSnapshot");
+  }
+
+  @Test
   void askedTurnDefaultsToTextInputMode() {
     var turn = InterviewTurnEntity.asked(
         1L, 1, InterviewPhase.FUNDAMENTALS, QuestionType.MAIN, 1L, "问题");

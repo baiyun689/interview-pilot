@@ -96,3 +96,21 @@ app:
       api-key: ${DASHSCOPE_EMBEDDING_API_KEY:}
       model: ${DASHSCOPE_EMBEDDING_MODEL:text-embedding-v3}
       dimensions: 1024
+  voice:
+    enabled: ${VOICE_ENABLED:false}
+    files-root: ${VOICE_FILES_ROOT:./data/voice}
+    max-upload-bytes: ${VOICE_MAX_UPLOAD_BYTES:8388608}
+    max-recording-duration: ${VOICE_MAX_RECORDING_DURATION:5m}
+    retention: ${VOICE_MEDIA_RETENTION:7d}
+    asr:
+      provider: dashscope
+      base-url: ${DASHSCOPE_SPEECH_BASE_URL:https://dashscope.aliyuncs.com/api/v1}
+      workspace-id: ${DASHSCOPE_WORKSPACE_ID:}
+      api-key: ${DASHSCOPE_SPEECH_API_KEY:}
+      model: ${DASHSCOPE_ASR_MODEL:fun-asr-flash-2026-06-15}
+      timeout: ${DASHSCOPE_ASR_TIMEOUT:60s}
+    tts:
+      provider: dashscope
+      model: ${DASHSCOPE_TTS_MODEL:cosyvoice-v3-flash}
+      voice: ${DASHSCOPE_TTS_VOICE:longanyang}
+      timeout: ${DASHSCOPE_TTS_TIMEOUT:30s}

@@ -14,6 +14,7 @@ import interview.pilot.common.exception.BusinessException;
 import interview.pilot.interview.api.CreateInterviewRequest;
 import interview.pilot.interview.api.CreateInterviewResponse;
 import interview.pilot.interview.domain.InterviewBriefSnapshot;
+import interview.pilot.interview.domain.InterviewMode;
 import interview.pilot.interview.domain.JobSourceType;
 import interview.pilot.interview.infrastructure.InterviewSessionEntity;
 import interview.pilot.interview.infrastructure.InterviewSessionRepository;
@@ -23,6 +24,7 @@ import interview.pilot.knowledge.retrieval.ValidatedKnowledgeScope;
 import interview.pilot.resume.domain.ResumeProfile;
 import interview.pilot.resume.domain.ResumeStatus;
 import interview.pilot.resume.infrastructure.ResumeRepository;
+import interview.pilot.voice.config.VoiceProperties;
 import jakarta.validation.Validator;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
@@ -39,6 +41,7 @@ public class FixedInterviewCreationService {
   private final AsyncTaskRepository tasks;
   private final ObjectMapper objectMapper;
   private final Validator validator;
+  private final VoiceProperties voice;
 
   public FixedInterviewCreationService(
       ResumeRepository resumes,
@@ -48,7 +51,8 @@ public class FixedInterviewCreationService {
       InterviewSessionRepository sessions,
       AsyncTaskRepository tasks,
       ObjectMapper objectMapper,
-      Validator validator) {
+      Validator validator,
+      VoiceProperties voice) {
     this.resumes = resumes;
     this.providers = providers;
     this.presets = presets;
@@ -57,11 +61,16 @@ public class FixedInterviewCreationService {
     this.tasks = tasks;
     this.objectMapper = objectMapper;
     this.validator = validator;
+    this.voice = voice;
   }
 
   @Transactional
   public CreateInterviewResponse create(CurrentUser user, CreateInterviewRequest request) {
     Long ownerId = requireOwner(user);
+    if (request.interviewMode() == InterviewMode.VOICE && !voice.asrConfigured()) {
+      throw new BusinessException(
+          "VOICE_MODE_UNAVAILABLE", "Voice mode is not available", HttpStatus.CONFLICT);
+    }
     ResumeProfile resume = ResumeProfile.empty();
     Long resumeId = null;
     if (request.resumeId() != null) {
@@ -106,9 +115,11 @@ public class FixedInterviewCreationService {
     String briefJson = encode(brief);
     String scopeJson = scope == null ? null : encode(scope);
 
+    InterviewMode mode = request.interviewMode();
     var session = sessions.save(InterviewSessionEntity.preparing(
         ownerId, resumeId, request.difficulty(), request.interviewSize(), sourceType,
-        title, provider.id(), provider.model(), briefJson, scopeJson));
+        title, provider.id(), provider.model(), briefJson, scopeJson,
+        mode, mode == InterviewMode.VOICE ? encode(voice.toSnapshot()) : null));
     sessions.flush();
     var task = tasks.save(AsyncTaskEntity.pending(
         ownerId,

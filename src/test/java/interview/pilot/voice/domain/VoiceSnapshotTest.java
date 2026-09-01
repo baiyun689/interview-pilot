@@ -19,7 +19,7 @@ class VoiceSnapshotTest {
 
   @Test
   void acceptsTheDocumentedExampleSnapshot() {
-    var snapshot = VoiceSnapshot.of(
+    var snapshot = new VoiceSnapshot(
         VERSION, ASR_PROVIDER, ASR_MODEL, TTS_PROVIDER, TTS_MODEL, VOICE,
         MAX_RECORDING_SECONDS, MAX_UPLOAD_BYTES);
 
@@ -35,7 +35,7 @@ class VoiceSnapshotTest {
 
   @Test
   void rejectsWrongSchemaVersion() {
-    assertThatThrownBy(() -> VoiceSnapshot.of(
+    assertThatThrownBy(() -> new VoiceSnapshot(
         2, ASR_PROVIDER, ASR_MODEL, TTS_PROVIDER, TTS_MODEL, VOICE,
         MAX_RECORDING_SECONDS, MAX_UPLOAD_BYTES))
         .isInstanceOf(IllegalArgumentException.class)
@@ -44,7 +44,7 @@ class VoiceSnapshotTest {
 
   @Test
   void rejectsMissingAsrProvider() {
-    assertThatThrownBy(() -> VoiceSnapshot.of(
+    assertThatThrownBy(() -> new VoiceSnapshot(
         VERSION, null, ASR_MODEL, TTS_PROVIDER, TTS_MODEL, VOICE,
         MAX_RECORDING_SECONDS, MAX_UPLOAD_BYTES))
         .isInstanceOf(IllegalArgumentException.class)
@@ -53,7 +53,7 @@ class VoiceSnapshotTest {
 
   @Test
   void rejectsBlankAsrModel() {
-    assertThatThrownBy(() -> VoiceSnapshot.of(
+    assertThatThrownBy(() -> new VoiceSnapshot(
         VERSION, ASR_PROVIDER, "  ", TTS_PROVIDER, TTS_MODEL, VOICE,
         MAX_RECORDING_SECONDS, MAX_UPLOAD_BYTES))
         .isInstanceOf(IllegalArgumentException.class)
@@ -62,7 +62,7 @@ class VoiceSnapshotTest {
 
   @Test
   void rejectsMissingTtsProvider() {
-    assertThatThrownBy(() -> VoiceSnapshot.of(
+    assertThatThrownBy(() -> new VoiceSnapshot(
         VERSION, ASR_PROVIDER, ASR_MODEL, null, TTS_MODEL, VOICE,
         MAX_RECORDING_SECONDS, MAX_UPLOAD_BYTES))
         .isInstanceOf(IllegalArgumentException.class)
@@ -71,7 +71,7 @@ class VoiceSnapshotTest {
 
   @Test
   void rejectsBlankTtsModel() {
-    assertThatThrownBy(() -> VoiceSnapshot.of(
+    assertThatThrownBy(() -> new VoiceSnapshot(
         VERSION, ASR_PROVIDER, ASR_MODEL, TTS_PROVIDER, " ", VOICE,
         MAX_RECORDING_SECONDS, MAX_UPLOAD_BYTES))
         .isInstanceOf(IllegalArgumentException.class)
@@ -80,7 +80,7 @@ class VoiceSnapshotTest {
 
   @Test
   void rejectsBlankVoice() {
-    assertThatThrownBy(() -> VoiceSnapshot.of(
+    assertThatThrownBy(() -> new VoiceSnapshot(
         VERSION, ASR_PROVIDER, ASR_MODEL, TTS_PROVIDER, TTS_MODEL, "",
         MAX_RECORDING_SECONDS, MAX_UPLOAD_BYTES))
         .isInstanceOf(IllegalArgumentException.class)
@@ -89,7 +89,7 @@ class VoiceSnapshotTest {
 
   @Test
   void rejectsNonPositiveRecordingSeconds() {
-    assertThatThrownBy(() -> VoiceSnapshot.of(
+    assertThatThrownBy(() -> new VoiceSnapshot(
         VERSION, ASR_PROVIDER, ASR_MODEL, TTS_PROVIDER, TTS_MODEL, VOICE,
         0, MAX_UPLOAD_BYTES))
         .isInstanceOf(IllegalArgumentException.class)
@@ -98,7 +98,7 @@ class VoiceSnapshotTest {
 
   @Test
   void rejectsNonPositiveUploadBytes() {
-    assertThatThrownBy(() -> VoiceSnapshot.of(
+    assertThatThrownBy(() -> new VoiceSnapshot(
         VERSION, ASR_PROVIDER, ASR_MODEL, TTS_PROVIDER, TTS_MODEL, VOICE,
         MAX_RECORDING_SECONDS, 0))
         .isInstanceOf(IllegalArgumentException.class)
@@ -107,7 +107,7 @@ class VoiceSnapshotTest {
 
   @Test
   void normalizesProviderStringsAndKeepsLimitsImmutable() {
-    var snapshot = VoiceSnapshot.of(
+    var snapshot = new VoiceSnapshot(
         VERSION, "  dashscope  ", ASR_MODEL, TTS_PROVIDER, TTS_MODEL, VOICE,
         MAX_RECORDING_SECONDS, MAX_UPLOAD_BYTES);
 
@@ -116,7 +116,7 @@ class VoiceSnapshotTest {
 
   @Test
   void roundTripsThroughJsonForTheVoiceSnapshotColumn() throws Exception {
-    var snapshot = VoiceSnapshot.of(
+    var snapshot = new VoiceSnapshot(
         VERSION, ASR_PROVIDER, ASR_MODEL, TTS_PROVIDER, TTS_MODEL, VOICE,
         MAX_RECORDING_SECONDS, MAX_UPLOAD_BYTES);
     ObjectMapper objectMapper = new ObjectMapper();

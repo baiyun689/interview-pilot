@@ -141,7 +141,12 @@ public class InterviewSessionEntity {
     session.modelName = Objects.requireNonNull(modelName);
     session.briefSnapshot = Objects.requireNonNull(briefSnapshot);
     session.knowledgeScopeSnapshot = knowledgeScopeSnapshot;
-    session.voiceSnapshot = voiceSnapshot;
+    if (session.interviewMode == InterviewMode.VOICE) {
+      session.voiceSnapshot = Objects.requireNonNull(
+          voiceSnapshot, "voiceSnapshot is required for VOICE sessions");
+    } else {
+      session.voiceSnapshot = voiceSnapshot;
+    }
     return session;
   }
 

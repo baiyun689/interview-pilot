@@ -55,6 +55,23 @@ class InfrastructureConfigurationTest {
     assertFalse(environmentExample.contains("KNOWLEDGE_COLLECTION_NAME"));
   }
 
+  @Test
+  @DisplayName("语音配置的启用开关默认关闭且环境变量在 .env.example 中可覆盖")
+  void voiceInfrastructureDeclaresEnvironmentOverridableConfiguration() throws IOException {
+    var application = read("src/main/resources/application.yml");
+    var environmentExample = read(".env.example");
+
+    assertTrue(application.contains("voice:"));
+    assertTrue(application.contains("enabled: ${VOICE_ENABLED:false}"));
+    assertTrue(application.contains("max-upload-bytes: ${VOICE_MAX_UPLOAD_BYTES:8388608}"));
+    assertTrue(application.contains("max-recording-duration: ${VOICE_MAX_RECORDING_DURATION:5m}"));
+    assertTrue(application.contains("model: ${DASHSCOPE_ASR_MODEL:fun-asr-flash-2026-06-15}"));
+    assertTrue(environmentExample.contains("VOICE_ENABLED=false"));
+    assertTrue(environmentExample.contains("DASHSCOPE_SPEECH_API_KEY="));
+    assertTrue(environmentExample.contains("DASHSCOPE_TTS_MODEL=cosyvoice-v3-flash"));
+    assertFalse(application.contains("DASHSCOPE_SPEECH_API_KEY:sk"));
+  }
+
   private String read(String path) throws IOException {
     return Files.readString(Path.of(path));
   }

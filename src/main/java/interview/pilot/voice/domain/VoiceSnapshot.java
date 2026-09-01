@@ -29,15 +29,6 @@ public record VoiceSnapshot(
     }
   }
 
-  public static VoiceSnapshot of(
-      int schemaVersion, String asrProvider, String asrModel,
-      String ttsProvider, String ttsModel, String voice,
-      int maxRecordingSeconds, long maxUploadBytes) {
-    return new VoiceSnapshot(
-        schemaVersion, asrProvider, asrModel, ttsProvider, ttsModel, voice,
-        maxRecordingSeconds, maxUploadBytes);
-  }
-
   private static String required(String value, int max, String name) {
     String normalized = value == null ? "" : value.trim();
     if (normalized.isEmpty() || normalized.length() > max) {
