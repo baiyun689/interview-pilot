@@ -38,6 +38,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import interview.pilot.async.domain.AsyncTaskStatus;
 import interview.pilot.async.domain.AsyncTaskType;
+import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.async.messaging.PendingTaskDispatcher;
 import interview.pilot.async.messaging.TaskMessage;
@@ -121,6 +122,9 @@ class VoiceAnswerModuleTest {
   private TaskMessagePublisher publisher;
 
   @MockitoBean
+  private ProcessingClaim claims;
+
+  @MockitoBean
   private AudioProbe probe;
 
   @Autowired
@@ -160,6 +164,7 @@ class VoiceAnswerModuleTest {
 
   @BeforeEach
   void setUp() {
+    when(claims.clearTerminal(any())).thenReturn(ProcessingClaim.ClearResult.CLEARED);
     when(probe.probe(any())).thenReturn(new ProbedAudio("audio/webm", Duration.ofSeconds(30)));
     tasks.deleteAll();
     recordings.deleteAll();
@@ -578,6 +583,10 @@ class VoiceAnswerModuleTest {
     var retried = recordings.findByRecordingId(receipt.recordingId()).orElseThrow();
     assertThat(retried.getStatus()).isEqualTo(VoiceRecordingStatus.TRANSCRIBING);
     assertThat(retried.getExecutionEpoch()).isEqualTo(1);
+    // The listener's terminal claim is cleared so the retried message can acquire it
+    // (the claim key IS the voice bizKey).
+    verify(claims).clearTerminal(
+        VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + receipt.recordingId());
     var task = tasks.findByTaskTypeAndBizKey(
         AsyncTaskType.VOICE_TRANSCRIPTION, VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + receipt.recordingId()).orElseThrow();
     assertThat(task.getStatus()).isEqualTo(AsyncTaskStatus.PENDING);

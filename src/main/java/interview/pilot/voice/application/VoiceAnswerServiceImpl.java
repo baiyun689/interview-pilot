@@ -26,6 +26,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import interview.pilot.async.domain.AsyncTaskStatus;
 import interview.pilot.async.domain.AsyncTaskType;
+import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.async.policy.VoiceTranscriptionRetryPolicy;
@@ -110,6 +111,7 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
   private final InterviewSessionRepository sessions;
   private final InterviewTurnRepository turns;
   private final AsyncTaskRepository tasks;
+  private final ProcessingClaim claims;
   private final VoiceMediaStore mediaStore;
   private final AudioProbe probe;
   private final VoiceProperties properties;
@@ -121,6 +123,7 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
       InterviewSessionRepository sessions,
       InterviewTurnRepository turns,
       AsyncTaskRepository tasks,
+      ProcessingClaim claims,
       VoiceMediaStore mediaStore,
       AudioProbe probe,
       VoiceProperties properties,
@@ -129,6 +132,7 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
     this.sessions = sessions;
     this.turns = turns;
     this.tasks = tasks;
+    this.claims = claims;
     this.mediaStore = mediaStore;
     this.probe = probe;
     this.properties = properties;
@@ -415,6 +419,7 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
   private void retryTranscription(long recordingId) {
     for (int attempt = 0; ; attempt++) {
       try {
+        clearTranscriptionClaim(recordingId);
         transactions.executeWithoutResult(status -> {
           var recording = recordings.findById(recordingId).orElseThrow(this::notFound);
           switch (recording.getStatus()) {
@@ -447,6 +452,30 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
           throw conflict("REQUEST_ID_CONFLICT", "Retry conflicted with another operation");
         }
       }
+    }
+  }
+
+  /**
+   * Clears the listener's terminal processing claim (same pattern as the async retry
+   * endpoint): a deterministic failure or success COMPLETES the claim, and an un-cleared
+   * terminal claim would block the retried message's acquire forever (Task 5 wiring — the
+   * claim key IS the voice bizKey per {@link VoiceTranscriptionRetryPolicy}). The clear runs
+   * before the transaction, mirroring {@code AsyncTaskService.retry}; an ACTIVE claim means a
+   * transcription is genuinely in flight and the retry is rejected.
+   */
+  private void clearTranscriptionClaim(long recordingId) {
+    VoiceRecordingEntity recording = recordings.findById(recordingId)
+        .orElseThrow(this::notFound);
+    String claimKey = TASK_BIZ_KEY_PREFIX + recording.getRecordingId();
+    ProcessingClaim.ClearResult cleared;
+    try {
+      cleared = claims.clearTerminal(claimKey);
+    } catch (RuntimeException exception) {
+      throw conflict("TASK_RETRY_UNAVAILABLE", "Voice transcription retry is temporarily unavailable");
+    }
+    if (cleared == ProcessingClaim.ClearResult.ACTIVE) {
+      throw conflict(VoiceErrorCodes.VOICE_TRANSCRIPTION_IN_PROGRESS,
+          "The recording transcription is in progress");
     }
   }
 

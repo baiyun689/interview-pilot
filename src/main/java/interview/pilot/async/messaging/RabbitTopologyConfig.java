@@ -68,7 +68,8 @@ public class RabbitTopologyConfig {
   static final String KNOWLEDGE_INDEX_ROUTING_KEY = "knowledge.index";
   static final String KNOWLEDGE_DELETE_ROUTING_KEY = "knowledge.delete";
   static final String VOICE_TRANSCRIPTION_ROUTING_KEY = "voice.transcription";
-  static final String RETRY_COUNT_HEADER = "x-retry-count";
+  /** Wire-level retry-delay counter; tests outside this package build exhausted-message sources. */
+  public static final String RETRY_COUNT_HEADER = "x-retry-count";
   static final int[] RETRY_DELAYS_MILLIS = {5_000, 30_000, 120_000};
 
   @Bean
