@@ -70,7 +70,7 @@ class QuestionSpeechEntityTest {
   }
 
   @Test
-  void readyIsTerminalUntilTask8IntroducesTheRetryTransition() {
+  void readyIsTerminalAndCannotBeRetried() {
     speech.startSynthesis();
     speech.completeSynthesis("req", "key", "audio/mpeg", 1, 1);
 
@@ -79,7 +79,46 @@ class QuestionSpeechEntityTest {
         () -> speech.completeSynthesis("r", "k", "t", 1, 1));
     assertThatIllegalStateException().isThrownBy(
         () -> speech.failSynthesis("VOICE_QUESTION_SPEECH_FAILED"));
+    assertThatIllegalStateException().isThrownBy(speech::beginRetry); // READY has no retry
     assertThat(speech.getStatus()).isEqualTo(QuestionSpeechStatus.READY);
+  }
+
+  @Test
+  void beginRetryMovesFailedBackToPendingWithAFencedExecutionEpoch() {
+    speech.startSynthesis();
+    speech.failSynthesis("VOICE_QUESTION_SPEECH_FAILED");
+
+    speech.beginRetry();
+
+    assertThat(speech.getStatus()).isEqualTo(QuestionSpeechStatus.PENDING);
+    assertThat(speech.getExecutionEpoch()).isEqualTo(1);
+    // The stale safeError is a past-generation fact: the view only surfaces it while FAILED,
+    // and the retried synthesis overwrites it on its own failure (mirror of the recording).
+    assertThat(speech.getStorageKey()).isNull();
+  }
+
+  @Test
+  void beginRetryIsGuardedToFailedAndOnlyRetryBumpsTheEpoch() {
+    speech.startSynthesis();
+    speech.failSynthesis("VOICE_QUESTION_SPEECH_FAILED");
+
+    speech.beginRetry(); // FAILED → PENDING, fenced epoch 1
+    assertThat(speech.getExecutionEpoch()).isEqualTo(1);
+
+    speech.startSynthesis(); // the retried generation claims without touching the epoch
+    assertThat(speech.getExecutionEpoch()).isEqualTo(1);
+
+    assertThatIllegalStateException().isThrownBy(speech::beginRetry); // SYNTHESIZING is not retryable
+  }
+
+  @Test
+  void beginRetryRejectsEveryNonFailedState() {
+    assertThatIllegalStateException().isThrownBy(speech::beginRetry); // PENDING
+    speech.startSynthesis();
+    assertThatIllegalStateException().isThrownBy(speech::beginRetry); // SYNTHESIZING
+    speech.completeSynthesis("r", "k", "t", 1, 1);
+    assertThatIllegalStateException().isThrownBy(speech::beginRetry); // READY
+    assertThat(speech.getExecutionEpoch()).isZero();
   }
 
   @Test
