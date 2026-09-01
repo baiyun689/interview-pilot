@@ -23,6 +23,7 @@ import org.junit.jupiter.api.io.TempDir;
 import interview.pilot.voice.domain.ProbedAudio;
 import interview.pilot.voice.domain.VoiceMediaKey;
 import interview.pilot.voice.domain.VoiceMediaKind;
+import interview.pilot.voice.domain.VoiceMediaNotFoundException;
 import interview.pilot.voice.domain.VoiceMediaResource;
 import interview.pilot.voice.domain.VoiceMediaStorageException;
 import interview.pilot.voice.domain.VoiceMediaTooLargeException;
@@ -57,7 +58,8 @@ class FileSystemVoiceMediaStoreTest {
 
     store.delete(key.storageKey());
     assertThat(root.resolve(key.storageKey())).doesNotExist();
-    assertThatIllegalArgumentException().isThrownBy(() -> store.open(key.storageKey()));
+    assertThatThrownBy(() -> store.open(key.storageKey()))
+        .isInstanceOf(VoiceMediaNotFoundException.class);
   }
 
   @Test
@@ -251,8 +253,26 @@ class FileSystemVoiceMediaStoreTest {
         () -> store.store(recordingKey(), stream("x"), 0));
     assertThatIllegalArgumentException().isThrownBy(
         () -> store.store(recordingKey(), stream("x"), -1));
-    assertThatIllegalArgumentException().isThrownBy(() -> store.open(key));
-    assertThatIllegalArgumentException().isThrownBy(() -> store.delete(key));
+    assertThatThrownBy(() -> store.open(key)).isInstanceOf(VoiceMediaNotFoundException.class);
+    assertThatThrownBy(() -> store.delete(key)).isInstanceOf(VoiceMediaNotFoundException.class);
+  }
+
+  @Test
+  void distinguishesGenuineAbsenceFromSecurityRejections() throws Exception {
+    var store = new FileSystemVoiceMediaStore(root, probe);
+    VoiceMediaKey key = recordingKey();
+
+    assertThatThrownBy(() -> store.open(key.storageKey()))
+        .isInstanceOf(VoiceMediaNotFoundException.class);
+    assertThatThrownBy(() -> store.delete(key.storageKey()))
+        .isInstanceOf(VoiceMediaNotFoundException.class);
+
+    store.store(key, stream("audio"), MAX);
+    store.delete(key.storageKey());
+    // A second delete still reports absence, never a failure or a security rejection.
+    assertThatThrownBy(() -> store.delete(key.storageKey()))
+        .isInstanceOf(VoiceMediaNotFoundException.class);
+    assertThatIllegalArgumentException().isThrownBy(() -> store.open("../" + key.storageKey()));
   }
 
   @Test

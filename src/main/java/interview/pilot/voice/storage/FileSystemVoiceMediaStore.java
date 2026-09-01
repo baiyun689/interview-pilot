@@ -20,6 +20,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import interview.pilot.voice.domain.ProbedAudio;
 import interview.pilot.voice.domain.StoredVoiceMedia;
 import interview.pilot.voice.domain.VoiceMediaKey;
+import interview.pilot.voice.domain.VoiceMediaNotFoundException;
 import interview.pilot.voice.domain.VoiceMediaResource;
 import interview.pilot.voice.domain.VoiceMediaStorageException;
 import interview.pilot.voice.domain.VoiceMediaTooLargeException;
@@ -238,12 +239,22 @@ public final class FileSystemVoiceMediaStore implements VoiceMediaStore {
     }
   }
 
+  /**
+   * Security checks run first: only after they all pass is genuine absence reported as
+   * {@link VoiceMediaNotFoundException} so cleanup can treat it as "already gone" without
+   * fail-open on symlinks, directories or multi-linked files (plan §14).
+   */
   private void requireRegularFile(Path target) {
     verifyPrivateRoot();
     verifyPrivatePath(target.getParent());
-    if (Files.isSymbolicLink(target)
-        || !Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
-      throw new IllegalArgumentException("Voice media does not exist");
+    if (Files.isSymbolicLink(target)) {
+      throw invalidStorageKey();
+    }
+    if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+      throw new VoiceMediaNotFoundException();
+    }
+    if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
+      throw invalidStorageKey();
     }
     if (unix && linkCount(target) != 1) {
       throw new IllegalArgumentException("Voice media must not have multiple links");

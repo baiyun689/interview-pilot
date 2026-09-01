@@ -58,9 +58,10 @@ public final class FfprobeAudioProbe implements AudioProbe {
       throw new VoiceMediaProbeException("Unable to start ffprobe", exception);
     }
     try {
+      closeStdin(process);
       boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
       if (!finished) {
-        process.destroyForcibly();
+        terminate(process);
         throw new VoiceMediaProbeException(
             "ffprobe did not finish within " + timeout.toSeconds() + "s", null);
       }
@@ -70,10 +71,32 @@ public final class FfprobeAudioProbe implements AudioProbe {
       return parse(process.getInputStream().readAllBytes());
     } catch (InterruptedException exception) {
       Thread.currentThread().interrupt();
-      process.destroyForcibly();
+      terminate(process);
       throw new VoiceMediaProbeException("ffprobe was interrupted", exception);
     } catch (IOException exception) {
       throw new VoiceMediaProbeException("Unable to read ffprobe output", exception);
+    }
+  }
+
+  /**
+   * ffprobe reads nothing from stdin, but a child that never reads blocks forever if the
+   * parent keeps the pipe open; close our end before waiting.
+   */
+  private static void closeStdin(Process process) {
+    try {
+      process.getOutputStream().close();
+    } catch (IOException ignored) {
+      // best effort; probing proceeds
+    }
+  }
+
+  /** Kills the child and reaps it so no zombie process is left behind. */
+  private static void terminate(Process process) {
+    process.destroyForcibly();
+    try {
+      process.waitFor(10, TimeUnit.SECONDS);
+    } catch (InterruptedException exception) {
+      Thread.currentThread().interrupt();
     }
   }
 

@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import interview.pilot.voice.domain.StoredVoiceMedia;
 import interview.pilot.voice.domain.VoiceMediaKey;
+import interview.pilot.voice.domain.VoiceMediaNotFoundException;
 import interview.pilot.voice.domain.VoiceMediaResource;
 import interview.pilot.voice.domain.VoiceMediaStorageException;
 import interview.pilot.voice.domain.VoiceMediaTooLargeException;
@@ -51,7 +52,7 @@ public final class InMemoryVoiceMediaStore implements VoiceMediaStore {
     VoiceStorageKeys.requireValid(storageKey);
     byte[] bytes = media.get(storageKey);
     if (bytes == null) {
-      throw new IllegalArgumentException("Voice media does not exist");
+      throw new VoiceMediaNotFoundException();
     }
     return new VoiceMediaResource(new ByteArrayInputStream(bytes), bytes.length, null, null);
   }
@@ -60,7 +61,7 @@ public final class InMemoryVoiceMediaStore implements VoiceMediaStore {
   public void delete(String storageKey) {
     VoiceStorageKeys.requireValid(storageKey);
     if (media.remove(storageKey) == null) {
-      throw new IllegalArgumentException("Voice media does not exist");
+      throw new VoiceMediaNotFoundException();
     }
   }
 

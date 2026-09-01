@@ -4,6 +4,7 @@ import java.io.InputStream;
 
 import interview.pilot.voice.domain.StoredVoiceMedia;
 import interview.pilot.voice.domain.VoiceMediaKey;
+import interview.pilot.voice.domain.VoiceMediaNotFoundException;
 import interview.pilot.voice.domain.VoiceMediaResource;
 import interview.pilot.voice.domain.VoiceMediaTooLargeException;
 import interview.pilot.voice.domain.VoiceMediaUnsupportedException;
@@ -15,6 +16,13 @@ import interview.pilot.voice.domain.VoiceMediaUnsupportedException;
  * {@code maxBytes} while copying and rejecting unsupported media via probing before any file
  * becomes visible; the final file is installed atomically. Storage keys are immutable and are
  * the only way files are addressed — no static or public file paths exist.
+ *
+ * <p>Contract for {@code open}/{@code delete}: {@link VoiceMediaNotFoundException} is thrown
+ * only when the storage key is well-formed, all security checks (symlink, hard link, private
+ * permissions, file kind) passed and the media file is simply absent. Cleanup (Task 11)
+ * may therefore treat it as "file already gone" (plan §14). Security rejections surface as
+ * {@link IllegalArgumentException} with distinct messages and must never be treated as
+ * absence; I/O failures surface as {@link VoiceMediaStorageException}.
  */
 public interface VoiceMediaStore {
 

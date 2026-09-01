@@ -106,6 +106,43 @@ class FfprobeAudioProbeTest {
         .isInstanceOf(VoiceMediaProbeException.class)
         .hasMessageContaining("did not finish");
     assertThat(process.destroyed()).isTrue();
+    assertThat(process.stdinClosed()).isTrue();
+  }
+
+  @Test
+  void propagatesInterruptedWaitsAsProbeErrorsAndReapsTheChild() {
+    FakeProcess process = new FakeProcess(new byte[0], false, 0);
+    process.interruptOnWait = true;
+    var probe = new FfprobeAudioProbe(command -> process, timeout, json);
+
+    try {
+      assertThatThrownBy(() -> probe.probe(Path.of("media.bin")))
+          .isInstanceOf(VoiceMediaProbeException.class)
+          .hasMessageContaining("interrupted");
+      assertThat(Thread.currentThread().isInterrupted()).isTrue();
+    } finally {
+      Thread.interrupted();
+    }
+    assertThat(process.destroyed()).isTrue();
+  }
+
+  @Test
+  void rejectsJsonWhoseFormatNameIsMissing() {
+    assertThatThrownBy(() -> probeOutput(
+        "{\"streams\":[{\"codec_type\":\"audio\"}],\"format\":{\"duration\":\"1.0\"}}"))
+        .isInstanceOf(VoiceMediaUnsupportedException.class);
+  }
+
+  @Test
+  void rejectsNonNumericDurations() {
+    assertThatThrownBy(() -> probeOutput(ffprobeOutput("wav", "N/A")))
+        .isInstanceOf(VoiceMediaUnsupportedException.class);
+  }
+
+  @Test
+  void rejectsNegativeDurations() {
+    assertThatThrownBy(() -> probeOutput(ffprobeOutput("wav", "-1.0")))
+        .isInstanceOf(VoiceMediaUnsupportedException.class);
   }
 
   @Test
@@ -222,6 +259,8 @@ class FfprobeAudioProbeTest {
     private final boolean exits;
     private final int exitCode;
     private boolean destroyed;
+    private boolean interruptOnWait;
+    private boolean stdinClosed;
 
     FakeProcess(byte[] stdout, boolean exits, int exitCode) {
       this.stdout = stdout;
@@ -231,7 +270,16 @@ class FfprobeAudioProbeTest {
 
     @Override
     public OutputStream getOutputStream() {
-      return OutputStream.nullOutputStream();
+      return new OutputStream() {
+        @Override
+        public void write(int value) {
+        }
+
+        @Override
+        public void close() {
+          stdinClosed = true;
+        }
+      };
     }
 
     @Override
@@ -250,7 +298,10 @@ class FfprobeAudioProbeTest {
     }
 
     @Override
-    public boolean waitFor(long timeout, TimeUnit unit) {
+    public boolean waitFor(long timeout, TimeUnit unit) throws InterruptedException {
+      if (interruptOnWait) {
+        throw new InterruptedException("test interruption");
+      }
       return exits;
     }
 
@@ -271,6 +322,10 @@ class FfprobeAudioProbeTest {
 
     boolean destroyed() {
       return destroyed;
+    }
+
+    boolean stdinClosed() {
+      return stdinClosed;
     }
   }
 }

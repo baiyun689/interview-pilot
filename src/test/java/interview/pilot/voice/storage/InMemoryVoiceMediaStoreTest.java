@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 
 import interview.pilot.voice.domain.VoiceMediaKey;
 import interview.pilot.voice.domain.VoiceMediaKind;
+import interview.pilot.voice.domain.VoiceMediaNotFoundException;
 import interview.pilot.voice.domain.VoiceMediaTooLargeException;
 
 class InMemoryVoiceMediaStoreTest {
@@ -40,7 +41,8 @@ class InMemoryVoiceMediaStoreTest {
     }
 
     store.delete(key.storageKey());
-    assertThatIllegalArgumentException().isThrownBy(() -> store.open(key.storageKey()));
+    assertThatThrownBy(() -> store.open(key.storageKey()))
+        .isInstanceOf(VoiceMediaNotFoundException.class);
   }
 
   @Test
@@ -60,7 +62,8 @@ class InMemoryVoiceMediaStoreTest {
 
     assertThatThrownBy(() -> store.store(key, stream(new byte[2000]), 1024))
         .isInstanceOf(VoiceMediaTooLargeException.class);
-    assertThatIllegalArgumentException().isThrownBy(() -> store.open(key.storageKey()));
+    assertThatThrownBy(() -> store.open(key.storageKey()))
+        .isInstanceOf(VoiceMediaNotFoundException.class);
   }
 
   @Test
@@ -94,8 +97,8 @@ class InMemoryVoiceMediaStoreTest {
         () -> store.store(recordingKey(), stream("x"), 0));
     assertThatIllegalArgumentException().isThrownBy(
         () -> store.store(recordingKey(), stream("x"), -1));
-    assertThatIllegalArgumentException().isThrownBy(() -> store.open(key));
-    assertThatIllegalArgumentException().isThrownBy(() -> store.delete(key));
+    assertThatThrownBy(() -> store.open(key)).isInstanceOf(VoiceMediaNotFoundException.class);
+    assertThatThrownBy(() -> store.delete(key)).isInstanceOf(VoiceMediaNotFoundException.class);
     assertThatThrownBy(() -> store.store(null, stream("x"), MAX))
         .isInstanceOf(NullPointerException.class);
     assertThatThrownBy(() -> store.store(recordingKey(), null, MAX))
