@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.UUID;
@@ -87,6 +88,40 @@ class InMemoryVoiceMediaStoreTest {
       assertThat(new String(resource.inputStream().readAllBytes(), StandardCharsets.UTF_8))
           .isEqualTo("second");
     }
+  }
+
+  @Test
+  void installsAnAlreadyStagedFileWithTheProbedMetadataAndConsumesIt() throws Exception {
+    VoiceMediaKey key = recordingKey();
+    var probed = new interview.pilot.voice.domain.ProbedAudio(
+        "audio/wav", java.time.Duration.ofSeconds(3));
+    Path staged = java.nio.file.Files.createTempFile("staged-", ".audio");
+    java.nio.file.Files.writeString(staged, "staged media");
+
+    var stored = store.store(key, staged, MAX, probed);
+
+    assertThat(staged).doesNotExist(); // consumed, mirroring the file-system move
+    assertThat(stored.storageKey()).isEqualTo(key.storageKey());
+    assertThat(stored.sha256()).isEqualTo(sha256("staged media"));
+    assertThat(stored.sizeBytes()).isEqualTo(12);
+    assertThat(stored.mediaType()).isEqualTo("audio/wav");
+    assertThat(stored.duration()).isEqualTo(java.time.Duration.ofSeconds(3));
+    try (var resource = store.open(key.storageKey())) {
+      assertThat(new String(resource.inputStream().readAllBytes(), StandardCharsets.UTF_8))
+          .isEqualTo("staged media");
+    }
+  }
+
+  @Test
+  void stagedInstallRejectsOversizedFilesAndKeepsThemForTheCaller() throws Exception {
+    VoiceMediaKey key = recordingKey();
+    Path staged = java.nio.file.Files.createTempFile("staged-", ".audio");
+    java.nio.file.Files.write(staged, new byte[2000]);
+
+    assertThatThrownBy(() -> store.store(key, staged, MAX, new interview.pilot.voice.domain.ProbedAudio(
+        "audio/webm", java.time.Duration.ofSeconds(1))))
+        .isInstanceOf(VoiceMediaTooLargeException.class);
+    assertThat(staged).exists(); // rejected: the caller retains ownership and cleans up
   }
 
   @Test

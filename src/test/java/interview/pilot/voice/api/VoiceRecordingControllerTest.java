@@ -1,5 +1,6 @@
 package interview.pilot.voice.api;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -97,6 +98,38 @@ class VoiceRecordingControllerTest {
     mvc.perform(upload())
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value(VoiceErrorCodes.VOICE_RECORDING_NOT_FOUND));
+  }
+
+  @Test
+  void operationalFailuresReachTheClientAsGeneric500WithoutTheDiagnosticCodes()
+      throws Exception {
+    var probeFailure = new interview.pilot.voice.domain.VoiceMediaProbeException(
+        "ffprobe timed out", null);
+    when(module.accept(org.mockito.ArgumentMatchers.eq(user),
+        org.mockito.ArgumentMatchers.eq(sessionId), org.mockito.ArgumentMatchers.eq(1),
+        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        .thenThrow(probeFailure);
+    var probeBody = mvc.perform(upload())
+        .andExpect(status().isInternalServerError())
+        .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
+        .andReturn().getResponse().getContentAsString();
+    assertThat(probeBody)
+        .doesNotContain(VoiceErrorCodes.VOICE_MEDIA_PROBE_FAILED)
+        .doesNotContain("ffprobe");
+
+    var storageFailure = new interview.pilot.voice.domain.VoiceMediaStorageException(
+        "disk full", new java.io.IOException());
+    when(module.accept(org.mockito.ArgumentMatchers.eq(user),
+        org.mockito.ArgumentMatchers.eq(sessionId), org.mockito.ArgumentMatchers.eq(1),
+        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        .thenThrow(storageFailure);
+    var storageBody = mvc.perform(upload())
+        .andExpect(status().isInternalServerError())
+        .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
+        .andReturn().getResponse().getContentAsString();
+    assertThat(storageBody)
+        .doesNotContain(VoiceErrorCodes.VOICE_MEDIA_STORAGE_FAILED)
+        .doesNotContain("disk full");
   }
 
   @Test

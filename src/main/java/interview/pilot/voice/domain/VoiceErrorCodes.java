@@ -26,5 +26,13 @@ public final class VoiceErrorCodes {
    */
   public static final String VOICE_MEDIA_PROBE_FAILED = "VOICE_MEDIA_PROBE_FAILED";
 
+  /**
+   * Diagnostic safe_error stored on FAILED recordings when the media store failed
+   * operationally (temp staging or install IO). Same off-wire treatment as
+   * {@link #VOICE_MEDIA_PROBE_FAILED}; the row is FAILED so the requestId never looks like a
+   * 10-minute RECEIVING upload.
+   */
+  public static final String VOICE_MEDIA_STORAGE_FAILED = "VOICE_MEDIA_STORAGE_FAILED";
+
   private VoiceErrorCodes() {}
 }

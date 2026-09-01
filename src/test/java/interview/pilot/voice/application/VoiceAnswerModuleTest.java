@@ -3,6 +3,9 @@ package interview.pilot.voice.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -27,6 +30,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -63,6 +67,8 @@ import interview.pilot.voice.domain.VoiceErrorCodes;
 import interview.pilot.voice.domain.VoiceMediaKey;
 import interview.pilot.voice.domain.VoiceMediaKind;
 import interview.pilot.voice.domain.VoiceMediaNotFoundException;
+import interview.pilot.voice.domain.VoiceMediaProbeException;
+import interview.pilot.voice.domain.VoiceMediaStorageException;
 import interview.pilot.voice.domain.VoiceRecordingStatus;
 import interview.pilot.voice.infrastructure.AudioProbe;
 import interview.pilot.voice.infrastructure.VoiceRecordingEntity;
@@ -137,7 +143,7 @@ class VoiceAnswerModuleTest {
   @Autowired
   private UserAccountRepository users;
 
-  @Autowired
+  @MockitoSpyBean
   private VoiceMediaStore mediaStore;
 
   @Autowired
@@ -254,7 +260,8 @@ class VoiceAnswerModuleTest {
   }
 
   @Test
-  void sameRequestIdWithDifferentBytesIsAStableConflictAndCleansTheFile() {
+  void sameRequestIdWithDifferentBytesIsAStableConflictThatLeavesTheOriginalMediaUntouched()
+      throws Exception {
     UUID requestId = UUID.randomUUID();
     var first = module.accept(user, session.getSessionId(), 1, requestId, audio("original"));
 
@@ -269,8 +276,11 @@ class VoiceAnswerModuleTest {
     assertThat(recording.getStatus()).isEqualTo(VoiceRecordingStatus.UPLOADED);
     assertThat(recordings.count()).isEqualTo(1);
     assertThat(tasks.count()).isEqualTo(1);
-    assertThatThrownBy(() -> mediaStore.open(recording.getStorageKey()))
-        .isInstanceOf(VoiceMediaNotFoundException.class);
+    // The digest comparison happens before any store call: the live media survives intact.
+    try (var resource = mediaStore.open(recording.getStorageKey())) {
+      assertThat(resource.inputStream().readAllBytes())
+          .isEqualTo("original".getBytes(StandardCharsets.UTF_8));
+    }
   }
 
   @Test
@@ -352,13 +362,81 @@ class VoiceAnswerModuleTest {
     assertThat(recording.getSha256()).isEqualTo(sha256(bytes));
     assertThat(tasks.count()).isZero();
 
-    // Replaying the identical requestId re-runs the probe: the requestId outcome stays fixed.
+    // Equal-content replay compares the staged digest and returns the recording with its
+    // current FAILED status — the requestId outcome stays fixed and the store is untouched.
     UUID requestId = recording.getUploadRequestId();
+    var replay = module.accept(user, session.getSessionId(), 1, requestId, audio(bytes));
+    assertThat(replay.recordingId()).isEqualTo(recording.getRecordingId());
+    assertThat(replay.status()).isEqualTo(VoiceRecordingStatus.FAILED);
+    assertThat(replay.transcriptionTaskId()).isNull();
+    assertThat(recordings.count()).isEqualTo(1);
+  }
+
+  @Test
+  void probeFailureMarksTheRecordingFailedWithDiagnosticAndReplaysTheFailure() {
+    when(probe.probe(any())).thenThrow(new VoiceMediaProbeException("ffprobe timed out", null));
+    byte[] bytes = "mystery media".getBytes(StandardCharsets.UTF_8);
+    UUID requestId = UUID.randomUUID();
+
     assertThatThrownBy(() ->
         module.accept(user, session.getSessionId(), 1, requestId, audio(bytes)))
-        .isInstanceOfSatisfying(BusinessException.class,
-            error -> assertThat(error.code()).isEqualTo(VoiceErrorCodes.VOICE_MEDIA_UNSUPPORTED));
+        .isInstanceOf(VoiceMediaProbeException.class);
+
+    var recording = recordings.findAll().getFirst();
+    assertThat(recording.getStatus()).isEqualTo(VoiceRecordingStatus.FAILED);
+    assertThat(recording.getSafeError()).isEqualTo(VoiceErrorCodes.VOICE_MEDIA_PROBE_FAILED);
+    assertThat(recording.getSha256()).isEqualTo(sha256(bytes)); // digest kept for replay
+    assertThat(recording.getStorageKey()).isNull();
+    assertThat(tasks.count()).isZero();
+
+    // Equal-content replay returns the recording with its current FAILED status.
+    var replay = module.accept(user, session.getSessionId(), 1, requestId, audio(bytes));
+    assertThat(replay.recordingId()).isEqualTo(recording.getRecordingId());
+    assertThat(replay.status()).isEqualTo(VoiceRecordingStatus.FAILED);
     assertThat(recordings.count()).isEqualTo(1);
+  }
+
+  @Test
+  void storageFailureMarksTheRecordingFailedInsteadOfStrandingItReceiving() throws Exception {
+    doThrow(new VoiceMediaStorageException("disk full", new java.io.IOException()))
+        .when(mediaStore).store(any(VoiceMediaKey.class), any(Path.class), anyLong(),
+            any(ProbedAudio.class));
+    byte[] bytes = "storable".getBytes(StandardCharsets.UTF_8);
+
+    assertThatThrownBy(() ->
+        module.accept(user, session.getSessionId(), 1, UUID.randomUUID(), audio(bytes)))
+        .isInstanceOf(VoiceMediaStorageException.class);
+
+    var recording = recordings.findAll().getFirst();
+    assertThat(recording.getStatus()).isEqualTo(VoiceRecordingStatus.FAILED);
+    assertThat(recording.getSafeError()).isEqualTo(VoiceErrorCodes.VOICE_MEDIA_STORAGE_FAILED);
+    assertThat(recording.getSha256()).isEqualTo(sha256(bytes));
+    assertThat(tasks.count()).isZero();
+  }
+
+  @Test
+  void uploadLevelFailuresAreNotRetryableWhileTranscriptionFailuresAre() {
+    // Upload-level failure: no media, retry refuses — the view must not promise a retry.
+    when(probe.probe(any())).thenThrow(new interview.pilot.voice.domain.VoiceMediaUnsupportedException());
+    assertThatThrownBy(() ->
+        module.accept(user, session.getSessionId(), 1, UUID.randomUUID(), audio("bad")));
+    var uploadFailed = recordings.findAll().getFirst();
+    var uploadView = module.get(user, session.getSessionId(), uploadFailed.getRecordingId());
+    assertThat(uploadView.status()).isEqualTo(VoiceRecordingStatus.FAILED);
+    assertThat(uploadView.retryable()).isFalse();
+    assertThat(uploadView.safeError()).isEqualTo(VoiceErrorCodes.VOICE_MEDIA_UNSUPPORTED);
+
+    // Transcription-level failure: media exists, retry is the recovery path. doReturn (not
+    // when) so the re-stub does not execute the still-active thenThrow stub above.
+    doReturn(new ProbedAudio("audio/webm", Duration.ofSeconds(30))).when(probe).probe(any());
+    var receipt = module.accept(user, session.getSessionId(), 1, UUID.randomUUID(), audio("ok"));
+    var transcribing = recordings.findByRecordingId(receipt.recordingId()).orElseThrow();
+    transcribing.moveTo(VoiceRecordingStatus.TRANSCRIBING);
+    transcribing.moveTo(VoiceRecordingStatus.FAILED);
+    recordings.saveAndFlush(transcribing);
+    var transcriptionView = module.get(user, session.getSessionId(), receipt.recordingId());
+    assertThat(transcriptionView.status()).isEqualTo(VoiceRecordingStatus.FAILED);
+    assertThat(transcriptionView.retryable()).isTrue();
   }
 
   @Test

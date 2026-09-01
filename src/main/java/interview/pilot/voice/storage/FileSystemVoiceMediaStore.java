@@ -127,6 +127,59 @@ public final class FileSystemVoiceMediaStore implements VoiceMediaStore {
   }
 
   @Override
+  public StoredVoiceMedia store(
+      VoiceMediaKey key, Path stagedFile, long maxBytes, ProbedAudio probed) {
+    Objects.requireNonNull(key, "key");
+    Objects.requireNonNull(stagedFile, "stagedFile");
+    Objects.requireNonNull(probed, "probed");
+    if (maxBytes <= 0) {
+      throw new IllegalArgumentException("maxBytes must be positive");
+    }
+    String storageKey = key.storageKey();
+    lock.lock();
+    try {
+      Path target = resolve(storageKey);
+      createSafeDirectories(target.getParent());
+      verifyPrivatePath(target.getParent());
+      rejectSymbolicLink(stagedFile);
+      if (!Files.isRegularFile(stagedFile, LinkOption.NOFOLLOW_LINKS)) {
+        throw new IllegalArgumentException("The staged voice media file is not a regular file");
+      }
+      long sizeBytes = Files.size(stagedFile);
+      if (sizeBytes > maxBytes) {
+        throw new VoiceMediaTooLargeException(maxBytes);
+      }
+      // No probing here: the caller verified the media in phase 2 (plan §9 keeps the probe
+      // outside the transaction); the staged file is hashed in one pass and moved in place.
+      String sha256 = hash(stagedFile);
+      verifyPrivateRoot();
+      verifyPrivatePath(target.getParent());
+      rejectSymbolicLink(target);
+      mover.move(stagedFile, target); // consumes the staged file
+      verifyPrivateRoot();
+      requireRegularFile(target);
+      setPrivateFilePermissions(target);
+      return new StoredVoiceMedia(
+          storageKey, sha256, sizeBytes, probed.mediaType(), probed.duration());
+    } catch (IOException exception) {
+      throw storageFailure("Unable to store voice media", exception);
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  private static String hash(Path file) throws IOException {
+    MessageDigest digest = sha256Digest();
+    try (InputStream input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
+      byte[] buffer = new byte[8192];
+      for (int read; (read = input.read(buffer)) >= 0;) {
+        digest.update(buffer, 0, read);
+      }
+    }
+    return HexFormat.of().formatHex(digest.digest());
+  }
+
+  @Override
   public VoiceMediaResource open(String storageKey) {
     lock.lock();
     try {

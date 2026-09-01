@@ -1,7 +1,9 @@
 package interview.pilot.voice.storage;
 
 import java.io.InputStream;
+import java.nio.file.Path;
 
+import interview.pilot.voice.domain.ProbedAudio;
 import interview.pilot.voice.domain.StoredVoiceMedia;
 import interview.pilot.voice.domain.VoiceMediaKey;
 import interview.pilot.voice.domain.VoiceMediaNotFoundException;
@@ -27,6 +29,23 @@ import interview.pilot.voice.domain.VoiceMediaUnsupportedException;
 public interface VoiceMediaStore {
 
   StoredVoiceMedia store(VoiceMediaKey key, InputStream source, long maxBytes);
+
+  /**
+   * Installs an already-staged file under the immutable key. The caller has already bounded
+   * the size (still enforced defensively) and probed the media — this variant performs the
+   * key/security validation and the atomic replacement only: no copying into an internal
+   * temp file and no probing. This is the upload module's phase-3 path, where a probe inside
+   * the database transaction would be slow work (plan §9); the stream variant remains for
+   * callers that have not staged anything (Task 7's TTS audio).
+   *
+   * <p>The staged file is CONSUMED on success (moved into place; the path no longer exists);
+   * on rejection the caller retains ownership and must clean it up. Rewrite semantics are
+   * identical to the stream variant: a reused key atomically replaces the previous file.
+   *
+   * @param stagedFile the caller's staged media file (a regular file, never user-controlled)
+   * @param probed the media type and duration the caller already verified
+   */
+  StoredVoiceMedia store(VoiceMediaKey key, Path stagedFile, long maxBytes, ProbedAudio probed);
 
   VoiceMediaResource open(String storageKey);
 

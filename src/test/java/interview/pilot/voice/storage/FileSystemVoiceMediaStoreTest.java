@@ -235,6 +235,95 @@ class FileSystemVoiceMediaStoreTest {
   }
 
   @Test
+  void installsAnAlreadyStagedFileWithoutProbingAndConsumesIt() throws Exception {
+    VoiceMediaKey key = recordingKey();
+    var probed = new ProbedAudio("audio/wav", Duration.ofSeconds(3));
+    var countingProbe = new CountingProbe();
+    var store = new FileSystemVoiceMediaStore(root, countingProbe);
+    Path staged = Files.createTempFile("staged-", ".audio");
+    Files.writeString(staged, "staged media");
+
+    var stored = store.store(key, staged, MAX, probed);
+
+    assertThat(countingProbe.calls()).isZero(); // phase 2 already probed; never re-probed
+    assertThat(staged).doesNotExist(); // consumed by the move
+    assertThat(stored.storageKey()).isEqualTo(key.storageKey());
+    assertThat(stored.sha256()).isEqualTo(sha256("staged media"));
+    assertThat(stored.sizeBytes()).isEqualTo(12);
+    assertThat(stored.mediaType()).isEqualTo("audio/wav");
+    assertThat(stored.duration()).isEqualTo(Duration.ofSeconds(3));
+    try (var resource = store.open(key.storageKey())) {
+      assertThat(new String(resource.inputStream().readAllBytes(), StandardCharsets.UTF_8))
+          .isEqualTo("staged media");
+    }
+  }
+
+  @Test
+  void stagedInstallKeepsTheAtomicReplaceSemanticsOfTheStreamVariant() throws Exception {
+    VoiceMediaKey key = recordingKey();
+    var store = new FileSystemVoiceMediaStore(root, probe);
+    store.store(key, stream("first"), MAX);
+    Path staged = Files.createTempFile("staged-", ".audio");
+    Files.writeString(staged, "second");
+
+    var stored = store.store(key, staged, MAX, new ProbedAudio("audio/webm", Duration.ofSeconds(1)));
+
+    assertThat(stored.sizeBytes()).isEqualTo(6);
+    try (var resource = store.open(key.storageKey())) {
+      assertThat(new String(resource.inputStream().readAllBytes(), StandardCharsets.UTF_8))
+          .isEqualTo("second");
+    }
+  }
+
+  @Test
+  void stagedInstallRejectsOversizedFilesAndLeavesThemToTheCaller() throws Exception {
+    VoiceMediaKey key = recordingKey();
+    var store = new FileSystemVoiceMediaStore(root, probe);
+    Path staged = Files.createTempFile("staged-", ".audio");
+    Files.write(staged, new byte[2000]);
+
+    assertThatThrownBy(() -> store.store(key, staged, MAX, new ProbedAudio(
+        "audio/webm", Duration.ofSeconds(1))))
+        .isInstanceOf(VoiceMediaTooLargeException.class);
+    assertThat(staged).exists(); // rejected: the caller retains ownership and cleans up
+    assertThat(root.resolve(key.storageKey())).doesNotExist();
+  }
+
+  @Test
+  void stagedInstallRefusesASymbolicLinkStagedFile() throws Exception {
+    VoiceMediaKey key = recordingKey();
+    var store = new FileSystemVoiceMediaStore(root, probe);
+    Path target = Files.createTempFile("staged-target-", ".audio");
+    Files.writeString(target, "secret");
+    Path link = Files.createTempFile("staged-", ".audio");
+    Files.delete(link);
+    try {
+      Files.createSymbolicLink(link, target);
+    } catch (UnsupportedOperationException | java.nio.file.FileSystemException exception) {
+      Assumptions.abort("Symbolic links are not available in this test environment");
+    }
+
+    assertThatIllegalArgumentException().isThrownBy(() ->
+        store.store(key, link, MAX, new ProbedAudio("audio/webm", Duration.ofSeconds(1))));
+    assertThat(Files.readString(target)).isEqualTo("secret");
+  }
+
+  /** Fails the test on any probe call — the staged-install variant must never probe. */
+  private static final class CountingProbe implements AudioProbe {
+    private int calls;
+
+    @Override
+    public ProbedAudio probe(Path file) {
+      calls++;
+      throw new AssertionError("the staged-install variant must not probe");
+    }
+
+    int calls() {
+      return calls;
+    }
+  }
+
+  @Test
   void deleteRejectsAStorageKeyWhoseTargetIsADirectory() throws Exception {
     var store = new FileSystemVoiceMediaStore(root, probe);
     String key = recordingKey().storageKey();

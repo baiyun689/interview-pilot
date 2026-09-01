@@ -65,10 +65,11 @@ import interview.pilot.voice.storage.VoiceMediaStore;
  *       upload byte limit while its SHA-256 is computed (never buffered in memory), then
  *       probed for the real media type and duration;</li>
  *   <li>short transaction: the recording row (and the turn) are re-locked via the {@code
- *       @Version} optimistic lock, the temp file is atomically installed at the immutable
- *       storage key through {@link VoiceMediaStore} (its internal stage → probe → move is
- *       the only file work), metadata is saved, the unique VOICE_TRANSCRIPTION task row is
- *       created in the same transaction, and the recording becomes UPLOADED.</li>
+ *       @Version} optimistic lock, the staged temp file is atomically installed at the
+ *       immutable storage key through the staged-file {@link VoiceMediaStore} overload
+ *       (validation + atomic move only — the probe already ran in phase 2, so no slow work
+ *       happens inside the transaction), metadata is saved, the unique VOICE_TRANSCRIPTION
+ *       task row is created in the same transaction, and the recording becomes UPLOADED.</li>
  * </ol>
  *
  * <p>The task row is published by the existing reliable path ({@code PendingTaskDispatcher}
@@ -76,25 +77,22 @@ import interview.pilot.voice.storage.VoiceMediaStore;
  * uses; Task 4 only makes the new type routable. The receipt therefore returns the task id
  * immediately while the row sits PENDING until Task 5's listener picks it up.
  *
- * <p>Failure recovery: probe/validation failures move RECEIVING → FAILED with a safe_error
- * and delete the temp file; a phase-3 conflict deletes the just-written immutable file
- * immediately (a rolled-back transaction would otherwise leave a file no row references — an
- * orphan the sweeper would never reclaim); a crash after phase 1 leaves a RECEIVING row
+ * <p>Failure recovery: probe/validation/storage failures move RECEIVING → FAILED with a
+ * safe_error and delete the temp file; a phase-3 conflict deletes the just-installed
+ * immutable file (a rolled-back transaction would otherwise leave a file no row references —
+ * an orphan the sweeper would never reclaim); a crash after phase 1 leaves a RECEIVING row
  * whose {@code expires_at} + {@code idx_voice_recording_expiry (status, expires_at)} make it
  * discoverable for Task 11's sweeper, and replays of its requestId are 409
  * VOICE_UPLOAD_IN_PROGRESS until then.
  *
- * <p>Idempotent replay (quality-review carry-over): {@link VoiceMediaStore} exposes no
- * digest-read API, so a duplicate requestId re-stores the upload at the same immutable key
- * (atomic replace is benign for identical content) and compares the stored digest against
- * the row. On mismatch the file is deleted and the requestId is stably 409
- * REQUEST_ID_CONFLICT (the original recording's media is therefore not preserved for a
- * mismatched replay — the row keeps its status and the transcript, the transcription task
- * fails over, and the client must re-record with a fresh requestId). A replay of a FAILED
+ * <p>Idempotent replay: a duplicate requestId hashes the staged bytes and compares the
+ * digest against the row BEFORE the store is ever touched — the live media (even of an
+ * ATTACHED recording) is never replaced or deleted, and equal content skips the re-store
+ * entirely. A mismatched digest is a stable 409 REQUEST_ID_CONFLICT with the original media
+ * untouched; the client must re-record with a fresh requestId. A replay of a FAILED
  * recording that never recorded a digest (size rejection interrupts streaming) cannot be
- * verified and is also 409. Replaying a probe-rejected upload re-runs the probe and fails
- * with the same deterministic 413/415 — the requestId outcome stays fixed, as the plan
- * requires.
+ * verified and is also 409. Equal-content replays return the recording with its current
+ * status — a probe-rejected upload therefore replays as a FAILED receipt, not a 415.
  */
 @Service
 @ConditionalOnProperty(prefix = "app.voice", name = "enabled", havingValue = "true")
@@ -143,6 +141,9 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
       return replay(user, outcome.existing(), audio);
     }
     long recordingId = outcome.recordingId();
+    String mediaKey = new VoiceMediaKey(
+        user.userId(), outcome.sessionDatabaseId(), VoiceMediaKind.RECORDING,
+        outcome.recordingUuid()).storageKey();
     TempWrite staged = null;
     try {
       staged = writeTempBounded(audio);
@@ -150,7 +151,7 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
       rejectUnsupported(probed.mediaType());
       rejectDuration(probed.duration());
       return phase3(user, sessionId, outcome.sessionDatabaseId(),
-          outcome.recordingUuid(), recordingId, staged.path(), probed);
+          outcome.recordingUuid(), recordingId, staged, probed);
     } catch (VoiceMediaTooLargeException exception) {
       failUpload(recordingId, VoiceErrorCodes.VOICE_UPLOAD_TOO_LARGE, null);
       throw new BusinessException(
@@ -165,6 +166,13 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
     } catch (VoiceMediaProbeException exception) {
       // Operational failure (ffprobe start/timeout/IO): recorded for diagnosis, kept off the wire.
       failUpload(recordingId, VoiceErrorCodes.VOICE_MEDIA_PROBE_FAILED,
+          staged == null ? null : staged.sha256());
+      throw exception;
+    } catch (VoiceMediaStorageException exception) {
+      // A phase-3 move may have installed the file before failing — keep the key clean,
+      // then mark the row FAILED so the requestId never looks like a 10-minute RECEIVING.
+      deleteMediaQuietly(mediaKey);
+      failUpload(recordingId, VoiceErrorCodes.VOICE_MEDIA_STORAGE_FAILED,
           staged == null ? null : staged.sha256());
       throw exception;
     } catch (BusinessException exception) {
@@ -286,10 +294,11 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
   }
 
   /**
-   * Replays a duplicate requestId (carry-over decision, see class comment): re-store at the
-   * immutable key, compare digests, delete on mismatch, and answer with the recording's
-   * current status. The replay consumes the requestId forever: every later attempt yields
-   * exactly the same outcome.
+   * Replays a duplicate requestId. The staged digest is compared against the row's sha256
+   * BEFORE the store is ever touched: the live media (even of an ATTACHED recording) is
+   * never replaced or deleted, and equal content needs no re-store at all. A mismatch is a
+   * stable 409 with the original media untouched. The replay consumes the requestId forever:
+   * every later attempt yields exactly the same outcome.
    */
   private VoiceRecordingReceipt replay(CurrentUser user, VoiceRecordingEntity existing,
       MultipartFile audio) {
@@ -299,32 +308,19 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
       // recorded, identity cannot be verified, so the requestId is treated as consumed.
       throw conflict("REQUEST_ID_CONFLICT", "uploadRequestId was already used for another upload");
     }
-    VoiceMediaKey key = new VoiceMediaKey(
-        user.userId(), existing.getSessionId(), VoiceMediaKind.RECORDING, existing.getRecordingId());
     TempWrite staged = null;
     try {
       staged = writeTempBounded(audio);
-      StoredVoiceMedia stored = mediaStore.store(
-          key, openTemp(staged.path()), properties.maxUploadBytes());
-      if (!stored.sha256().equals(expected)) {
-        mediaStore.delete(stored.storageKey());
+      if (!staged.sha256().equals(expected)) {
         throw conflict("REQUEST_ID_CONFLICT", "uploadRequestId was already used for another upload");
       }
-      if (existing.getStorageKey() == null) {
-        // The row owns no media (upload-level FAILED): the re-store existed only for the
-        // digest comparison and must not leave an unreferenced file behind.
-        mediaStore.delete(stored.storageKey());
-      }
+      // Equal content: the original upload already installed the media (or recorded the
+      // failure) — answer with the recording's current status, never touching the store.
       return receipt(user, existing.getRecordingId());
     } catch (VoiceMediaTooLargeException exception) {
       throw new BusinessException(
           VoiceErrorCodes.VOICE_UPLOAD_TOO_LARGE,
           "Voice upload exceeds the configured limit", HttpStatus.CONTENT_TOO_LARGE);
-    } catch (VoiceMediaUnsupportedException exception) {
-      // Re-storing identical rejected bytes fails the same way: the requestId outcome is fixed.
-      throw new BusinessException(
-          VoiceErrorCodes.VOICE_MEDIA_UNSUPPORTED,
-          "Voice media format is not supported", HttpStatus.UNSUPPORTED_MEDIA_TYPE);
     } finally {
       deleteQuietly(staged);
     }
@@ -337,13 +333,13 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
    */
   private VoiceRecordingReceipt phase3(
       CurrentUser user, UUID sessionId, Long sessionDatabaseId,
-      UUID recordingUuid, long recordingId, Path temp, ProbedAudio probed) {
+      UUID recordingUuid, long recordingId, TempWrite staged, ProbedAudio probed) {
     String storageKey = new VoiceMediaKey(
         user.userId(), sessionDatabaseId, VoiceMediaKind.RECORDING, recordingUuid).storageKey();
     for (int attempt = 0; ; attempt++) {
       try {
         return transactions.execute(status ->
-            phase3InTransaction(user, sessionId, recordingId, temp, probed));
+            phase3InTransaction(user, sessionId, recordingId, staged, probed));
       } catch (BusinessException exception) {
         // State conflicts (row already resolved / turn advanced) abort before the store, but
         // a rolled-back earlier attempt may still have installed the file — keep the key clean.
@@ -359,7 +355,7 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
   }
 
   private VoiceRecordingReceipt phase3InTransaction(
-      CurrentUser user, UUID sessionId, long recordingId, Path temp, ProbedAudio probed) {
+      CurrentUser user, UUID sessionId, long recordingId, TempWrite staged, ProbedAudio probed) {
     var recording = recordings.findById(recordingId).orElseThrow(() -> conflict(
         "REQUEST_ID_CONFLICT", "uploadRequestId was already used concurrently"));
     if (recording.getStatus() != VoiceRecordingStatus.RECEIVING) {
@@ -381,11 +377,17 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
     }
     VoiceMediaKey key = new VoiceMediaKey(
         user.userId(), session.getId(), VoiceMediaKind.RECORDING, recording.getRecordingId());
-    StoredVoiceMedia stored = mediaStore.store(
-        key, openTemp(temp), properties.maxUploadBytes());
+    // The store move consumes the staged file; a retried transaction whose first attempt
+    // already moved it finds the identical content installed and skips the move.
+    String sha256 = staged.sha256();
+    if (Files.exists(staged.path())) {
+      StoredVoiceMedia stored = mediaStore.store(
+          key, staged.path(), properties.maxUploadBytes(), probed);
+      sha256 = stored.sha256();
+    }
     recording.acceptUpload(
-        stored.storageKey(), stored.mediaType(), stored.sizeBytes(),
-        stored.duration() == null ? 0 : stored.duration().toMillis(), stored.sha256());
+        key.storageKey(), probed.mediaType(), staged.sizeBytes(),
+        probed.duration() == null ? 0 : probed.duration().toMillis(), sha256);
     UUID taskId = createTranscriptionTask(recording);
     recordings.flush(); // forces the @Version optimistic-lock check inside the transaction
     return new VoiceRecordingReceipt(
@@ -525,11 +527,15 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
 
   private VoiceRecordingView view(VoiceRecordingEntity recording, int turnNo) {
     boolean ready = recording.getStatus() == VoiceRecordingStatus.READY;
+    // Upload-level failures (no media, no transcription to retry) are not retryable:
+    // the client must re-record with a fresh requestId.
+    boolean retryable = recording.getStatus() == VoiceRecordingStatus.FAILED
+        && recording.getStorageKey() != null;
     return new VoiceRecordingView(
         recording.getRecordingId(), turnNo, recording.getStatus(),
         ready ? recording.getRawTranscript() : null,
         recording.getDurationMillis(),
-        recording.getStatus() == VoiceRecordingStatus.FAILED,
+        retryable,
         recording.getSafeError());
   }
 
@@ -550,14 +556,6 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
       throw new BusinessException(
           VoiceErrorCodes.VOICE_DURATION_EXCEEDED,
           "Voice recording exceeds the maximum duration", HttpStatus.CONTENT_TOO_LARGE);
-    }
-  }
-
-  private static InputStream openTemp(Path temp) {
-    try {
-      return Files.newInputStream(temp);
-    } catch (IOException exception) {
-      throw new VoiceMediaStorageException("Unable to read the staged voice upload", exception);
     }
   }
 
@@ -590,7 +588,7 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
           copied += read;
         }
       }
-      return new TempWrite(temp, HexFormat.of().formatHex(digest.digest()));
+      return new TempWrite(temp, HexFormat.of().formatHex(digest.digest()), copied);
     } catch (VoiceMediaTooLargeException exception) {
       deleteQuietly(temp);
       throw exception;
@@ -663,5 +661,5 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
     }
   }
 
-  private record TempWrite(Path path, String sha256) {}
+  private record TempWrite(Path path, String sha256, long sizeBytes) {}
 }

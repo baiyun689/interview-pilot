@@ -4,6 +4,8 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
@@ -11,6 +13,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
+import interview.pilot.voice.domain.ProbedAudio;
 import interview.pilot.voice.domain.StoredVoiceMedia;
 import interview.pilot.voice.domain.VoiceMediaKey;
 import interview.pilot.voice.domain.VoiceMediaNotFoundException;
@@ -45,6 +48,32 @@ public final class InMemoryVoiceMediaStore implements VoiceMediaStore {
     }
     media.put(storageKey, bytes);
     return new StoredVoiceMedia(storageKey, sha256(bytes), bytes.length, null, null);
+  }
+
+  @Override
+  public StoredVoiceMedia store(
+      VoiceMediaKey key, Path stagedFile, long maxBytes, ProbedAudio probed) {
+    Objects.requireNonNull(key, "key");
+    Objects.requireNonNull(stagedFile, "stagedFile");
+    Objects.requireNonNull(probed, "probed");
+    if (maxBytes <= 0) {
+      throw new IllegalArgumentException("maxBytes must be positive");
+    }
+    String storageKey = key.storageKey();
+    VoiceStorageKeys.requireValid(storageKey);
+    try {
+      long sizeBytes = Files.size(stagedFile);
+      if (sizeBytes > maxBytes) {
+        throw new VoiceMediaTooLargeException(maxBytes);
+      }
+      byte[] bytes = Files.readAllBytes(stagedFile);
+      Files.delete(stagedFile); // consumed, mirroring the file-system move semantics
+      media.put(storageKey, bytes);
+      return new StoredVoiceMedia(
+          storageKey, sha256(bytes), sizeBytes, probed.mediaType(), probed.duration());
+    } catch (IOException exception) {
+      throw new VoiceMediaStorageException("Unable to store voice media", exception);
+    }
   }
 
   @Override
