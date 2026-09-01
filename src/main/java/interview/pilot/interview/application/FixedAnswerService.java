@@ -213,12 +213,14 @@ public class FixedAnswerService {
 
     var decision = flow.next(size, new FixedInterviewFlowPolicy.Progress(
         phase, mainAsked, followUpsForCard, parent.getFollowUpQuota()));
-    return switch (decision.kind()) {
-      case FOLLOW_UP -> Next.followUp(decision.phase(), parent.getId());
-      case MAIN -> Next.main(
-          decision.phase(), card(allCards, decision.phase(), decision.mainQuestionSequence()));
-      case END -> Next.end();
-    };
+    if (decision instanceof FixedInterviewFlowPolicy.FollowUp followUp) {
+      return Next.followUp(followUp.phase(), parent.getId());
+    }
+    if (decision instanceof FixedInterviewFlowPolicy.MainQuestion main) {
+      return Next.main(
+          main.phase(), card(allCards, main.phase(), main.sequence()));
+    }
+    return Next.end();
   }
 
   private InterviewQuestionCardEntity card(

@@ -36,19 +36,35 @@ public final class FixedInterviewFlowPolicy {
       int followUpsForCurrentCard,
       int currentCardFollowUpQuota) { }
 
-  public record Decision(Kind kind, InterviewPhase phase, int mainQuestionSequence) {
-    public static Decision main(InterviewPhase phase, int sequence) {
-      return new Decision(Kind.MAIN, phase, sequence);
+  public sealed interface Decision permits MainQuestion, FollowUp, End {
+    static MainQuestion main(InterviewPhase phase, int sequence) {
+      return new MainQuestion(phase, sequence);
     }
 
-    public static Decision followUp(InterviewPhase phase) {
-      return new Decision(Kind.FOLLOW_UP, phase, 0);
+    static FollowUp followUp(InterviewPhase phase) {
+      return new FollowUp(phase);
     }
 
-    public static Decision end() {
-      return new Decision(Kind.END, null, 0);
+    static End end() {
+      return new End();
     }
   }
 
-  public enum Kind { MAIN, FOLLOW_UP, END }
+  public record MainQuestion(InterviewPhase phase, int sequence) implements Decision {
+    public MainQuestion {
+      if (phase == null || phase == InterviewPhase.SELF_INTRODUCTION || sequence < 1) {
+        throw new IllegalArgumentException("main question decision is invalid");
+      }
+    }
+  }
+
+  public record FollowUp(InterviewPhase phase) implements Decision {
+    public FollowUp {
+      if (phase == null || !phase.allowsFollowUp()) {
+        throw new IllegalArgumentException("follow-up decision is invalid");
+      }
+    }
+  }
+
+  public record End() implements Decision { }
 }

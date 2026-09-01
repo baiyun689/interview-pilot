@@ -19,10 +19,10 @@ import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.async.messaging.TaskMessage;
 import interview.pilot.interview.domain.FixedInterviewReport;
+import interview.pilot.interview.domain.FixedInterviewEvidencePolicy;
 import interview.pilot.interview.domain.InterviewBriefSnapshot;
 import interview.pilot.interview.domain.InterviewPhase;
 import interview.pilot.interview.domain.SessionStatus;
-import interview.pilot.interview.domain.TurnStatus;
 import interview.pilot.interview.infrastructure.InterviewQuestionCardRepository;
 import interview.pilot.interview.infrastructure.InterviewReportEntity;
 import interview.pilot.interview.infrastructure.InterviewReportRepository;
@@ -43,6 +43,7 @@ public class FixedInterviewReportHandler {
   private final InterviewReportRepository reports;
   private final ObjectMapper objectMapper;
   private final TransactionTemplate transactions;
+  private final FixedInterviewEvidencePolicy evidencePolicy = new FixedInterviewEvidencePolicy();
 
   public FixedInterviewReportHandler(
       FixedReportGenerator generator,
@@ -128,12 +129,13 @@ public class FixedInterviewReportHandler {
     InterviewBriefSnapshot brief = decode(session.getBriefSnapshot(), InterviewBriefSnapshot.class);
     var storedTurns = turns.findAllBySessionIdOrderByTurnNo(session.getId());
     var storedCards = cards.findAllBySessionIdOrderByPhaseAscPhaseSequenceAsc(session.getId());
-    int expectedTurnCount = brief.totalMainQuestionCount()
-        + storedCards.stream().mapToInt(card -> card.getFollowUpQuota()).sum();
-    if (storedTurns.size() != expectedTurnCount
-        || storedTurns.stream().anyMatch(turn -> turn.getStatus() != TurnStatus.COMPLETED)) {
-      throw new IllegalStateException("Completed interview evidence is incomplete");
-    }
+    evidencePolicy.requireComplete(
+        brief.totalMainQuestionCount(),
+        storedCards.stream().map(card -> new FixedInterviewEvidencePolicy.CardEvidence(
+            card.getId(), card.getPhase(), card.getFollowUpQuota())).toList(),
+        storedTurns.stream().map(turn -> new FixedInterviewEvidencePolicy.TurnEvidence(
+            turn.getTurnNo(), turn.getSourceCardId(), turn.getPhase(),
+            turn.getQuestionType(), turn.getStatus())).toList());
     var evidence = new ArrayList<FixedReportInput.TurnEvidence>();
     var allowed = new HashSet<String>();
     var availability = new EnumMap<InterviewPhase, String>(InterviewPhase.class);
