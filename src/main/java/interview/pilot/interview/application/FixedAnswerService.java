@@ -96,12 +96,20 @@ public class FixedAnswerService {
       throw conflict("ANSWER_CLAIM_BUSY", "Another answer claim is being admitted; retry shortly");
     }
     try {
-      try {
-        return transactions.execute(status -> claimInTransaction(user, sessionId, request));
-      } catch (DataIntegrityViolationException exception) {
-        return transactions.execute(status -> replayOrConflict(user, sessionId, request));
-      } catch (OptimisticLockingFailureException exception) {
-        throw conflict("TURN_ALREADY_CLAIMED", "Current interview turn is already being answered");
+      for (int attempt = 0; ; attempt++) {
+        try {
+          return transactions.execute(status -> claimInTransaction(user, sessionId, request));
+        } catch (DataIntegrityViolationException exception) {
+          return transactions.execute(status -> replayOrConflict(user, sessionId, request));
+        } catch (OptimisticLockingFailureException exception) {
+          // The recording's optimistic lock can lose to a concurrent discard/retry/transcription
+          // (the turn's own lock no longer conflicts — it is claimed pessimistically). One
+          // retry re-reads the fresh row state and surfaces the accurate 409; the same pattern
+          // guards VoiceAnswerServiceImpl.discardRecording.
+          if (attempt == 1) {
+            throw conflict("ANSWER_CLAIM_CONFLICT", "Answer claim conflicted; retry shortly");
+          }
+        }
       }
     } finally {
       if (token != null) {
@@ -158,10 +166,10 @@ public class FixedAnswerService {
       throw conflict("TURN_ALREADY_CLAIMED", "Current interview turn is already being answered");
     }
     VoiceRecordingEntity recording = null;
-    if (request.recordingId() != null) {
-      if (request.inputMode() != InputMode.VOICE) {
+    if (request.inputMode() == InputMode.VOICE) {
+      if (request.recordingId() == null) {
         throw conflict(VoiceErrorCodes.VOICE_INPUT_MODE_MISMATCH,
-            "recordingId requires inputMode VOICE");
+            "inputMode VOICE requires a recordingId");
       }
       if (session.getInterviewMode() != InterviewMode.VOICE) {
         throw conflict(VoiceErrorCodes.VOICE_INPUT_MODE_MISMATCH,
@@ -169,6 +177,9 @@ public class FixedAnswerService {
       }
       recording = requireBindableRecording(session, turn, request.recordingId());
       recording.attach(request.requestId());
+    } else if (request.recordingId() != null) {
+      throw conflict(VoiceErrorCodes.VOICE_INPUT_MODE_MISMATCH,
+          "recordingId requires inputMode VOICE");
     }
     var attempt = attempts.save(AnswerAttemptEntity.processing(
         request.requestId(), session.getId(), turn.getId(), hash));
@@ -222,6 +233,9 @@ public class FixedAnswerService {
     if (!attempt.getSessionId().equals(session.getId())
         || !attempt.getSubmissionFingerprint().equals(hash)) {
       throw conflict("REQUEST_ID_CONFLICT", "requestId was already used for another answer");
+    }
+    if (attempt.getStatus() == AnswerAttemptStatus.FAILED) {
+      throw conflict("ANSWER_FAILED", "The answer attempt failed; submit with a new requestId");
     }
     if (attempt.getStatus() != AnswerAttemptStatus.COMPLETED) {
       throw conflict("ANSWER_STILL_PROCESSING", "The answer is still processing");

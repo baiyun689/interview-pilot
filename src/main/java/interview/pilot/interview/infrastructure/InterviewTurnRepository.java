@@ -21,6 +21,10 @@ public interface InterviewTurnRepository extends JpaRepository<InterviewTurnEnti
    * so the loser re-reads the committed PROCESSING status and gets a stable
    * TURN_ALREADY_CLAIMED instead of a deadlock error (MySQL stays authoritative when the
    * Redis admission gate is unavailable).
+   *
+   * <p>The explicit {@code @Query} is required: the derived-query parser mis-parses the
+   * {@code ForUpdate} suffix as a property path ({@code InterviewTurnEntity.turnNo.forUpdate}),
+   * so this method must not be "simplified" back into a derived query.
    */
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   @Query("select turn from InterviewTurnEntity turn "

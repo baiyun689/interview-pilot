@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
 import java.time.Duration;
@@ -15,6 +16,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,6 +27,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -58,6 +63,8 @@ import interview.pilot.voice.domain.VoiceErrorCodes;
 import interview.pilot.voice.domain.VoiceRecordingStatus;
 import interview.pilot.voice.infrastructure.VoiceRecordingEntity;
 import interview.pilot.voice.infrastructure.VoiceRecordingRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 
 /**
  * Answer submission binding against MySQL (real repositories, V23 schema). A VOICE
@@ -112,8 +119,14 @@ class FixedAnswerBindingIT {
   @Autowired
   private FixedAnswerService answers;
 
-  @Autowired
+  @MockitoSpyBean
   private VoiceRecordingRepository recordings;
+
+  @Autowired
+  private PlatformTransactionManager transactionManager;
+
+  @PersistenceContext
+  private EntityManager entityManager;
 
   @Autowired
   private InterviewSessionRepository sessions;
@@ -252,6 +265,51 @@ class FixedAnswerBindingIT {
     assertThat(attempts.count()).isEqualTo(1);
   }
 
+  @Test
+  void replayOfAFailedAttemptReturnsAStableFailedCode() {
+    var recording = readyRecording(account, session, turn);
+    var request = new SubmitAnswerRequest(
+        UUID.randomUUID(), "转写确认", InputMode.VOICE, recording.getRecordingId());
+    answers.claim(user, session.getSessionId(), request);
+    var attempt = attempts.findByRequestId(request.requestId()).orElseThrow();
+    attempt.fail("ANSWER_PROCESSING_FAILED");
+    attempts.saveAndFlush(attempt);
+
+    assertThatThrownBy(() -> answers.claim(user, session.getSessionId(), request))
+        .isInstanceOfSatisfying(BusinessException.class, error -> {
+          assertThat(error.code()).isEqualTo("ANSWER_FAILED");
+          assertThat(error.status()).isEqualTo(HttpStatus.CONFLICT);
+        });
+    // The recording stays bound to the failed attempt: a retry must use a new requestId
+    // (and re-record or fall back to text) instead of rebinding.
+    assertThat(recordings.findByRecordingId(recording.getRecordingId()).orElseThrow().getStatus())
+        .isEqualTo(VoiceRecordingStatus.ATTACHED);
+    assertThat(attempts.count()).isEqualTo(1);
+  }
+
+  @Test
+  void replayOfAVoiceSubmissionAfterSessionCompletionReturnsTheStoredResultWithoutRebinding() {
+    var recording = readyRecording(account, session, turn);
+    var request = new SubmitAnswerRequest(
+        UUID.randomUUID(), "转写确认", InputMode.VOICE, recording.getRecordingId());
+    var result = submit(request);
+    // Reload: the processed submission advanced the session (version bump) — the detached
+    // fixture reference is stale.
+    var evaluating = sessions.findById(session.getId()).orElseThrow();
+    evaluating.beginEvaluation();
+    sessions.saveAndFlush(evaluating);
+
+    var replay = answers.process(answers.claim(user, session.getSessionId(), request));
+
+    assertThat(replay.idempotentReplay()).isTrue();
+    assertThat(replay.completedTurnNo()).isEqualTo(result.completedTurnNo());
+    assertThat(replay.sessionStatus()).isEqualTo(result.sessionStatus());
+    var bound = recordings.findByRecordingId(recording.getRecordingId()).orElseThrow();
+    assertThat(bound.getStatus()).isEqualTo(VoiceRecordingStatus.ATTACHED);
+    assertThat(bound.getAttachedAnswerRequestId()).isEqualTo(request.requestId());
+    assertThat(attempts.count()).isEqualTo(1);
+  }
+
   // ---------------------------------------------------------------- rejections
 
   @Test
@@ -302,6 +360,19 @@ class FixedAnswerBindingIT {
     assertThat(recordings.findByRecordingId(recording.getRecordingId()).orElseThrow().getStatus())
         .isEqualTo(VoiceRecordingStatus.READY);
     assertThat(attempts.count()).isZero();
+  }
+
+  @Test
+  void voiceInputModeWithoutARecordingIdIsAStableConflict() {
+    assertThatThrownBy(() -> answers.claim(user, session.getSessionId(),
+        new SubmitAnswerRequest(UUID.randomUUID(), "转写确认", InputMode.VOICE, null)))
+        .isInstanceOfSatisfying(BusinessException.class, error -> {
+          assertThat(error.code()).isEqualTo(VoiceErrorCodes.VOICE_INPUT_MODE_MISMATCH);
+          assertThat(error.status()).isEqualTo(HttpStatus.CONFLICT);
+        });
+    assertThat(attempts.count()).isZero();
+    assertThat(turns.findById(turn.getId()).orElseThrow().getStatus())
+        .isEqualTo(interview.pilot.interview.domain.TurnStatus.ASKED);
   }
 
   @Test
@@ -432,6 +503,46 @@ class FixedAnswerBindingIT {
         .extracting(VoiceRecordingEntity::getStatus)
         .containsExactlyInAnyOrder(VoiceRecordingStatus.ATTACHED, VoiceRecordingStatus.READY);
     assertThat(attempts.count()).isEqualTo(1);
+  }
+
+  @Test
+  void aRecordingDiscardedConcurrentlyWithTheClaimSurfacesTheAccurateStateOnRetry()
+      throws Exception {
+    var recording = readyRecording(account, session, turn);
+    var answerRequestId = UUID.randomUUID();
+    AtomicInteger reads = new AtomicInteger();
+    // The first recording read loads the stale READY snapshot through the claim
+    // transaction's persistence context while a concurrent discard commits a version bump in
+    // its own transaction: the claim's optimistic flush then loses and the retry must
+    // re-read the row instead of mislabeling the loss as TURN_ALREADY_CLAIMED.
+    doAnswer(invocation -> {
+      var stale = entityManager.find(VoiceRecordingEntity.class, recording.getId());
+      if (reads.getAndIncrement() == 0) {
+        var discarder = Executors.newSingleThreadExecutor();
+        discarder.execute(() -> new TransactionTemplate(transactionManager)
+            .executeWithoutResult(status -> {
+              var row = recordings.findById(recording.getId()).orElseThrow();
+              row.discard();
+              recordings.saveAndFlush(row);
+            }));
+        discarder.shutdown();
+        assertThat(discarder.awaitTermination(30, TimeUnit.SECONDS)).isTrue();
+      }
+      return Optional.ofNullable(stale);
+    }).when(recordings).findByRecordingId(recording.getRecordingId());
+
+    assertThatThrownBy(() -> answers.claim(user, session.getSessionId(),
+        new SubmitAnswerRequest(answerRequestId, "转写确认", InputMode.VOICE,
+            recording.getRecordingId())))
+        .isInstanceOfSatisfying(BusinessException.class, error -> {
+          assertThat(error.code()).isEqualTo(VoiceErrorCodes.VOICE_RECORDING_NOT_READY);
+          assertThat(error.status()).isEqualTo(HttpStatus.CONFLICT);
+        });
+    assertThat(recordings.findByRecordingId(recording.getRecordingId()).orElseThrow().getStatus())
+        .isEqualTo(VoiceRecordingStatus.DISCARDED);
+    assertThat(attempts.count()).isZero();
+    assertThat(turns.findById(turn.getId()).orElseThrow().getStatus())
+        .isEqualTo(interview.pilot.interview.domain.TurnStatus.ASKED);
   }
 
   // ---------------------------------------------------------------- helpers

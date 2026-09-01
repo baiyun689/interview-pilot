@@ -19,9 +19,10 @@ public final class VoiceErrorCodes {
   public static final String VOICE_RECORDING_ALREADY_ATTACHED = "VOICE_RECORDING_ALREADY_ATTACHED";
 
   /**
-   * Voice fields used in a text flow (plan §8.4): a recordingId with inputMode TEXT, or a
-   * recordingId on a TEXT-mode session. Both are client bugs — the correct client never
-   * sends them — so the stable 409 lets the frontend treat the request as unrecoverable.
+   * Voice and text submission fields mixed inconsistently (plan §8.4): a recordingId with
+   * inputMode TEXT, inputMode VOICE without a recordingId, or a recordingId on a TEXT-mode
+   * session. All are client bugs — the correct client never sends them — so the stable 409
+   * lets the frontend treat the request as unrecoverable.
    */
   public static final String VOICE_INPUT_MODE_MISMATCH = "VOICE_INPUT_MODE_MISMATCH";
 

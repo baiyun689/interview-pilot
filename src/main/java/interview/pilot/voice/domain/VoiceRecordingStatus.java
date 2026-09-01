@@ -5,6 +5,13 @@ public enum VoiceRecordingStatus {
   UPLOADED,
   TRANSCRIBING,
   READY,
+
+  /**
+   * Bound to the submitted answer attempt (§6.1): the binding happens inside the claim
+   * transaction and is irreversible. A FAILED attempt also keeps its recording ATTACHED —
+   * a failed attempt must be resubmitted with a new requestId, so the client should
+   * re-record (or fall back to text) rather than rebind the recording.
+   */
   ATTACHED,
   FAILED,
   DISCARDED;
