@@ -48,6 +48,6 @@ class AsyncTaskV9MigrationIT {
     latest.migrate();
     assertThat(jdbc.queryForObject(
         "select count(*) from flyway_schema_history where success=true", Integer.class))
-        .isEqualTo(22);
+        .isEqualTo(23);
   }
 }

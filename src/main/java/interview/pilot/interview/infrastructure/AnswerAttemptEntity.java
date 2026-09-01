@@ -41,8 +41,8 @@ public class AnswerAttemptEntity {
   @Column(name = "turn_id", nullable = false, updatable = false)
   private Long turnId;
 
-  @Column(name = "answer_hash", nullable = false, length = 64, updatable = false)
-  private String answerHash;
+  @Column(name = "submission_fingerprint", nullable = false, length = 64, updatable = false)
+  private String submissionFingerprint;
 
   @Enumerated(EnumType.STRING)
   @Column(nullable = false, length = 32)
@@ -65,12 +65,12 @@ public class AnswerAttemptEntity {
   private long version;
 
   public static AnswerAttemptEntity processing(
-      UUID requestId, Long sessionId, Long turnId, String answerHash) {
+      UUID requestId, Long sessionId, Long turnId, String submissionFingerprint) {
     var attempt = new AnswerAttemptEntity();
     attempt.requestId = requestId;
     attempt.sessionId = sessionId;
     attempt.turnId = turnId;
-    attempt.answerHash = answerHash;
+    attempt.submissionFingerprint = submissionFingerprint;
     attempt.status = AnswerAttemptStatus.PROCESSING;
     return attempt;
   }

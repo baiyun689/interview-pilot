@@ -169,7 +169,8 @@ public class FixedAnswerService {
   private FixedAnswerClaim replay(
       AnswerAttemptEntity attempt, UUID sessionId, SubmitAnswerRequest request, String hash) {
     var session = sessions.findBySessionId(sessionId).orElseThrow(this::notFound);
-    if (!attempt.getSessionId().equals(session.getId()) || !attempt.getAnswerHash().equals(hash)) {
+    if (!attempt.getSessionId().equals(session.getId())
+        || !attempt.getSubmissionFingerprint().equals(hash)) {
       throw conflict("REQUEST_ID_CONFLICT", "requestId was already used for another answer");
     }
     if (attempt.getStatus() != AnswerAttemptStatus.COMPLETED) {

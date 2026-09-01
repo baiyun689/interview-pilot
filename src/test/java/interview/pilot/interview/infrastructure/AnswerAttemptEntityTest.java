@@ -9,7 +9,7 @@ import jakarta.persistence.Column;
 class AnswerAttemptEntityTest {
   @Test
   void identityColumnsAreCreationOnlyAndHaveNoPublicSetters() throws Exception {
-    for (String fieldName : List.of("requestId", "sessionId", "turnId", "answerHash")) {
+    for (String fieldName : List.of("requestId", "sessionId", "turnId", "submissionFingerprint")) {
       Column column = AnswerAttemptEntity.class.getDeclaredField(fieldName).getAnnotation(Column.class);
       assertThat(column.updatable()).as(fieldName).isFalse();
       String setter = "set" + Character.toUpperCase(fieldName.charAt(0)) + fieldName.substring(1);
