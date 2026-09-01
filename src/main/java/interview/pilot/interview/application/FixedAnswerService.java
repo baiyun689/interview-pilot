@@ -22,6 +22,8 @@ import interview.pilot.interview.api.SubmitAnswerRequest;
 import interview.pilot.interview.domain.AnswerAttemptStatus;
 import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.domain.FixedInterviewFlowPolicy;
+import interview.pilot.interview.domain.InputMode;
+import interview.pilot.interview.domain.InterviewMode;
 import interview.pilot.interview.domain.InterviewPhase;
 import interview.pilot.interview.domain.InterviewSize;
 import interview.pilot.interview.domain.QuestionType;
@@ -29,11 +31,16 @@ import interview.pilot.interview.domain.SessionStatus;
 import interview.pilot.interview.infrastructure.AnswerAttemptEntity;
 import interview.pilot.interview.infrastructure.AnswerAttemptRepository;
 import interview.pilot.interview.infrastructure.InterviewQuestionCardEntity;
+import interview.pilot.interview.infrastructure.InterviewSessionEntity;
 import interview.pilot.interview.infrastructure.InterviewQuestionCardRepository;
 import interview.pilot.interview.infrastructure.InterviewSessionRepository;
 import interview.pilot.interview.infrastructure.InterviewTurnEntity;
 import interview.pilot.interview.infrastructure.InterviewTurnRepository;
 import interview.pilot.interview.rag.RagContextSnapshot;
+import interview.pilot.voice.domain.VoiceErrorCodes;
+import interview.pilot.voice.domain.VoiceRecordingStatus;
+import interview.pilot.voice.infrastructure.VoiceRecordingEntity;
+import interview.pilot.voice.infrastructure.VoiceRecordingRepository;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -48,6 +55,7 @@ public class FixedAnswerService {
   private final FollowUpGenerator followUps;
   private final ObjectMapper objectMapper;
   private final TransactionTemplate transactions;
+  private final VoiceRecordingRepository recordings;
   private final FixedInterviewFlowPolicy flow = new FixedInterviewFlowPolicy();
 
   public FixedAnswerService(
@@ -59,7 +67,8 @@ public class FixedAnswerService {
       ProcessingClaim coordination,
       FollowUpGenerator followUps,
       ObjectMapper objectMapper,
-      PlatformTransactionManager transactionManager) {
+      PlatformTransactionManager transactionManager,
+      VoiceRecordingRepository recordings) {
     this.sessions = sessions;
     this.turns = turns;
     this.cards = cards;
@@ -69,6 +78,7 @@ public class FixedAnswerService {
     this.followUps = followUps;
     this.objectMapper = objectMapper;
     this.transactions = new TransactionTemplate(transactionManager);
+    this.recordings = recordings;
   }
 
   public FixedAnswerClaim claim(
@@ -141,19 +151,59 @@ public class FixedAnswerService {
     if (session.getStatus() != SessionStatus.INTERVIEWING) {
       throw conflict("INTERVIEW_NOT_ACTIVE", "Interview is not accepting answers");
     }
-    var turn = turns.findBySessionIdAndTurnNo(session.getId(), session.getCurrentTurnNo())
+    var turn = turns.findBySessionIdAndTurnNoForUpdate(session.getId(), session.getCurrentTurnNo())
         .orElseThrow(() -> conflict("CURRENT_TURN_MISSING", "Current interview turn is missing"));
     if (turn.getStatus() != interview.pilot.interview.domain.TurnStatus.ASKED
         && turn.getStatus() != interview.pilot.interview.domain.TurnStatus.FAILED) {
       throw conflict("TURN_ALREADY_CLAIMED", "Current interview turn is already being answered");
     }
+    VoiceRecordingEntity recording = null;
+    if (request.recordingId() != null) {
+      if (request.inputMode() != InputMode.VOICE) {
+        throw conflict(VoiceErrorCodes.VOICE_INPUT_MODE_MISMATCH,
+            "recordingId requires inputMode VOICE");
+      }
+      if (session.getInterviewMode() != InterviewMode.VOICE) {
+        throw conflict(VoiceErrorCodes.VOICE_INPUT_MODE_MISMATCH,
+            "voice recordings require a voice interview");
+      }
+      recording = requireBindableRecording(session, turn, request.recordingId());
+      recording.attach(request.requestId());
+    }
     var attempt = attempts.save(AnswerAttemptEntity.processing(
         request.requestId(), session.getId(), turn.getId(), hash));
-    turn.beginAnswer(request.requestId(), request.answer());
+    turn.beginAnswer(request.requestId(), request.answer(), request.inputMode());
     attempts.flush();
     turns.flush();
+    if (recording != null) {
+      recordings.flush(); // forces the @Version optimistic-lock check inside the transaction
+    }
     Work work = buildWork(session, turn, attempt.getId(), request);
     return new FixedAnswerClaim(turn.getTurnNo(), true, null, work);
+  }
+
+  /**
+   * A recording is bindable only when it is the current user's, belongs to this session and
+   * THIS turn, and its transcript is READY. Everything else is hidden as 404 (plan §8.6);
+   * READY → ATTACHED is the single allowed state change, so double-binding is impossible.
+   */
+  private VoiceRecordingEntity requireBindableRecording(
+      InterviewSessionEntity session, InterviewTurnEntity turn, UUID recordingId) {
+    var recording = recordings.findByRecordingId(recordingId).orElseThrow(this::voiceRecordingNotFound);
+    if (!recording.getUserAccountId().equals(session.getUserAccountId())
+        || !recording.getSessionId().equals(session.getId())
+        || !recording.getTurnId().equals(turn.getId())) {
+      throw voiceRecordingNotFound();
+    }
+    if (recording.getStatus() == VoiceRecordingStatus.ATTACHED) {
+      throw conflict(VoiceErrorCodes.VOICE_RECORDING_ALREADY_ATTACHED,
+          "The recording is already bound to an answer");
+    }
+    if (recording.getStatus() != VoiceRecordingStatus.READY) {
+      throw conflict(VoiceErrorCodes.VOICE_RECORDING_NOT_READY,
+          "The recording transcript is not ready to submit");
+    }
+    return recording;
   }
 
   private FixedAnswerClaim replayOrConflict(
@@ -293,6 +343,11 @@ public class FixedAnswerService {
 
   private BusinessException notFound() {
     return new BusinessException("INTERVIEW_NOT_FOUND", "Interview not found", HttpStatus.NOT_FOUND);
+  }
+
+  private BusinessException voiceRecordingNotFound() {
+    return new BusinessException(VoiceErrorCodes.VOICE_RECORDING_NOT_FOUND,
+        "Voice recording not found", HttpStatus.NOT_FOUND);
   }
 
   private BusinessException conflict(String code, String message) {

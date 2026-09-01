@@ -5,9 +5,28 @@ import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+import jakarta.persistence.LockModeType;
 
 public interface InterviewTurnRepository extends JpaRepository<InterviewTurnEntity, Long> {
   Optional<InterviewTurnEntity> findBySessionIdAndTurnNo(Long sessionId, int turnNo);
+
+  /**
+   * Claim-time locking read of the current turn (plan §8.4). Concurrent claims otherwise
+   * deadlock on the turn row: the attempt INSERT's foreign-key check holds a shared lock
+   * while the claim UPDATE needs an exclusive one. Locking the turn first serializes claims
+   * so the loser re-reads the committed PROCESSING status and gets a stable
+   * TURN_ALREADY_CLAIMED instead of a deadlock error (MySQL stays authoritative when the
+   * Redis admission gate is unavailable).
+   */
+  @Lock(LockModeType.PESSIMISTIC_WRITE)
+  @Query("select turn from InterviewTurnEntity turn "
+      + "where turn.sessionId = :sessionId and turn.turnNo = :turnNo")
+  Optional<InterviewTurnEntity> findBySessionIdAndTurnNoForUpdate(
+      @Param("sessionId") Long sessionId, @Param("turnNo") int turnNo);
 
   Optional<InterviewTurnEntity> findByRequestId(UUID requestId);
 

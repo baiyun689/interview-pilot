@@ -19,6 +19,13 @@ public final class VoiceErrorCodes {
   public static final String VOICE_RECORDING_ALREADY_ATTACHED = "VOICE_RECORDING_ALREADY_ATTACHED";
 
   /**
+   * Voice fields used in a text flow (plan §8.4): a recordingId with inputMode TEXT, or a
+   * recordingId on a TEXT-mode session. Both are client bugs — the correct client never
+   * sends them — so the stable 409 lets the frontend treat the request as unrecoverable.
+   */
+  public static final String VOICE_INPUT_MODE_MISMATCH = "VOICE_INPUT_MODE_MISMATCH";
+
+  /**
    * Diagnostic safe_error stored on FAILED recordings when the media probe failed
    * operationally (ffprobe start/timeout/IO). Not a stable HTTP code: the wire response for
    * operational probe failures stays a generic 500 (plan §14 keeps provider details off the

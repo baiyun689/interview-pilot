@@ -31,7 +31,8 @@ class FixedAnswerServiceTest {
         mock(InterviewSessionRepository.class), mock(InterviewTurnRepository.class),
         mock(InterviewQuestionCardRepository.class), mock(AnswerAttemptRepository.class),
         mock(AsyncTaskRepository.class), coordination, mock(FollowUpGenerator.class),
-        new ObjectMapper(), mock(PlatformTransactionManager.class));
+        new ObjectMapper(), mock(PlatformTransactionManager.class),
+        mock(interview.pilot.voice.infrastructure.VoiceRecordingRepository.class));
 
     assertThatThrownBy(() -> service.claim(
         new CurrentUser(1L, UUID.randomUUID(), "user@example.com", "User"),

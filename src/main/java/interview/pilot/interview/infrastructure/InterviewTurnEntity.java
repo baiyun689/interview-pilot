@@ -83,12 +83,13 @@ public class InterviewTurnEntity {
     return turn;
   }
 
-  public void beginAnswer(UUID requestId, String answerText) {
+  public void beginAnswer(UUID requestId, String answerText, InputMode inputMode) {
     if (status != TurnStatus.ASKED && status != TurnStatus.FAILED) throw new IllegalStateException("turn cannot be claimed");
-    if (requestId == null || answerText == null || answerText.isBlank()) throw new IllegalArgumentException("answer is required");
+    if (requestId == null || answerText == null || answerText.isBlank() || inputMode == null)
+      throw new IllegalArgumentException("answer is required");
     this.requestId = requestId;
     this.answerText = answerText.trim();
-    this.inputMode = InputMode.TEXT;
+    this.inputMode = inputMode;
     this.status = TurnStatus.PROCESSING;
     this.processingError = null;
   }

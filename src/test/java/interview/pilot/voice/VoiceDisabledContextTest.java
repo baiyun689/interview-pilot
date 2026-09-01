@@ -45,6 +45,7 @@ import interview.pilot.resume.infrastructure.ResumeRepository;
 import interview.pilot.voice.application.SpeechRecognizer;
 import interview.pilot.voice.config.VoiceProperties;
 import interview.pilot.voice.infrastructure.AudioProbe;
+import interview.pilot.voice.infrastructure.VoiceRecordingRepository;
 import interview.pilot.voice.storage.VoiceMediaStore;
 
 @SpringBootTest(properties = {
@@ -111,6 +112,9 @@ class VoiceDisabledContextTest {
 
   @MockitoBean
   private KnowledgeDocumentJpaRepository knowledgeDocumentJpaRepository;
+
+  @MockitoBean
+  private VoiceRecordingRepository voiceRecordingRepository;
 
   @MockitoBean
   private RateLimiter rateLimiter;
