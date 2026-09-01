@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiClientError, setAccessToken } from './request'
+import { ApiClientError, onUnauthorized, setAccessToken } from './request'
 import {
   discardVoiceRecording,
   fetchVoiceCapabilities,
@@ -153,6 +153,70 @@ describe('voice api', () => {
     const failure = await promise.catch((error: unknown) => error)
     expect(failure).toBeInstanceOf(DOMException)
     expect((failure as DOMException).name).toBe('AbortError')
+  })
+
+  it('调用前已中止的 AbortSignal 直接拒绝，不发任何请求', async () => {
+    vi.stubGlobal('XMLHttpRequest', FakeXHR)
+    const controller = new AbortController()
+    controller.abort()
+
+    const failure = await uploadVoiceRecording(
+      'session-1', 1, 'req-1', new Blob(['x']), undefined, controller.signal,
+    ).catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(DOMException)
+    expect((failure as DOMException).name).toBe('AbortError')
+    expect(FakeXHR.instances).toHaveLength(0)
+  })
+
+  it('上传 401 时刷新令牌并用新令牌重传一次（评审 I3）', async () => {
+    setAccessToken('expired-token')
+    vi.stubGlobal('XMLHttpRequest', FakeXHR)
+    const fetchMock = vi.fn().mockResolvedValue(json({ accessToken: 'fresh-token' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const promise = uploadVoiceRecording('session-1', 1, 'req-1', new Blob(['x']))
+    const first = lastXhr()
+    first.status = 401
+    first.responseText = JSON.stringify({ code: 'UNAUTHORIZED', message: 'token expired' })
+    first.onload?.()
+
+    await vi.waitFor(() => expect(FakeXHR.instances).toHaveLength(2))
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/refresh', expect.objectContaining({ method: 'POST' }))
+    const second = lastXhr()
+    expect(second.setRequestHeader).toHaveBeenCalledWith('Authorization', 'Bearer fresh-token')
+
+    second.status = 202
+    second.responseText = JSON.stringify({ recordingId: 'r', status: 'UPLOADED', transcriptionTaskId: null })
+    second.onload?.()
+
+    await expect(promise).resolves.toMatchObject({ status: 202, data: { recordingId: 'r' } })
+  })
+
+  it('刷新后重传仍 401 时通知未授权处理器并拒绝（评审 I3）', async () => {
+    setAccessToken('stale-token')
+    vi.stubGlobal('XMLHttpRequest', FakeXHR)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ accessToken: 'fresh-token' })))
+    const handler = vi.fn()
+    const unsubscribe = onUnauthorized(handler)
+
+    const promise = uploadVoiceRecording('session-1', 1, 'req-1', new Blob(['x']))
+    const first = lastXhr()
+    first.status = 401
+    first.responseText = JSON.stringify({ code: 'UNAUTHORIZED', message: 'token expired' })
+    first.onload?.()
+
+    await vi.waitFor(() => expect(FakeXHR.instances).toHaveLength(2))
+    const second = lastXhr()
+    second.status = 401
+    second.responseText = JSON.stringify({ code: 'UNAUTHORIZED', message: 'still expired' })
+    second.onload?.()
+
+    const failure = await promise.catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(ApiClientError)
+    expect((failure as ApiClientError).status).toBe(401)
+    expect(handler).toHaveBeenCalled()
+    unsubscribe()
   })
 
   it('getVoiceRecording / retry / discard 使用正确的路径与方法', async () => {

@@ -78,7 +78,8 @@ export function authenticatedInit(init: RequestInit = {}): RequestInit {
   return { ...init, headers }
 }
 
-async function refreshAccessToken(): Promise<boolean> {
+/** 刷新 accessToken（并发调用合并为单次请求）；供不走 fetch 封装的调用方（如 XHR 上传）复用 */
+export async function refreshAccessToken(): Promise<boolean> {
   if (!refreshInFlight) {
     refreshInFlight = fetch('/api/auth/refresh', { method: 'POST' })
       .then(async (response) => {

@@ -2,6 +2,8 @@ import {
   ApiClientError,
   fetchWithAuthRetry,
   getAccessToken,
+  notifyUnauthorized,
+  refreshAccessToken,
   request,
   requestWithMeta,
   type ApiResponse,
@@ -68,28 +70,31 @@ function audioFileName(blob: Blob, uploadRequestId: string): string {
   return `voice-${uploadRequestId}.${extension}`
 }
 
-/**
- * 上传录音（计划 §8.2）：multipart/form-data，字段 uploadRequestId + 文件 audio。
- * fetch 不暴露上传进度，因此使用 XMLHttpRequest 实现 onProgress；错误处理与
- * 其余 API 保持一致（ApiClientError 携带后端稳定 code，如 VOICE_UPLOAD_TOO_LARGE）。
- */
-export function uploadVoiceRecording(
-  sessionId: string,
-  turnNo: number,
+interface UploadOptions {
+  onProgress?: (progress: UploadProgress) => void
+  signal?: AbortSignal
+}
+
+/** 单次 multipart 上传；401 由调用方决定是否刷新令牌后重传。 */
+function sendUploadOnce(
+  url: string,
   uploadRequestId: string,
   blob: Blob,
-  onProgress?: (progress: UploadProgress) => void,
-  signal?: AbortSignal,
+  token: string | null,
+  options: UploadOptions,
 ): Promise<ApiResponse<VoiceRecordingUploadReceipt>> {
-  const url = `/api/interviews/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(String(turnNo))}/voice-recordings`
   return new Promise((resolve, reject) => {
+    // 评审 M4：调用前信号已中止时直接拒绝，不发任何请求
+    if (options.signal?.aborted) {
+      reject(new DOMException('The operation was aborted.', 'AbortError'))
+      return
+    }
     const xhr = new XMLHttpRequest()
     xhr.open('POST', url)
-    const token = getAccessToken()
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
-    if (onProgress) {
+    if (options.onProgress) {
       xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable) onProgress({ loaded: event.loaded, total: event.total })
+        if (event.lengthComputable) options.onProgress!({ loaded: event.loaded, total: event.total })
       }
     }
     xhr.onload = () => {
@@ -108,15 +113,51 @@ export function uploadVoiceRecording(
       reject(new ApiClientError(0, 'NETWORK_ERROR', '网络连接失败，请检查网络后重试', null))
     }
     const onAbort = () => xhr.abort()
-    if (signal) signal.addEventListener('abort', onAbort, { once: true })
+    if (options.signal) options.signal.addEventListener('abort', onAbort, { once: true })
     xhr.onabort = () => {
-      if (signal) signal.removeEventListener('abort', onAbort)
+      options.signal?.removeEventListener('abort', onAbort)
       reject(new DOMException('The operation was aborted.', 'AbortError'))
     }
     const form = new FormData()
     form.append('uploadRequestId', uploadRequestId)
     form.append('audio', blob, audioFileName(blob, uploadRequestId))
     xhr.send(form)
+  })
+}
+
+/**
+ * 上传录音（计划 §8.2）：multipart/form-data，字段 uploadRequestId + 文件 audio。
+ * fetch 不暴露上传进度，因此使用 XMLHttpRequest 实现 onProgress；错误处理与
+ * 其余 API 保持一致（ApiClientError 携带后端稳定 code，如 VOICE_UPLOAD_TOO_LARGE）。
+ * 认证语义与 fetchWithAuthRetry 对齐（评审 I3）：401 时刷新令牌并重传一次，
+ * 刷新失败或重传仍 401 时通知未授权处理器。录音动辄数分钟，上传时令牌过期
+ * 是真实场景，不能让一次 401 丢掉整段录音。
+ */
+export function uploadVoiceRecording(
+  sessionId: string,
+  turnNo: number,
+  uploadRequestId: string,
+  blob: Blob,
+  onProgress?: (progress: UploadProgress) => void,
+  signal?: AbortSignal,
+): Promise<ApiResponse<VoiceRecordingUploadReceipt>> {
+  const url = `/api/interviews/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(String(turnNo))}/voice-recordings`
+  const options: UploadOptions = { onProgress, signal }
+  return sendUploadOnce(url, uploadRequestId, blob, getAccessToken(), options).catch((error: unknown) => {
+    if (!(error instanceof ApiClientError) || error.status !== 401) throw error
+    return refreshAccessToken().then((refreshed) => {
+      if (!refreshed) {
+        notifyUnauthorized()
+        throw error
+      }
+      return sendUploadOnce(url, uploadRequestId, blob, getAccessToken(), options).then(
+        (result) => result,
+        (secondError: unknown) => {
+          if (secondError instanceof ApiClientError && secondError.status === 401) notifyUnauthorized()
+          throw secondError
+        },
+      )
+    })
   })
 }
 
@@ -176,6 +217,8 @@ export async function fetchVoiceMediaBlob(mediaUrl: string, signal?: AbortSignal
     if (error instanceof DOMException && error.name === 'AbortError') throw error
     throw new ApiClientError(0, 'NETWORK_ERROR', '网络连接失败，请检查网络后重试', null)
   }
+  // 评审 M5：与 requestWithMeta 对齐，最终 401 时通知未授权处理器
+  if (response.status === 401) notifyUnauthorized()
   if (!response.ok) {
     throw mediaError(response.status, await safeText(response), (name) => response.headers.get(name))
   }
