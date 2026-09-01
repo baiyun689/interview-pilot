@@ -90,12 +90,24 @@ class RetryableTaskPolicyTest {
   }
 
   @Test
+  void speechClaimKeyMatchesTheQuestionSpeechBizKeyFormatOwnedByThePolicy() {
+    var policy = new QuestionSpeechSynthesisRetryPolicy();
+    UUID speechId = UUID.randomUUID();
+
+    assertThat(policy.claimKey(task(
+        AsyncTaskType.QUESTION_SPEECH_SYNTHESIS,
+        QuestionSpeechSynthesisRetryPolicy.BIZ_KEY_PREFIX + speechId)))
+        .isEqualTo(QuestionSpeechSynthesisRetryPolicy.BIZ_KEY_PREFIX + speechId);
+  }
+
+  @Test
   void malformedBizKeysFailWithTaskStateInvalidForEveryPolicy() {
     var resumePolicy = new ResumeAnalysisRetryPolicy(mock(ResumeRepository.class));
     var preparationPolicy = new InterviewPreparationRetryPolicy(mock(InterviewSessionRepository.class));
     var evaluationPolicy = new InterviewEvaluationRetryPolicy(mock(InterviewSessionRepository.class));
     var indexPolicy = new KnowledgeDocumentIndexRetryPolicy(mock(KnowledgeDocumentRepository.class));
     var voicePolicy = new VoiceTranscriptionRetryPolicy();
+    var speechPolicy = new QuestionSpeechSynthesisRetryPolicy();
 
     expectTaskStateInvalid(() ->
         resumePolicy.claimKey(task(AsyncTaskType.RESUME_ANALYSIS, "resume:not-a-number")));
@@ -107,6 +119,8 @@ class RetryableTaskPolicyTest {
         indexPolicy.claimKey(task(AsyncTaskType.KNOWLEDGE_DOCUMENT_INDEX, "doc:1")));
     expectTaskStateInvalid(() ->
         voicePolicy.claimKey(task(AsyncTaskType.VOICE_TRANSCRIPTION, "recording:1")));
+    expectTaskStateInvalid(() ->
+        speechPolicy.claimKey(task(AsyncTaskType.QUESTION_SPEECH_SYNTHESIS, "speech:1")));
   }
 
   @Test
@@ -183,6 +197,23 @@ class RetryableTaskPolicyTest {
   }
 
   @Test
+  void speechResetRefusesGenericRetryWithTheStableError() {
+    // Task 7: the generic /api/tasks/{id}/retry endpoint must refuse to reset a synthesis
+    // task alone — the speech row and task row stay in epoch lockstep, and the speech retry
+    // endpoint (Task 8) owns the FAILED → PENDING transition.
+    var policy = new QuestionSpeechSynthesisRetryPolicy();
+
+    assertThatThrownBy(() -> policy.reset(
+        task(AsyncTaskType.QUESTION_SPEECH_SYNTHESIS,
+            "question-speech:" + UUID.randomUUID()), 1L))
+        .isInstanceOfSatisfying(BusinessException.class, error -> {
+          assertThat(error.code()).isEqualTo("TASK_NOT_RETRYABLE");
+          assertThat(error.getMessage())
+              .isEqualTo("Voice synthesis retry is managed by the question speech");
+        });
+  }
+
+  @Test
   void wrongBusinessStateFailsWithTaskStateInvalid() {
     var repository = mock(ResumeRepository.class);
     var policy = new ResumeAnalysisRetryPolicy(repository);
@@ -205,6 +236,13 @@ class RetryableTaskPolicyTest {
     // Pinned so the constant value cannot drift from the format VoiceAnswerServiceImpl
     // writes (Task 4 review M4).
     assertThat(VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX).isEqualTo("voice-recording:");
+  }
+
+  @Test
+  void speechBizKeyPrefixIsTheSingleSourceForTheTaskFormat() {
+    // Pinned so the constant value cannot drift from the format QuestionSpeechTaskCreator
+    // writes and the listener's claim key (Task 7).
+    assertThat(QuestionSpeechSynthesisRetryPolicy.BIZ_KEY_PREFIX).isEqualTo("question-speech:");
   }
 
   private static void expectTaskStateInvalid(

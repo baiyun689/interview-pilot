@@ -62,12 +62,20 @@ public class RabbitTopologyConfig {
   public static final String VOICE_TRANSCRIPTION_DLQ =
       "interview-pilot.voice.transcription.dlq";
 
+  public static final String VOICE_SYNTHESIS_MAIN_EXCHANGE =
+      "interview-pilot.voice.synthesis";
+  public static final String VOICE_SYNTHESIS_MAIN_QUEUE =
+      "interview-pilot.voice.synthesis.main";
+  public static final String VOICE_SYNTHESIS_DLQ =
+      "interview-pilot.voice.synthesis.dlq";
+
   static final String RESUME_ANALYSIS_ROUTING_KEY = "resume.analysis";
   static final String INTERVIEW_REPORT_ROUTING_KEY = "interview.report";
   static final String INTERVIEW_PREPARATION_ROUTING_KEY = "interview.preparation";
   static final String KNOWLEDGE_INDEX_ROUTING_KEY = "knowledge.index";
   static final String KNOWLEDGE_DELETE_ROUTING_KEY = "knowledge.delete";
   static final String VOICE_TRANSCRIPTION_ROUTING_KEY = "voice.transcription";
+  static final String VOICE_SYNTHESIS_ROUTING_KEY = "voice.synthesis";
   /** Wire-level retry-delay counter; tests outside this package build exhausted-message sources. */
   public static final String RETRY_COUNT_HEADER = "x-retry-count";
   static final int[] RETRY_DELAYS_MILLIS = {5_000, 30_000, 120_000};
@@ -86,6 +94,7 @@ public class RabbitTopologyConfig {
     declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.KNOWLEDGE_DOCUMENT_INDEX)));
     declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.KNOWLEDGE_DOCUMENT_DELETE)));
     declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.VOICE_TRANSCRIPTION)));
+    declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.QUESTION_SPEECH_SYNTHESIS)));
     return new Declarables(declarations);
   }
 
@@ -133,6 +142,13 @@ public class RabbitTopologyConfig {
           "interview-pilot.voice.transcription.dead-letter",
           VOICE_TRANSCRIPTION_DLQ,
           "voice.transcription.dead");
+      case QUESTION_SPEECH_SYNTHESIS -> new PipelineRoute(
+          VOICE_SYNTHESIS_MAIN_EXCHANGE,
+          VOICE_SYNTHESIS_MAIN_QUEUE,
+          VOICE_SYNTHESIS_ROUTING_KEY,
+          "interview-pilot.voice.synthesis.dead-letter",
+          VOICE_SYNTHESIS_DLQ,
+          "voice.synthesis.dead");
     };
   }
 
