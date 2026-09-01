@@ -140,4 +140,20 @@ public class QuestionSpeechEntity {
     moveTo(QuestionSpeechStatus.FAILED);
     this.safeError = error;
   }
+
+  /**
+   * FAILED → PENDING with a fenced execution epoch (V9 precedent, mirror of the recording's
+   * {@code beginTranscription}): the manual retry path (Task 8) bumps the speech epoch in
+   * lockstep with the task row so stale listener messages from the old generation lose.
+   * Guarded to FAILED on purpose — since PENDING → SYNTHESIZING became legal for the
+   * listener's claim path ({@link #startSynthesis}), a retry-style epoch bump from any other
+   * state would silently break the speech/task lockstep.
+   */
+  public void beginRetry() {
+    if (status != QuestionSpeechStatus.FAILED) {
+      throw new IllegalStateException("question speech cannot begin a retried synthesis from " + status);
+    }
+    moveTo(QuestionSpeechStatus.PENDING);
+    executionEpoch++;
+  }
 }

@@ -19,6 +19,28 @@ public final class VoiceErrorCodes {
   public static final String VOICE_RECORDING_ALREADY_ATTACHED = "VOICE_RECORDING_ALREADY_ATTACHED";
 
   /**
+   * Question speech resources that are hidden as 404 (plan §8.6): a session of another user,
+   * a turn that does not exist, a speech that belongs to a different session, or a READY row
+   * whose media file is absent (crash/orphan residue — the frontend falls back to text).
+   */
+  public static final String QUESTION_SPEECH_NOT_FOUND = "QUESTION_SPEECH_NOT_FOUND";
+
+  /**
+   * 409 for a question speech that is not in a retryable/playable state (plan §8.6): media
+   * reads of PENDING/SYNTHESIZING speech, and retries of PENDING/SYNTHESIZING/READY speech
+   * (including a retry racing an ACTIVE listener claim). One stable code covers "not ready"
+   * in the same way VOICE_RECORDING_NOT_READY does for recordings.
+   */
+  public static final String QUESTION_SPEECH_NOT_READY = "QUESTION_SPEECH_NOT_READY";
+
+  /**
+   * 409 for media reads of a FAILED speech (plan §8.6): the synthesis deterministically
+   * failed or exhausted its retries — the client retries the speech (QUESTION_SPEECH_NOT_READY
+   * applies while the retried synthesis is in flight) or falls back to text.
+   */
+  public static final String QUESTION_SPEECH_FAILED = "QUESTION_SPEECH_FAILED";
+
+  /**
    * safe_error on FAILED question_speech rows: a deterministic synthesis failure (provider
    * rejection, empty/unsupported audio, text drift) or retry exhaustion. Speech is a
    * degradable playback capability — a FAILED speech never touches the turn or the session,
