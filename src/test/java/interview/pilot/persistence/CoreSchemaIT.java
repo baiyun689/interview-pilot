@@ -39,13 +39,16 @@ class CoreSchemaIT {
   }
 
   @Test
-  void createsTheSevenBusinessTables() {
+  void createsTheFixedInterviewBusinessTablesAndRemovesLegacyJobProfile() {
     assertThat(jdbcTemplate.queryForObject(
         "select count(*) from information_schema.tables "
             + "where table_schema = database() and table_name in "
-            + "('resume','job_profile','interview_session','interview_turn','answer_attempt',"
-            + "'interview_report','async_task','ai_setting')",
+            + "('resume','interview_session','interview_question_card','interview_turn',"
+            + "'answer_attempt','interview_report','async_task','ai_setting')",
         Integer.class)).isEqualTo(8);
+    assertThat(jdbcTemplate.queryForObject(
+        "select count(*) from information_schema.tables where table_schema = database() "
+            + "and table_name = 'job_profile'", Integer.class)).isZero();
   }
 
   @Test
@@ -59,22 +62,32 @@ class CoreSchemaIT {
   }
 
   @Test
-  void requiresImmutableProviderPlanAndFirstQuestionSnapshots() {
+  void requiresImmutableBriefAndQuestionCardSnapshots() {
     List<String> requiredSessionColumns = jdbcTemplate.queryForList(
         "select column_name from information_schema.columns "
             + "where table_schema = database() and table_name = 'interview_session' "
-            + "and column_name in ('total_turn_budget','provider_id','model_name','plan_snapshot') "
+            + "and column_name in ('interview_size','job_source_type','job_title',"
+            + "'total_turn_budget','provider_id','model_name','brief_snapshot') "
             + "and is_nullable = 'NO' order by ordinal_position",
         String.class);
     List<String> requiredTurnColumns = jdbcTemplate.queryForList(
         "select column_name from information_schema.columns "
-            + "where table_schema = database() and table_name = 'interview_turn' "
-            + "and column_name = 'target_competency' and is_nullable = 'NO'",
+            + "where table_schema = database() and table_name = 'interview_question_card' "
+            + "and column_name in ('phase','phase_sequence','rag_context_snapshot',"
+            + "'follow_up_quota') and is_nullable = 'NO' order by ordinal_position",
         String.class);
 
     assertThat(requiredSessionColumns).containsExactly(
-        "total_turn_budget", "provider_id", "model_name", "plan_snapshot");
-    assertThat(requiredTurnColumns).containsExactly("target_competency");
+        "interview_size", "job_source_type", "job_title", "total_turn_budget",
+        "provider_id", "model_name", "brief_snapshot");
+    assertThat(requiredTurnColumns).containsExactly(
+        "phase", "phase_sequence", "rag_context_snapshot", "follow_up_quota");
+
+    assertThat(jdbcTemplate.queryForObject(
+        "select count(*) from information_schema.columns where table_schema = database() "
+            + "and table_name = 'interview_turn' and column_name in "
+            + "('target_competency','score','feedback','decision','next_difficulty')",
+        Integer.class)).isZero();
   }
 
   @Test

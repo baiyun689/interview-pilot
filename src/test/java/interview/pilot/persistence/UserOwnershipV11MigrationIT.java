@@ -36,7 +36,8 @@ class UserOwnershipV11MigrationIT {
         + "values(uuid(),'RESUME_ANALYSIS','legacy:resume:1','PENDING',json_object())");
 
     Flyway latest = Flyway.configure()
-        .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword()).load();
+        .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+        .target("12").load();
     latest.migrate();
 
     Integer users = jdbc.queryForObject(

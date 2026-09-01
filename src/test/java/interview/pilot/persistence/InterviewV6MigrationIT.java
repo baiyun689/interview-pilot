@@ -27,7 +27,7 @@ class InterviewV6MigrationIT {
         MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword()));
     fixture(jdbc);
     Flyway.configure().dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
-        .load().migrate();
+        .target("7").load().migrate();
 
     assertThat(jdbc.queryForList(
         "select status from answer_attempt order by turn_id", String.class))

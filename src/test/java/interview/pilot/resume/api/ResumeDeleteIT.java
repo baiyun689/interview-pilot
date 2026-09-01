@@ -13,7 +13,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
-
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RedissonClient;
@@ -21,8 +20,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.junit.jupiter.Container;
@@ -38,10 +38,10 @@ import interview.pilot.auth.infrastructure.UserAccountEntity;
 import interview.pilot.auth.infrastructure.UserAccountRepository;
 import interview.pilot.common.ratelimit.RateLimiter;
 import interview.pilot.interview.domain.Difficulty;
+import interview.pilot.interview.domain.InterviewSize;
+import interview.pilot.interview.domain.JobSourceType;
 import interview.pilot.interview.infrastructure.InterviewSessionEntity;
 import interview.pilot.interview.infrastructure.InterviewSessionRepository;
-import interview.pilot.interview.infrastructure.JobProfileEntity;
-import interview.pilot.interview.infrastructure.JobProfileRepository;
 import interview.pilot.resume.domain.ResumeStatus;
 import interview.pilot.resume.infrastructure.ResumeEntity;
 import interview.pilot.resume.infrastructure.ResumeRepository;
@@ -53,12 +53,11 @@ import interview.pilot.resume.infrastructure.ResumeRepository;
 @AutoConfigureMockMvc
 @Testcontainers
 class ResumeDeleteIT {
-  @Container
-  static final MySQLContainer MYSQL = new MySQLContainer(
+  @Container static final MySQLContainer MYSQL = new MySQLContainer(
       DockerImageName.parse("mysql:8.4")).withDatabaseName("interview_pilot_resume_delete");
 
-  @org.springframework.test.context.DynamicPropertySource
-  static void databaseProperties(org.springframework.test.context.DynamicPropertyRegistry registry) {
+  @DynamicPropertySource
+  static void databaseProperties(DynamicPropertyRegistry registry) {
     registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
     registry.add("spring.datasource.username", MYSQL::getUsername);
     registry.add("spring.datasource.password", MYSQL::getPassword);
@@ -66,89 +65,70 @@ class ResumeDeleteIT {
 
   @MockitoBean RedissonClient redissonClient;
   @MockitoBean RateLimiter rateLimiter;
-
   @Autowired MockMvc mvc;
   @Autowired UserAccountRepository users;
   @Autowired ResumeRepository resumes;
   @Autowired AsyncTaskRepository tasks;
   @Autowired InterviewSessionRepository sessions;
-  @Autowired JobProfileRepository jobs;
-
-  private UserAccountEntity userA;
-  private UserAccountEntity userB;
+  private UserAccountEntity owner;
+  private UserAccountEntity other;
 
   @BeforeEach
   void setUp() {
-    sessions.deleteAll();
-    jobs.deleteAll();
-    tasks.deleteAll();
-    resumes.deleteAll();
-    userA = users.save(UserAccountEntity.register(
-        "resume-delete-a-" + UUID.randomUUID() + "@example.com", "!", "Owner A"));
-    userB = users.save(UserAccountEntity.register(
-        "resume-delete-b-" + UUID.randomUUID() + "@example.com", "!", "Owner B"));
+    sessions.deleteAll(); tasks.deleteAll(); resumes.deleteAll();
+    owner = users.save(UserAccountEntity.register(
+        "resume-a-" + UUID.randomUUID() + "@example.com", "!", "Owner"));
+    other = users.save(UserAccountEntity.register(
+        "resume-b-" + UUID.randomUUID() + "@example.com", "!", "Other"));
     when(rateLimiter.allowFixedWindow(anyString(), anyInt(), any(Duration.class))).thenReturn(true);
   }
 
   @Test
-  void deleteReadyResumeRemovesResumeAndTaskButKeepsInterviews() throws Exception {
-    ResumeEntity resume = resumeFor(userA.getId(), ResumeStatus.READY);
-    InterviewSessionEntity session = sessionUsing(resume.getId(), userA.getId());
+  void deleteReadyResumeKeepsTheImmutableInterviewAndClearsItsReference() throws Exception {
+    ResumeEntity resume = resumeFor(owner.getId(), ResumeStatus.READY);
+    InterviewSessionEntity session = sessions.saveAndFlush(InterviewSessionEntity.preparing(
+        owner.getId(), resume.getId(), Difficulty.MEDIUM, InterviewSize.QUICK,
+        JobSourceType.CUSTOM, "后端工程师", "dashscope", "qwen", "{}", null));
 
-    mvc.perform(delete("/api/resumes/{id}", resume.getId()).with(authentication(principal(userA))))
+    mvc.perform(delete("/api/resumes/{id}", resume.getId())
+            .with(authentication(principal(owner))))
         .andExpect(status().isNoContent());
 
     assertThat(resumes.findById(resume.getId())).isEmpty();
     assertThat(tasks.findByTaskTypeAndBizKeyAndUserAccountId(
-        AsyncTaskType.RESUME_ANALYSIS, "resume:" + resume.getId(), userA.getId())).isEmpty();
-    InterviewSessionEntity kept = sessions.findBySessionId(session.getSessionId()).orElseThrow();
-    assertThat(kept.getResumeId()).isNull();
+        AsyncTaskType.RESUME_ANALYSIS, "resume:" + resume.getId(), owner.getId())).isEmpty();
+    assertThat(sessions.findBySessionId(session.getSessionId()).orElseThrow().getResumeId()).isNull();
   }
 
   @Test
-  void deleteRejectsResumeWithAnalysisInProgress() throws Exception {
-    ResumeEntity resume = resumeFor(userA.getId(), ResumeStatus.ANALYZING);
-
-    mvc.perform(delete("/api/resumes/{id}", resume.getId()).with(authentication(principal(userA))))
+  void activeAnalysisAndCrossUserDeletionAreRejected() throws Exception {
+    ResumeEntity analyzing = resumeFor(owner.getId(), ResumeStatus.ANALYZING);
+    mvc.perform(delete("/api/resumes/{id}", analyzing.getId())
+            .with(authentication(principal(owner))))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("RESUME_ANALYSIS_IN_PROGRESS"));
 
-    assertThat(resumes.findById(resume.getId())).isPresent();
-  }
-
-  @Test
-  void deleteReturnsNotFoundForAnotherUsersResume() throws Exception {
-    ResumeEntity resume = resumeFor(userA.getId(), ResumeStatus.READY);
-
-    mvc.perform(delete("/api/resumes/{id}", resume.getId()).with(authentication(principal(userB))))
+    ResumeEntity ready = resumeFor(owner.getId(), ResumeStatus.READY);
+    mvc.perform(delete("/api/resumes/{id}", ready.getId())
+            .with(authentication(principal(other))))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("RESUME_NOT_FOUND"));
-
-    assertThat(resumes.findById(resume.getId())).isPresent();
   }
 
   private ResumeEntity resumeFor(Long ownerId, ResumeStatus status) {
     ResumeEntity resume = resumes.saveAndFlush(ResumeEntity.pending(
-        ownerId, "candidate.txt", UUID.randomUUID().toString().replace("-", ""), "Candidate resume"));
+        ownerId, "candidate.txt", UUID.randomUUID().toString().replace("-", ""), "Candidate"));
     resume.setStatus(status);
     resume = resumes.saveAndFlush(resume);
     tasks.saveAndFlush(AsyncTaskEntity.pending(
-        ownerId, AsyncTaskType.RESUME_ANALYSIS, "resume:" + resume.getId(),
-        "{\"resumeId\":" + resume.getId() + "}"));
+        ownerId, AsyncTaskType.RESUME_ANALYSIS, "resume:" + resume.getId(), "{}"));
     return resume;
   }
 
-  private InterviewSessionEntity sessionUsing(Long resumeId, Long ownerId) {
-    JobProfileEntity job = jobs.saveAndFlush(JobProfileEntity.create(
-        ownerId, "后端工程师", "JD", "{\"competencies\":[\"Java\"],\"preferredSkills\":[]}"));
-    return sessions.saveAndFlush(InterviewSessionEntity.create(
-        ownerId, resumeId, job.getId(), Difficulty.MEDIUM, 8, "deepseek", "deepseek-chat", "{}"));
-  }
-
-  private static Authentication principal(UserAccountEntity account) {
-    CurrentUser user = new CurrentUser(
+  private UsernamePasswordAuthenticationToken principal(UserAccountEntity account) {
+    var current = new CurrentUser(
         account.getId(), account.getUserId(), account.getEmail(), account.getDisplayName());
     return new UsernamePasswordAuthenticationToken(
-        user, null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
+        current, null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
   }
 }

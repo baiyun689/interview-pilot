@@ -1,53 +1,46 @@
 export type Difficulty = 'EASY' | 'MEDIUM' | 'HARD'
-export type SessionStatus = 'CREATED' | 'INTERVIEWING' | 'EVALUATING' | 'COMPLETED' | 'FAILED'
+export type InterviewSize = 'QUICK' | 'STANDARD' | 'DEEP'
+export type JobSourceType = 'PRESET' | 'CUSTOM'
+export type SessionStatus = 'PREPARING' | 'READY' | 'INTERVIEWING' | 'EVALUATING' | 'COMPLETED' | 'PREPARATION_FAILED' | 'EVALUATION_FAILED'
 export type TurnStatus = 'ASKED' | 'PROCESSING' | 'COMPLETED' | 'FAILED'
-export type NextStep = 'FOLLOW_UP' | 'NEXT_TOPIC' | 'FINISH'
-export type DifficultyAdjustment = 'INCREASE' | 'KEEP' | 'DECREASE'
+export type InterviewPhase = 'SELF_INTRODUCTION' | 'FUNDAMENTALS' | 'PROJECT_EXPERIENCE' | 'SCENARIO_TRADEOFF'
+export type QuestionType = 'SELF_INTRODUCTION' | 'MAIN' | 'FOLLOW_UP'
 
-export interface InterviewDecision {
-  nextStep: NextStep
-  difficultyAdjustment: DifficultyAdjustment
-  targetCompetency: string
-  probeFocus: string
-  reason: string
-  confidence: number
+export interface InterviewPreset {
+  id: string
+  displayName: string
+  description: string
+  jobTitle: string
+  jobDescription: string
+  presetVersion: string
 }
 
 export interface InterviewTurn {
-  requestId: string | null
   turnNo: number
   status: TurnStatus
-  difficulty: Difficulty
+  phase: InterviewPhase
+  questionType: QuestionType
   question: string
-  targetCompetency: string
   askedAt: string
   answer: string | null
-  feedback: string | null
-  score: number | null
-  evidence: string[]
-  missingPoints: string[]
-  redFlags?: string[]
-  decision: InterviewDecision | null
-  nextDifficulty: Difficulty | null
   answeredAt: string | null
-  processingError: string | null
 }
 
 export interface InterviewSession {
   sessionId: string
-  resumeId: number
+  resumeId: number | null
   jobTitle: string
   jdText: string
   status: SessionStatus
   difficulty: Difficulty
+  interviewSize: InterviewSize
+  jobSourceType: JobSourceType
   currentTurnNo: number
   totalTurnBudget: number
   providerId: string
   modelName: string
-  skillId: string
-  skillName: string
-  skillVersion: string
-  plan: { competencies: string[]; totalTurnBudget: number }
+  preparationTaskId: string | null
+  safeError: string | null
   turns: InterviewTurn[]
 }
 
@@ -56,46 +49,40 @@ export interface InterviewHistory {
   jobTitle: string
   status: SessionStatus
   difficulty: Difficulty
+  interviewSize: InterviewSize
+  jobSourceType: JobSourceType
   currentTurnNo: number
   totalTurnBudget: number
   providerId: string
   modelName: string
-  skillId: string
-  skillName: string
+  safeError: string | null
   createdAt: string
   completedAt: string | null
 }
 
 export interface CreateInterviewInput {
   resumeId: number | null
-  jobTitle: string
-  jdText: string
+  jobSource:
+    | { type: 'PRESET'; presetId: string }
+    | { type: 'CUSTOM'; jobTitle: string; jobDescription: string }
   difficulty: Difficulty
-  totalTurnBudget: number
+  interviewSize: InterviewSize
   providerId: string
-  skillId: string
   knowledgeBaseIds: string[]
 }
 
-export type InterviewSkillGroup = 'JOB' | 'SPECIALTY' | 'CUSTOM'
-export interface InterviewSkill {
-  id: string
-  displayName: string
-  description: string
-  group: InterviewSkillGroup
-  icon: string
-  defaultCompetencies: string[]
-  version: string
+export interface CreateInterviewResult {
+  sessionId: string
+  status: 'PREPARING'
+  preparationTaskId: string
 }
 
-export type InterviewEventType = 'ACCEPTED' | 'FEEDBACK' | 'DECISION' | 'NEXT_QUESTION' | 'COMPLETED' | 'ERROR'
+export type InterviewEventType = 'ACCEPTED' | 'PROCESSING' | 'RESULT' | 'ERROR'
 interface StreamEvent<T extends InterviewEventType, P> { type: T; sessionId: string; turnNo: number; payload: P }
 export type InterviewStreamEvent =
   | StreamEvent<'ACCEPTED', { requestId: string; replayed: boolean }>
-  | StreamEvent<'FEEDBACK', { score: number; feedback: string; evidence: string[]; missingPoints: string[]; redFlags?: string[] }>
-  | StreamEvent<'DECISION', { decision: InterviewDecision }>
-  | StreamEvent<'NEXT_QUESTION', { question: string; targetCompetency: string; difficulty: Difficulty }>
-  | StreamEvent<'COMPLETED', { status: SessionStatus }>
+  | StreamEvent<'PROCESSING', { state: string }>
+  | StreamEvent<'RESULT', { completedTurnNo: number; status: SessionStatus; nextTurn: InterviewTurn | null; idempotentReplay: boolean }>
   | StreamEvent<'ERROR', { code: string; message: string; retryable: boolean }>
 
 export interface InterviewReportStatus {
@@ -107,9 +94,20 @@ export interface InterviewReportStatus {
   retryable: boolean
 }
 
+export interface FixedInterviewReport {
+  overallScore: number
+  phaseScores: Record<InterviewPhase, number>
+  strengths: string[]
+  improvements: string[]
+  technicalReferences: { sourceId: string; note: string }[]
+  conflictNotes: string[]
+  summary: string
+  ragAvailability: Partial<Record<InterviewPhase, string>>
+}
+
 export interface InterviewReportResult {
   sessionId: string
   reportId: string
-  report: { overallScore: number; competencyScores: Record<string, number>; strengths: string[]; improvements: string[]; summary: string }
+  report: FixedInterviewReport
   createdAt: string
 }

@@ -29,6 +29,7 @@ class InterviewRagV14MigrationIT {
   static void migrateSchema() {
     Flyway.configure()
         .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+        .target("14")
         .load()
         .migrate();
     dataSource = new DriverManagerDataSource(

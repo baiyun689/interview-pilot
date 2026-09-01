@@ -26,9 +26,9 @@ import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 import interview.pilot.interview.infrastructure.InterviewSessionRepository;
 import interview.pilot.interview.infrastructure.InterviewTurnRepository;
-import interview.pilot.interview.infrastructure.JobProfileRepository;
 import interview.pilot.interview.infrastructure.AnswerAttemptRepository;
 import interview.pilot.interview.infrastructure.InterviewReportRepository;
+import interview.pilot.interview.infrastructure.InterviewQuestionCardRepository;
 import interview.pilot.interview.api.InterviewController;
 import interview.pilot.interview.infrastructure.InterviewKnowledgeBaseRepository;
 import interview.pilot.auth.infrastructure.UserAccountRepository;
@@ -60,10 +60,10 @@ class InterviewPilotApplicationTest {
   private AsyncTaskRepository asyncTaskRepository;
 
   @MockitoBean
-  private JobProfileRepository jobProfileRepository;
+  private InterviewSessionRepository interviewSessionRepository;
 
   @MockitoBean
-  private InterviewSessionRepository interviewSessionRepository;
+  private InterviewQuestionCardRepository interviewQuestionCardRepository;
 
   @MockitoBean
   private InterviewTurnRepository interviewTurnRepository;

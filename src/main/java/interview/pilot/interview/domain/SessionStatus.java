@@ -1,18 +1,23 @@
 package interview.pilot.interview.domain;
 
 public enum SessionStatus {
-  CREATED,
+  PREPARING,
+  READY,
   INTERVIEWING,
   EVALUATING,
   COMPLETED,
-  FAILED;
+  PREPARATION_FAILED,
+  EVALUATION_FAILED;
 
   public boolean canTransitionTo(SessionStatus target) {
     return switch (this) {
-      case CREATED -> target == INTERVIEWING || target == FAILED;
-      case INTERVIEWING -> target == EVALUATING || target == FAILED;
-      case EVALUATING -> target == COMPLETED || target == FAILED;
-      case COMPLETED, FAILED -> false;
+      case PREPARING -> target == READY || target == PREPARATION_FAILED;
+      case READY -> target == INTERVIEWING;
+      case INTERVIEWING -> target == EVALUATING;
+      case EVALUATING -> target == COMPLETED || target == EVALUATION_FAILED;
+      case PREPARATION_FAILED -> target == PREPARING;
+      case EVALUATION_FAILED -> target == EVALUATING;
+      case COMPLETED -> false;
     };
   }
 }

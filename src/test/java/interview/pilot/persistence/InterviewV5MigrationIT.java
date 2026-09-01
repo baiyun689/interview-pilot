@@ -34,6 +34,7 @@ class InterviewV5MigrationIT {
 
     Flyway.configure()
         .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+        .target("5")
         .load()
         .migrate();
 

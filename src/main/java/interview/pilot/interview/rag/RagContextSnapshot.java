@@ -5,7 +5,6 @@ import java.util.UUID;
 import java.util.Collection;
 
 import interview.pilot.interview.grounding.KnowledgeRole;
-import interview.pilot.interview.domain.GeneratedQuestion;
 import interview.pilot.interview.domain.GroundingMode;
 
 public record RagContextSnapshot(
@@ -22,14 +21,14 @@ public record RagContextSnapshot(
     embeddingVersion = embeddingVersion == null ? "" : embeddingVersion;
     failureCode = (failureCode == null || failureCode.isBlank()) ? null : failureCode;
     evidenceRefs = evidenceRefs == null ? List.of() : List.copyOf(evidenceRefs);
-    groundingMode = groundingMode == null ? GroundingMode.SKILL_GENERAL : groundingMode;
+    groundingMode = groundingMode == null ? GroundingMode.GENERAL : groundingMode;
   }
 
   public RagContextSnapshot(
       RagStatus status, String query, String embeddingVersion, List<Chunk> chunks,
       String failureCode) {
     this(status, query, embeddingVersion, chunks, failureCode,
-        GroundingMode.SKILL_GENERAL, List.of());
+        GroundingMode.GENERAL, List.of());
   }
 
   public static RagContextSnapshot notConfigured() {
@@ -55,18 +54,6 @@ public record RagContextSnapshot(
       this(pointId, documentId, filename, 1, chunkIndex,
           KnowledgeRole.TECHNICAL_REFERENCE, "", null, score, content);
     }
-  }
-
-  public RagContextSnapshot withQuestion(GeneratedQuestion question) {
-    return new RagContextSnapshot(
-        status, query, embeddingVersion, chunks, failureCode,
-        question.groundingMode(), question.evidenceRefs());
-  }
-
-  public RagContextSnapshot hiddenForDisallowedUse() {
-    return new RagContextSnapshot(
-        RagStatus.NOT_REQUESTED, query, embeddingVersion, List.of(),
-        "USE_NOT_ALLOWED", GroundingMode.SKILL_GENERAL, List.of());
   }
 
   public void requireCurrentSources(Collection<String> sourceIds) {

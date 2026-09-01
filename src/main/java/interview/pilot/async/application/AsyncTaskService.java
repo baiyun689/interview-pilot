@@ -115,13 +115,22 @@ public class AsyncTaskService {
         throw conflict("TASK_STATE_INVALID", "Task state is inconsistent");
       }
       document.beginReindex();
+    } else if (task.getTaskType() == AsyncTaskType.INTERVIEW_QUESTION_PREPARATION) {
+      UUID sessionId = parseInterviewId(task.getBizKey());
+      var session = sessions.findBySessionIdAndUserAccountId(sessionId, target.userAccountId())
+          .orElseThrow(() -> conflict("TASK_STATE_INVALID", "Task state is inconsistent"));
+      if (session.getStatus() != SessionStatus.PREPARATION_FAILED) {
+        throw conflict("TASK_STATE_INVALID", "Task state is inconsistent");
+      }
+      session.retryPreparation();
     } else {
       UUID sessionId = parseInterviewId(task.getBizKey());
       var session = sessions.findBySessionIdAndUserAccountId(sessionId, target.userAccountId())
           .orElseThrow(() -> conflict("TASK_STATE_INVALID", "Task state is inconsistent"));
-      if (session.getStatus() != SessionStatus.EVALUATING) {
+      if (session.getStatus() != SessionStatus.EVALUATION_FAILED) {
         throw conflict("TASK_STATE_INVALID", "Task state is inconsistent");
       }
+      session.retryEvaluation();
     }
     task.setStatus(AsyncTaskStatus.PENDING);
     task.setExecutionEpoch(task.getExecutionEpoch() + 1);
@@ -140,6 +149,8 @@ public class AsyncTaskService {
   private String claimKey(AsyncTaskEntity task) {
     return switch (task.getTaskType()) {
       case RESUME_ANALYSIS -> "resume-analysis:" + parseResumeId(task.getBizKey());
+      case INTERVIEW_QUESTION_PREPARATION ->
+          "interview-preparation:" + parseInterviewId(task.getBizKey());
       case INTERVIEW_EVALUATION -> "interview-report:" + parseInterviewId(task.getBizKey());
       case KNOWLEDGE_DOCUMENT_INDEX, KNOWLEDGE_DOCUMENT_DELETE ->
           "knowledge-index:" + parseKnowledgeDocumentId(task.getBizKey());

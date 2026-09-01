@@ -71,11 +71,14 @@ export function InterviewReportPage({ pollIntervalMs = 1500 }: { pollIntervalMs?
 }
 
 function Report({ result }: { result: InterviewReportResult }) {
-  const entries = Object.entries(result.report.competencyScores)
+  const entries = Object.entries(result.report.phaseScores)
+  const phaseNames: Record<string, string> = { SELF_INTRODUCTION: '自我介绍', FUNDAMENTALS: '基础原理', PROJECT_EXPERIENCE: '项目经历', SCENARIO_TRADEOFF: '场景取舍' }
   return <div className="report-grid">
     <article className="score-hero"><span>综合评分</span><strong>{result.report.overallScore}</strong><p>{result.report.summary}</p></article>
-    <article className="report-card score-chart"><h2>能力维度</h2><div role="img" aria-label="能力维度评分图">{entries.map(([name, score]) => <div className="score-row" key={name}><span>{name}：{score} 分</span><div aria-hidden="true"><i style={{ width: `${score}%` }} /></div></div>)}</div></article>
+    <article className="report-card score-chart"><h2>实际考查阶段</h2><div role="img" aria-label="阶段评分图">{entries.map(([name, score]) => <div className="score-row" key={name}><span>{phaseNames[name] ?? name}：{score} 分</span><div aria-hidden="true"><i style={{ width: `${score}%` }} /></div></div>)}</div></article>
     <article className="report-card"><h2>优势</h2><ul>{result.report.strengths.map((item) => <li key={item}>{item}</li>)}</ul></article>
     <article className="report-card"><h2>改进方向</h2><ul>{result.report.improvements.map((item) => <li key={item}>{item}</li>)}</ul></article>
+    <article className="report-card"><h2>技术参考</h2>{result.report.technicalReferences.length ? <ul>{result.report.technicalReferences.map((item) => <li key={`${item.sourceId}:${item.note}`}>{item.note} <small>({item.sourceId})</small></li>)}</ul> : <p>本次报告未引用外部技术资料。</p>}</article>
+    {result.report.conflictNotes.length > 0 && <article className="report-card"><h2>观点与参考资料差异</h2><ul>{result.report.conflictNotes.map((item) => <li key={item}>{item}</li>)}</ul></article>}
   </div>
 }

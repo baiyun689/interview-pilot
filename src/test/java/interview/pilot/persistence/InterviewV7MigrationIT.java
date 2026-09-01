@@ -32,6 +32,7 @@ class InterviewV7MigrationIT {
 
     Flyway latest = Flyway.configure()
         .dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
+        .target("7")
         .cleanDisabled(false).load();
     latest.migrate();
 
@@ -53,7 +54,7 @@ class InterviewV7MigrationIT {
     latest.migrate();
     assertThat(jdbc.queryForObject(
         "select count(*) from flyway_schema_history where success=true", Integer.class))
-        .isEqualTo(18);
+        .isEqualTo(7);
   }
 
   private JdbcTemplate jdbc() {

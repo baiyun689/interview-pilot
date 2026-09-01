@@ -65,7 +65,8 @@ public final class KnowledgeRevisionCleanup {
 
   private boolean hasActiveReference(UUID documentId, int revision) {
     return sessions.findAllByOrderByCreatedAtDesc().stream()
-        .filter(session -> session.getStatus() == SessionStatus.CREATED
+        .filter(session -> session.getStatus() == SessionStatus.PREPARING
+            || session.getStatus() == SessionStatus.READY
             || session.getStatus() == SessionStatus.INTERVIEWING
             || session.getStatus() == SessionStatus.EVALUATING)
         .anyMatch(session -> references(

@@ -11,6 +11,8 @@ import org.hibernate.annotations.UuidGenerator;
 import org.hibernate.type.SqlTypes;
 
 import interview.pilot.interview.domain.Difficulty;
+import interview.pilot.interview.domain.InterviewSize;
+import interview.pilot.interview.domain.JobSourceType;
 import interview.pilot.interview.domain.SessionStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -24,142 +26,124 @@ import jakarta.persistence.Version;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 @Entity
 @Table(name = "interview_session")
 @Getter
-@Setter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class InterviewSessionEntity {
-  @Id
-  @GeneratedValue(strategy = GenerationType.IDENTITY)
+  @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
 
   @Column(name = "user_account_id", nullable = false, updatable = false)
   private Long userAccountId;
 
-  @UuidGenerator
-  @JdbcTypeCode(SqlTypes.CHAR)
-  @Column(name = "session_id", nullable = false, unique = true, length = 36)
+  @UuidGenerator @JdbcTypeCode(SqlTypes.CHAR)
+  @Column(name = "session_id", nullable = false, unique = true, length = 36, updatable = false)
   private UUID sessionId;
 
   @Column(name = "resume_id")
   private Long resumeId;
-
-  @Column(name = "job_profile_id", nullable = false)
-  private Long jobProfileId;
 
   @Enumerated(EnumType.STRING)
   @Column(nullable = false, length = 32)
   private SessionStatus status;
 
   @Enumerated(EnumType.STRING)
-  @Column(nullable = false, length = 16)
+  @Column(nullable = false, updatable = false, length = 16)
   private Difficulty difficulty;
+
+  @Enumerated(EnumType.STRING)
+  @Column(name = "interview_size", nullable = false, updatable = false, length = 16)
+  private InterviewSize interviewSize;
+
+  @Enumerated(EnumType.STRING)
+  @Column(name = "job_source_type", nullable = false, updatable = false, length = 16)
+  private JobSourceType jobSourceType;
+
+  @Column(name = "job_title", nullable = false, updatable = false, length = 200)
+  private String jobTitle;
 
   @Column(name = "current_turn_no", nullable = false)
   private int currentTurnNo;
 
-  @Column(name = "total_turn_budget", nullable = false)
+  @Column(name = "total_turn_budget", nullable = false, updatable = false)
   private int totalTurnBudget;
 
-  @Setter(AccessLevel.NONE)
   @Column(name = "provider_id", nullable = false, updatable = false, length = 64)
   private String providerId;
 
-  @Setter(AccessLevel.NONE)
   @Column(name = "model_name", nullable = false, updatable = false, length = 128)
   private String modelName;
 
-  @Setter(AccessLevel.NONE)
   @JdbcTypeCode(SqlTypes.JSON)
-  @Column(name = "plan_snapshot", nullable = false, updatable = false, columnDefinition = "json")
-  private String planSnapshot;
+  @Column(name = "brief_snapshot", nullable = false, updatable = false, columnDefinition = "json")
+  private String briefSnapshot;
 
   @JdbcTypeCode(SqlTypes.JSON)
-  @Column(name = "context_snapshot", columnDefinition = "json")
-  private String contextSnapshot;
-
-  @JdbcTypeCode(SqlTypes.JSON)
-  @Column(name = "knowledge_scope_snapshot", columnDefinition = "json")
+  @Column(name = "knowledge_scope_snapshot", updatable = false, columnDefinition = "json")
   private String knowledgeScopeSnapshot;
 
-  @CreationTimestamp
-  @Column(name = "created_at", nullable = false, updatable = false)
+  @Column(name = "safe_error", length = 255)
+  private String safeError;
+
+  @CreationTimestamp @Column(name = "created_at", nullable = false, updatable = false)
   private Instant createdAt;
 
-  @UpdateTimestamp
-  @Column(name = "updated_at", nullable = false)
+  @UpdateTimestamp @Column(name = "updated_at", nullable = false)
   private Instant updatedAt;
 
   @Column(name = "completed_at")
   private Instant completedAt;
 
-  @Version
-  @Column(nullable = false)
+  @Version @Column(nullable = false)
   private long version;
 
-  public static InterviewSessionEntity create(
-      Long userAccountId,
-      Long resumeId,
-      Long jobProfileId,
-      Difficulty difficulty,
-      int totalTurnBudget,
-      String providerId,
-      String modelName,
-      String planSnapshot) {
+  public static InterviewSessionEntity preparing(
+      Long userAccountId, Long resumeId, Difficulty difficulty, InterviewSize interviewSize,
+      JobSourceType jobSourceType, String jobTitle, String providerId, String modelName,
+      String briefSnapshot, String knowledgeScopeSnapshot) {
     var session = new InterviewSessionEntity();
-    session.userAccountId = Objects.requireNonNull(userAccountId, "userAccountId");
+    session.userAccountId = Objects.requireNonNull(userAccountId);
     session.sessionId = UUID.randomUUID();
     session.resumeId = resumeId;
-    session.jobProfileId = jobProfileId;
-    session.status = SessionStatus.CREATED;
-    session.difficulty = difficulty;
-    session.currentTurnNo = 0;
-    session.totalTurnBudget = totalTurnBudget;
-    session.providerId = providerId;
-    session.modelName = modelName;
-    session.planSnapshot = planSnapshot;
+    session.status = SessionStatus.PREPARING;
+    session.difficulty = Objects.requireNonNull(difficulty);
+    session.interviewSize = Objects.requireNonNull(interviewSize);
+    session.jobSourceType = Objects.requireNonNull(jobSourceType);
+    session.jobTitle = Objects.requireNonNull(jobTitle);
+    session.totalTurnBudget = interviewSize.totalTurns();
+    session.providerId = Objects.requireNonNull(providerId);
+    session.modelName = Objects.requireNonNull(modelName);
+    session.briefSnapshot = Objects.requireNonNull(briefSnapshot);
+    session.knowledgeScopeSnapshot = knowledgeScopeSnapshot;
     return session;
   }
 
-  @Deprecated(forRemoval = true)
-  public static InterviewSessionEntity create(
-      Long resumeId, Long jobProfileId, Difficulty difficulty, int totalTurnBudget,
-      String providerId, String modelName, String planSnapshot) {
-    return create(1L, resumeId, jobProfileId, difficulty, totalTurnBudget,
-        providerId, modelName, planSnapshot);
-  }
+  public void preparationReady() { transition(SessionStatus.READY, "preparation cannot complete"); safeError = null; }
+  public void preparationFailed(String error) { transition(SessionStatus.PREPARATION_FAILED, "preparation cannot fail"); safeError = safe(error); }
+  public void retryPreparation() { transition(SessionStatus.PREPARING, "preparation cannot retry"); safeError = null; }
+  public void beginFixedInterview() { transition(SessionStatus.INTERVIEWING, "interview cannot start"); currentTurnNo = 1; }
 
-  public void start() {
-    if (!status.canTransitionTo(SessionStatus.INTERVIEWING)) {
-      throw new IllegalStateException("Interview session cannot be started");
-    }
-    status = SessionStatus.INTERVIEWING;
-    currentTurnNo = 1;
-  }
-
-  public void advanceTo(int nextTurnNo, Difficulty nextDifficulty) {
+  public void advanceTo(int nextTurnNo) {
     if (status != SessionStatus.INTERVIEWING || nextTurnNo != currentTurnNo + 1) {
-      throw new IllegalStateException("Interview session cannot advance");
+      throw new IllegalStateException("interview cannot advance");
     }
     currentTurnNo = nextTurnNo;
-    difficulty = nextDifficulty;
   }
 
-  public void beginEvaluation() {
-    if (!status.canTransitionTo(SessionStatus.EVALUATING)) {
-      throw new IllegalStateException("Interview session cannot begin evaluation");
-    }
-    status = SessionStatus.EVALUATING;
+  public void beginEvaluation() { transition(SessionStatus.EVALUATING, "evaluation cannot start"); }
+  public void completeEvaluation() { transition(SessionStatus.COMPLETED, "evaluation cannot complete"); completedAt = Instant.now(); }
+  public void evaluationFailed(String error) { transition(SessionStatus.EVALUATION_FAILED, "evaluation cannot fail"); safeError = safe(error); }
+  public void retryEvaluation() { transition(SessionStatus.EVALUATING, "evaluation cannot retry"); safeError = null; }
+
+  private void transition(SessionStatus target, String message) {
+    if (!status.canTransitionTo(target)) throw new IllegalStateException(message);
+    status = target;
   }
 
-  public void completeEvaluation() {
-    if (!status.canTransitionTo(SessionStatus.COMPLETED)) {
-      throw new IllegalStateException("Interview session cannot complete evaluation");
-    }
-    status = SessionStatus.COMPLETED;
-    completedAt = Instant.now();
+  private String safe(String error) {
+    String value = error == null || error.isBlank() ? "UNKNOWN_ERROR" : error;
+    return value.length() <= 255 ? value : value.substring(0, 255);
   }
 }

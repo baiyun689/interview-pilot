@@ -47,9 +47,13 @@ class ApplicationSchemaStartupIT {
     assertThat(jdbcTemplate.queryForObject(
         "select count(*) from information_schema.tables "
             + "where table_schema = database() and table_name in "
-            + "('resume','job_profile','interview_session','interview_turn','answer_attempt',"
-            + "'interview_report','async_task','ai_setting')",
+            + "('resume','interview_session','interview_question_card','interview_turn',"
+            + "'answer_attempt','interview_report','async_task','ai_setting')",
         Integer.class)).isEqualTo(8);
+    assertThat(jdbcTemplate.queryForObject(
+        "select count(*) from information_schema.tables "
+            + "where table_schema = database() and table_name = 'job_profile'",
+        Integer.class)).isZero();
     assertThat(jdbcTemplate.queryForObject(
         "select count(*) from information_schema.tables "
             + "where table_schema = database() and table_name = 'flyway_schema_history'",

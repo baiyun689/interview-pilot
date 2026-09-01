@@ -2,164 +2,116 @@ package interview.pilot.interview.application;
 
 import java.io.IOException;
 import java.util.UUID;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import org.springframework.core.task.TaskExecutor;
-import org.springframework.core.task.TaskRejectedException;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.stereotype.Service;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import interview.pilot.common.exception.BusinessException;
 import interview.pilot.auth.application.CurrentUser;
+import interview.pilot.common.exception.BusinessException;
 import interview.pilot.interview.api.InterviewStreamEvent;
 import interview.pilot.interview.api.InterviewStreamEvent.AcceptedPayload;
-import interview.pilot.interview.api.InterviewStreamEvent.CompletedPayload;
-import interview.pilot.interview.api.InterviewStreamEvent.DecisionPayload;
 import interview.pilot.interview.api.InterviewStreamEvent.ErrorPayload;
 import interview.pilot.interview.api.InterviewStreamEvent.EventType;
-import interview.pilot.interview.api.InterviewStreamEvent.FeedbackPayload;
-import interview.pilot.interview.api.InterviewStreamEvent.NextQuestionPayload;
+import interview.pilot.interview.api.InterviewStreamEvent.ProcessingPayload;
+import interview.pilot.interview.api.InterviewStreamEvent.ResultPayload;
 import interview.pilot.interview.api.SubmitAnswerRequest;
 
 @Service
 public class InterviewSseService {
-  private final SubmitAnswerService answers;
-  private final TaskExecutor taskExecutor;
+  private final FixedAnswerService answers;
+  private final TaskExecutor executor;
   private final InterviewProcessingSla processingSla;
 
   public InterviewSseService(
-      SubmitAnswerService answers,
-      @Qualifier("interviewAnswerExecutor") TaskExecutor taskExecutor,
+      FixedAnswerService answers,
+      @Qualifier("interviewAnswerExecutor") TaskExecutor executor,
       InterviewProcessingSla processingSla) {
     this.answers = answers;
-    this.taskExecutor = taskExecutor;
+    this.executor = executor;
     this.processingSla = processingSla;
   }
 
   public SseEmitter stream(CurrentUser user, UUID sessionId, SubmitAnswerRequest request) {
     SseEmitter emitter = createEmitter(processingSla.sseTimeoutMillis());
-    AtomicBoolean transportTerminal = new AtomicBoolean();
-    emitter.onTimeout(() -> transportTerminal.compareAndSet(false, true));
-    emitter.onError(error -> transportTerminal.compareAndSet(false, true));
-    emitter.onCompletion(() -> transportTerminal.compareAndSet(false, true));
-    CompletableFuture<ClaimedWork> admittedWork = new CompletableFuture<>();
+    AtomicBoolean terminal = new AtomicBoolean();
+    emitter.onTimeout(() -> terminal.compareAndSet(false, true));
+    emitter.onError(error -> terminal.compareAndSet(false, true));
+    emitter.onCompletion(() -> terminal.compareAndSet(false, true));
+    CompletableFuture<FixedAnswerClaim> admitted = new CompletableFuture<>();
     try {
-      taskExecutor.execute(() -> {
-        ClaimedWork work = admittedWork.join();
-        if (work != null) {
-          process(emitter, transportTerminal, work.user(), work.sessionId(), work.request(), work.claim());
-        }
-      });
-    } catch (TaskRejectedException exception) {
-      throw executorBusy();
+      executor.execute(() -> process(emitter, terminal, sessionId, admitted.join()));
     } catch (RejectedExecutionException exception) {
-      throw executorBusy();
+      throw new BusinessException(
+          "ANSWER_EXECUTOR_BUSY", "Answer processing is temporarily busy; retry shortly",
+          HttpStatus.SERVICE_UNAVAILABLE);
     }
-
-    InterviewTurnClaim claim;
+    FixedAnswerClaim claim;
     try {
       claim = answers.claim(user, sessionId, request);
     } catch (RuntimeException exception) {
-      admittedWork.complete(null);
+      admitted.complete(null);
       throw exception;
     }
     try {
-      send(emitter, transportTerminal, new InterviewStreamEvent(
+      send(emitter, terminal, new InterviewStreamEvent(
           EventType.ACCEPTED, sessionId, claim.turnNo(),
           new AcceptedPayload(request.requestId(), !claim.owner())));
     } finally {
-      // Capacity is already reserved, so durable owner processing starts even if transport fails.
-      admittedWork.complete(new ClaimedWork(user, sessionId, request, claim));
+      admitted.complete(claim);
     }
     return emitter;
   }
 
   private void process(
-      SseEmitter emitter,
-      AtomicBoolean transportTerminal,
-      CurrentUser user,
-      UUID sessionId,
-      SubmitAnswerRequest request,
-      InterviewTurnClaim claim) {
+      SseEmitter emitter, AtomicBoolean terminal, UUID sessionId, FixedAnswerClaim claim) {
+    if (claim == null) return;
     try {
-      AnswerProcessingResult result = answers.processClaim(user, sessionId, request, claim);
-      send(emitter, transportTerminal, new InterviewStreamEvent(
-          EventType.FEEDBACK, sessionId, result.turnNo(),
-          new FeedbackPayload(
-              result.evaluation().score(), result.evaluation().feedback(),
-              result.evaluation().evidence(), result.evaluation().missingPoints(),
-              result.evaluation().redFlags())));
-      send(emitter, transportTerminal, new InterviewStreamEvent(
-          EventType.DECISION, sessionId, result.turnNo(), new DecisionPayload(result.decision())));
-      if (result.nextQuestion() != null) {
-        send(emitter, transportTerminal, new InterviewStreamEvent(
-            EventType.NEXT_QUESTION, sessionId, result.turnNo(),
-            new NextQuestionPayload(
-                result.nextQuestion().question(), result.nextQuestion().targetCompetency(),
-                result.nextDifficulty())));
-      }
-      send(emitter, transportTerminal, new InterviewStreamEvent(
-          EventType.COMPLETED, sessionId, result.turnNo(),
-          new CompletedPayload(result.sessionStatus())));
-      complete(emitter, transportTerminal);
+      send(emitter, terminal, new InterviewStreamEvent(
+          EventType.PROCESSING, sessionId, claim.turnNo(),
+          new ProcessingPayload("GENERATING_NEXT_TURN")));
+      FixedAnswerResult result = answers.process(claim);
+      send(emitter, terminal, new InterviewStreamEvent(
+          EventType.RESULT, sessionId, result.completedTurnNo(),
+          new ResultPayload(result.completedTurnNo(), result.sessionStatus(),
+              result.nextTurn(), result.idempotentReplay())));
+      complete(emitter, terminal);
     } catch (BusinessException exception) {
-      safeError(emitter, transportTerminal, sessionId, claim.turnNo(),
-          exception.code(), exception.getMessage(), exception.status().is5xxServerError()
-              || exception.status().value() == 409);
+      error(emitter, terminal, sessionId, claim.turnNo(), exception.code(),
+          exception.getMessage(), exception.status().is5xxServerError());
     } catch (RuntimeException exception) {
-      safeError(emitter, transportTerminal, sessionId, claim.turnNo(),
-          "ANSWER_STREAM_FAILED", "Answer processing failed; retry shortly", true);
+      error(emitter, terminal, sessionId, claim.turnNo(), "ANSWER_STREAM_FAILED",
+          "Answer processing failed; retry shortly", true);
     }
   }
 
-  private void safeError(
-      SseEmitter emitter,
-      AtomicBoolean transportTerminal,
-      UUID sessionId,
-      int turnNo,
-      String code,
-      String message,
-      boolean retryable) {
-    try {
-      send(emitter, transportTerminal, new InterviewStreamEvent(
-          EventType.ERROR, sessionId, turnNo,
-          new ErrorPayload(code, message, retryable)));
-      complete(emitter, transportTerminal);
-    } catch (RuntimeException ignored) {
-      if (transportTerminal.compareAndSet(false, true)) {
-        emitter.completeWithError(new IllegalStateException("SSE connection closed"));
-      }
-    }
+  private void error(
+      SseEmitter emitter, AtomicBoolean terminal, UUID sessionId, int turnNo,
+      String code, String message, boolean retryable) {
+    send(emitter, terminal, new InterviewStreamEvent(
+        EventType.ERROR, sessionId, turnNo, new ErrorPayload(code, message, retryable)));
+    complete(emitter, terminal);
   }
 
-  private void send(
-      SseEmitter emitter, AtomicBoolean transportTerminal, InterviewStreamEvent event) {
-    if (transportTerminal.get()) return;
+  private void send(SseEmitter emitter, AtomicBoolean terminal, InterviewStreamEvent event) {
+    if (terminal.get()) return;
     try {
       emitter.send(SseEmitter.event().name(event.type().name()).data(event));
-    } catch (IOException exception) {
-      throw new IllegalStateException("SSE connection closed");
+    } catch (IOException ignored) {
+      // Durable owner work continues after the transport disconnects.
     }
   }
 
-  private void complete(SseEmitter emitter, AtomicBoolean transportTerminal) {
-    if (transportTerminal.compareAndSet(false, true)) emitter.complete();
-  }
-
-  private BusinessException executorBusy() {
-    return new BusinessException(
-        "ANSWER_EXECUTOR_BUSY", "Answer processing is temporarily busy; retry shortly",
-        HttpStatus.SERVICE_UNAVAILABLE);
+  private void complete(SseEmitter emitter, AtomicBoolean terminal) {
+    if (terminal.compareAndSet(false, true)) emitter.complete();
   }
 
   protected SseEmitter createEmitter(long timeoutMillis) {
     return new SseEmitter(timeoutMillis);
   }
-
-  private record ClaimedWork(
-      CurrentUser user, UUID sessionId, SubmitAnswerRequest request, InterviewTurnClaim claim) {}
 }

@@ -1,43 +1,46 @@
 package interview.pilot.interview.api;
 
-import interview.pilot.interview.domain.Difficulty;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Positive;
-import jakarta.validation.constraints.Size;
 import java.util.List;
 import java.util.UUID;
 
+import interview.pilot.interview.domain.Difficulty;
+import interview.pilot.interview.domain.InterviewSize;
+import interview.pilot.interview.domain.JobSourceType;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Size;
+
 public record CreateInterviewRequest(
     @Positive Long resumeId,
-    @Size(max = 200) String jobTitle,
-    @Size(max = 20_000) String jdText,
+    @NotNull @Valid JobSource jobSource,
     @NotNull Difficulty difficulty,
-    @Min(5) @Max(15) int totalTurnBudget,
-    @Size(max = 64) String providerId,
-    @Size(max = 64) String skillId,
+    @NotNull InterviewSize interviewSize,
+    @NotBlank @Size(max = 64) String providerId,
     @Size(max = 5) List<UUID> knowledgeBaseIds) {
 
   public CreateInterviewRequest {
-    if (skillId == null || skillId.isBlank()) skillId = "custom";
     knowledgeBaseIds = knowledgeBaseIds == null ? List.of() : List.copyOf(knowledgeBaseIds);
   }
 
-  public CreateInterviewRequest(
-      Long resumeId, String jobTitle, String jdText, Difficulty difficulty,
-      int totalTurnBudget, String providerId) {
-    this(resumeId, jobTitle, jdText, difficulty, totalTurnBudget, providerId, "custom");
-  }
+  public record JobSource(
+      @NotNull JobSourceType type,
+      @Size(max = 64) String presetId,
+      @Size(max = 200) String jobTitle,
+      @Size(max = 20_000) String jobDescription) {
+    @AssertTrue(message = "jobSource fields do not match its type")
+    public boolean isValid() {
+      if (type == null) return false;
+      return switch (type) {
+        case PRESET -> present(presetId) && !present(jobTitle) && !present(jobDescription);
+        case CUSTOM -> !present(presetId) && present(jobTitle) && present(jobDescription);
+      };
+    }
 
-  public CreateInterviewRequest(
-      Long resumeId, String jobTitle, String jdText, Difficulty difficulty,
-      int totalTurnBudget, String providerId, String skillId) {
-    this(resumeId, jobTitle, jdText, difficulty, totalTurnBudget, providerId, skillId, List.of());
-  }
-
-  @jakarta.validation.constraints.AssertTrue(message = "jobTitle is required for custom interviews")
-  public boolean isJobTitleValid() {
-    return !"custom".equals(skillId) || (jobTitle != null && !jobTitle.isBlank());
+    private static boolean present(String value) {
+      return value != null && !value.isBlank();
+    }
   }
 }

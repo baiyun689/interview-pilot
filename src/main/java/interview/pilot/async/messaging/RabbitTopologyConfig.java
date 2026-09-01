@@ -34,6 +34,13 @@ public class RabbitTopologyConfig {
   public static final String INTERVIEW_REPORT_DLQ =
       "interview-pilot.interview.report.dlq";
 
+  public static final String INTERVIEW_PREPARATION_MAIN_EXCHANGE =
+      "interview-pilot.interview.preparation";
+  public static final String INTERVIEW_PREPARATION_MAIN_QUEUE =
+      "interview-pilot.interview.preparation.main";
+  public static final String INTERVIEW_PREPARATION_DLQ =
+      "interview-pilot.interview.preparation.dlq";
+
   public static final String KNOWLEDGE_INDEX_MAIN_EXCHANGE =
       "interview-pilot.knowledge.index";
   public static final String KNOWLEDGE_INDEX_MAIN_QUEUE =
@@ -50,6 +57,7 @@ public class RabbitTopologyConfig {
 
   static final String RESUME_ANALYSIS_ROUTING_KEY = "resume.analysis";
   static final String INTERVIEW_REPORT_ROUTING_KEY = "interview.report";
+  static final String INTERVIEW_PREPARATION_ROUTING_KEY = "interview.preparation";
   static final String KNOWLEDGE_INDEX_ROUTING_KEY = "knowledge.index";
   static final String KNOWLEDGE_DELETE_ROUTING_KEY = "knowledge.delete";
   static final String RETRY_COUNT_HEADER = "x-retry-count";
@@ -64,6 +72,7 @@ public class RabbitTopologyConfig {
   Declarables asyncTaskTopology() {
     List<Declarable> declarations = new ArrayList<>();
     declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.RESUME_ANALYSIS)));
+    declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.INTERVIEW_QUESTION_PREPARATION)));
     declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.INTERVIEW_EVALUATION)));
     declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.KNOWLEDGE_DOCUMENT_INDEX)));
     declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.KNOWLEDGE_DOCUMENT_DELETE)));
@@ -79,6 +88,13 @@ public class RabbitTopologyConfig {
           "interview-pilot.resume.analysis.dead-letter",
           RESUME_ANALYSIS_DLQ,
           "resume.analysis.dead");
+      case INTERVIEW_QUESTION_PREPARATION -> new PipelineRoute(
+          INTERVIEW_PREPARATION_MAIN_EXCHANGE,
+          INTERVIEW_PREPARATION_MAIN_QUEUE,
+          INTERVIEW_PREPARATION_ROUTING_KEY,
+          "interview-pilot.interview.preparation.dead-letter",
+          INTERVIEW_PREPARATION_DLQ,
+          "interview.preparation.dead");
       case INTERVIEW_EVALUATION -> new PipelineRoute(
           INTERVIEW_REPORT_MAIN_EXCHANGE,
           INTERVIEW_REPORT_MAIN_QUEUE,

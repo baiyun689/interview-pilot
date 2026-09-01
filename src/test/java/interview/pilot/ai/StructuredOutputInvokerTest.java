@@ -20,7 +20,6 @@ import interview.pilot.ai.model.AiRequest;
 import interview.pilot.ai.model.AiResponse;
 import interview.pilot.ai.provider.AiProviderProperties;
 import interview.pilot.common.observability.AiMetrics;
-import interview.pilot.interview.domain.JobRequirements;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import tools.jackson.databind.ObjectMapper;
 
@@ -113,19 +112,6 @@ class StructuredOutputInvokerTest {
         .hasMessageContaining("JSON shape did not match")
         .hasMessageNotContaining("null");
     verify(gateway, times(2)).generate(any());
-  }
-
-  @Test
-  void parsesTheJobRequirementsShapeRequestedDuringInterviewCreation() {
-    when(gateway.generate(any())).thenReturn(response("""
-        {"competencies":["Java","mysql","Redis"],"preferredSkills":[]}
-        """));
-
-    JobRequirements result = invoker.invoke(request, JobRequirements.class);
-
-    assertThat(result.competencies()).containsExactly("Java", "mysql", "Redis");
-    assertThat(result.preferredSkills()).isEmpty();
-    verify(gateway).generate(any());
   }
 
   private AiResponse response(String content) {

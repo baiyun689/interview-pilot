@@ -15,9 +15,10 @@ import org.springframework.http.ResponseEntity;
 import java.util.List;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import interview.pilot.interview.application.CreateInterviewService;
+import interview.pilot.interview.application.FixedInterviewCreationService;
 import interview.pilot.interview.application.InterviewQueryService;
 import interview.pilot.interview.application.InterviewSseService;
+import interview.pilot.interview.application.StartInterviewService;
 import interview.pilot.auth.application.CurrentUserProvider;
 import jakarta.validation.Valid;
 import interview.pilot.common.ratelimit.RateLimit;
@@ -26,28 +27,31 @@ import interview.pilot.common.ratelimit.RateLimitScope;
 @RestController
 @RequestMapping("/api/interviews")
 public class InterviewController {
-  private final CreateInterviewService createService;
+  private final FixedInterviewCreationService fixedCreateService;
   private final InterviewQueryService queryService;
   private final InterviewSseService sseService;
   private final CurrentUserProvider currentUser;
+  private final StartInterviewService startService;
 
   public InterviewController(
-      CreateInterviewService createService,
+      FixedInterviewCreationService fixedCreateService,
       InterviewQueryService queryService,
       InterviewSseService sseService,
+      StartInterviewService startService,
       CurrentUserProvider currentUser) {
-    this.createService = createService;
+    this.fixedCreateService = fixedCreateService;
     this.queryService = queryService;
     this.sseService = sseService;
+    this.startService = startService;
     this.currentUser = currentUser;
   }
 
   @PostMapping
   @RateLimit(scope = RateLimitScope.IP, capacity = 10, expensive = true)
   @RateLimit(scope = RateLimitScope.USER, capacity = 10, expensive = true)
-  @ResponseStatus(HttpStatus.CREATED)
-  public InterviewSessionResponse create(@Valid @RequestBody CreateInterviewRequest request) {
-    return createService.create(currentUser.require(), request);
+  @ResponseStatus(HttpStatus.ACCEPTED)
+  public CreateInterviewResponse create(@Valid @RequestBody CreateInterviewRequest request) {
+    return fixedCreateService.create(currentUser.require(), request);
   }
 
   @GetMapping("/{sessionId}")
@@ -60,6 +64,12 @@ public class InterviewController {
   @RateLimit(scope = RateLimitScope.IP, capacity = 120)
   public List<InterviewHistoryResponse> list() {
     return queryService.list(currentUser.require());
+  }
+
+  @PostMapping("/{sessionId}/start")
+  @RateLimit(scope = RateLimitScope.USER, capacity = 20, expensive = true)
+  public StartInterviewResponse start(@PathVariable UUID sessionId) {
+    return startService.start(currentUser.require(), sessionId);
   }
 
   @GetMapping("/{sessionId}/report")

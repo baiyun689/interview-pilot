@@ -6,11 +6,13 @@ import { difficultyLabel, ErrorNotice, providerSnapshot, sessionStatusLabel } fr
 import type { InterviewHistory } from '../types/interview'
 
 const statusIcons: Record<string, LucideIcon> = {
-  CREATED: Clock,
+  PREPARING: Clock,
+  READY: Clock,
   INTERVIEWING: MessagesSquare,
   EVALUATING: BarChart3,
   COMPLETED: CheckCircle2,
-  FAILED: XCircle,
+  PREPARATION_FAILED: XCircle,
+  EVALUATION_FAILED: XCircle,
 }
 
 function toneFor(status: string) {
@@ -47,7 +49,7 @@ export function InterviewHistoryPage() {
         <div className="history-card-main">
           <div className={`history-status-icon ${toneFor(row.status)}`} aria-hidden><StatusIcon size={20} /></div>
           <div className="history-card-heading"><h2>{row.jobTitle}</h2>
-            <p className="history-meta">{row.skillName && <span>面试方向：{row.skillName}</span>}<span>{providerSnapshot(row.providerId, row.modelName)}</span></p>
+            <p className="history-meta"><span>{row.jobSourceType === 'PRESET' ? '预设岗位' : '自定义 JD'} · {row.interviewSize}</span><span>{providerSnapshot(row.providerId, row.modelName)}</span></p>
           </div>
         </div>
         <dl className="history-stats">
@@ -61,7 +63,7 @@ export function InterviewHistoryPage() {
         </div>
         <div className="provider-actions">
           <Link className="detail-link" to={`/interviews/${row.sessionId}`}>{row.status === 'INTERVIEWING' ? '继续面试' : '查看详情'}</Link>
-          {(row.status === 'EVALUATING' || row.status === 'COMPLETED') && <Link className="detail-link" to={`/interviews/${row.sessionId}/report`}>查看报告</Link>}
+          {(row.status === 'EVALUATING' || row.status === 'EVALUATION_FAILED' || row.status === 'COMPLETED') && <Link className="detail-link" to={`/interviews/${row.sessionId}/report`}>查看报告</Link>}
         </div>
       </article>
     })}</div>

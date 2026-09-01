@@ -1,6 +1,6 @@
 package interview.pilot.interview.domain;
 
 public enum GroundingMode {
-  SKILL_GENERAL,
+  GENERAL,
   KNOWLEDGE_ASSISTED
 }
