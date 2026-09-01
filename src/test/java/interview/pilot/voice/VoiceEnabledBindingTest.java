@@ -21,6 +21,7 @@ import interview.pilot.interview.infrastructure.InterviewTurnRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeBaseJpaRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentJpaRepository;
 import interview.pilot.resume.infrastructure.ResumeRepository;
+import interview.pilot.voice.application.SpeechRecognizer;
 import interview.pilot.voice.config.VoiceProperties;
 import interview.pilot.voice.infrastructure.AudioProbe;
 import interview.pilot.voice.infrastructure.VoiceRecordingRepository;
@@ -104,10 +105,14 @@ class VoiceEnabledBindingTest {
   @Autowired
   private AudioProbe audioProbe;
 
+  @Autowired
+  private SpeechRecognizer speechRecognizer;
+
   @Test
   void exposesTheMediaStoreAndProbeWhenVoiceIsEnabled() {
     assertThat(voiceMediaStore).isNotNull();
     assertThat(audioProbe).isNotNull();
+    assertThat(speechRecognizer).isNotNull();
   }
 
   @Test

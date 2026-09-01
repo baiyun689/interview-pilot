@@ -42,6 +42,7 @@ import interview.pilot.interview.infrastructure.InterviewTurnRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeBaseJpaRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentJpaRepository;
 import interview.pilot.resume.infrastructure.ResumeRepository;
+import interview.pilot.voice.application.SpeechRecognizer;
 import interview.pilot.voice.config.VoiceProperties;
 import interview.pilot.voice.infrastructure.AudioProbe;
 import interview.pilot.voice.storage.VoiceMediaStore;
@@ -130,6 +131,9 @@ class VoiceDisabledContextTest {
   @Autowired(required = false)
   private AudioProbe audioProbe;
 
+  @Autowired(required = false)
+  private SpeechRecognizer speechRecognizer;
+
   @BeforeEach
   void allowRateLimits() {
     when(rateLimiter.allowFixedWindow(any(), anyInt(), any(Duration.class))).thenReturn(true);
@@ -146,6 +150,7 @@ class VoiceDisabledContextTest {
   void doesNotCreateMediaBeansWhenVoiceIsDisabled() {
     assertThat(voiceMediaStore).isNull();
     assertThat(audioProbe).isNull();
+    assertThat(speechRecognizer).isNull();
   }
 
   @Test
