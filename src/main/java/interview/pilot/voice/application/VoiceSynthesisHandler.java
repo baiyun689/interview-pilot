@@ -27,6 +27,7 @@ import interview.pilot.voice.domain.StoredVoiceMedia;
 import interview.pilot.voice.domain.VoiceErrorCodes;
 import interview.pilot.voice.domain.VoiceMediaKey;
 import interview.pilot.voice.domain.VoiceMediaKind;
+import interview.pilot.voice.domain.VoiceMediaNotFoundException;
 import interview.pilot.voice.domain.VoiceMediaStorageException;
 import interview.pilot.voice.domain.VoiceMediaTooLargeException;
 import interview.pilot.voice.domain.VoiceMediaUnsupportedException;
@@ -47,7 +48,11 @@ import interview.pilot.voice.storage.VoiceMediaStore;
  *       captures the question text for the provider call;</li>
  *   <li>outside any transaction the {@link SpeechSynthesizer} is called and the returned
  *       audio is streamed into the store (probe + whitelist + size bound via the 3-arg
- *       {@link VoiceMediaStore#store(VoiceMediaKey, java.io.InputStream, long)} variant);</li>
+ *       {@link VoiceMediaStore#store(VoiceMediaKey, java.io.InputStream, long)} variant). The
+ *       voice profile comes from the ROW's pinned provider/model/voice columns (captured at
+ *       creation), never from the live configuration — a redeploy with changed (or removed)
+ *       TTS config must not re-synthesize a retried speech with a different voice than the
+ *       row and session snapshot record;</li>
  *   <li>a final short transaction re-checks the epoch, the SYNTHESIZING state and the
  *       text_sha256 (stale messages lose), persists storageKey/contentType/size/duration/
  *       providerRequestId and moves the speech to READY.</li>
@@ -202,13 +207,19 @@ public class VoiceSynthesisHandler {
         .orElseThrow(() -> new IllegalStateException("Question speech owner is missing"));
     return new BeginResult(new Work(
         task.getTaskId(), speech.getSpeechId(), userId, speech.getSessionId(),
-        speech.getExecutionEpoch(), attemptGeneration, questionText), false, false);
+        speech.getExecutionEpoch(), attemptGeneration, questionText,
+        speech.getProviderId(), speech.getModelName(), speech.getVoiceName()), false, false);
   }
 
-  /** Steps 2, entirely outside the claim transaction (slow provider + media I/O). */
+  /**
+   * Steps 2, entirely outside the claim transaction (slow provider + media I/O). The voice
+   * profile comes from the ROW's pinned provider/model/voice columns (captured at creation),
+   * never from the live configuration: a redeploy with changed (or removed) TTS config must
+   * not re-synthesize a retried speech with a different voice than the row and session
+   * snapshot record.
+   */
   private Outcome synthesizeMedia(Work work) {
-    VoiceProfile profile = new VoiceProfile(
-        properties.tts().provider(), properties.tts().model(), properties.tts().voice());
+    VoiceProfile profile = new VoiceProfile(work.provider(), work.model(), work.voice());
     long started = System.nanoTime();
     SynthesizedSpeech synthesized;
     try {
@@ -242,12 +253,17 @@ public class VoiceSynthesisHandler {
     } catch (VoiceMediaProbeException | VoiceMediaStorageException exception) {
       return retryable(work, latency);
     }
-    return complete(work, stored, synthesized, latency);
+    Outcome outcome = complete(work, stored, synthesized, latency);
+    if (outcome != Outcome.TERMINAL) {
+      // The final transaction did not persist the audio (stale fence or text drift): the
+      // just-stored file is orphaned — best-effort delete after the transaction.
+      deleteOrphanedAudio(work, stored.storageKey());
+    }
+    return outcome;
   }
 
   private Outcome complete(
       Work work, StoredVoiceMedia stored, SynthesizedSpeech synthesized, Duration latency) {
-    String provider = properties.tts().provider();
     Outcome outcome = transactions.execute(status -> {
       QuestionSpeechEntity speech = currentSpeech(work);
       if (speech == null) {
@@ -260,7 +276,7 @@ public class VoiceSynthesisHandler {
         task.setLastError(TEXT_MISMATCH_ERROR);
         metrics.afterCommit(() -> metrics.taskFailed(
             AsyncTaskType.QUESTION_SPEECH_SYNTHESIS, "failed"));
-        return Outcome.TERMINAL;
+        return Outcome.TERMINAL_WITHOUT_AUDIO;
       }
       speech.completeSynthesis(
           synthesized.providerRequestId(), stored.storageKey(), stored.mediaType(),
@@ -272,13 +288,12 @@ public class VoiceSynthesisHandler {
       return Outcome.TERMINAL;
     });
     if (outcome == Outcome.TERMINAL) {
-      metrics.aiCall(provider, "success", latency);
+      metrics.aiCall(work.provider(), "success", latency);
     }
     return outcome;
   }
 
   private Outcome fail(Work work, String code, String detail, Duration latency) {
-    String provider = properties.tts().provider();
     Outcome outcome = transactions.execute(status -> {
       QuestionSpeechEntity speech = currentSpeech(work);
       if (speech == null) {
@@ -293,7 +308,7 @@ public class VoiceSynthesisHandler {
       return Outcome.TERMINAL;
     });
     if (outcome == Outcome.TERMINAL) {
-      metrics.aiCall(provider, "failure", latency);
+      metrics.aiCall(work.provider(), "failure", latency);
     }
     return outcome;
   }
@@ -309,7 +324,7 @@ public class VoiceSynthesisHandler {
       task.setLastError(RETRYABLE_ERROR);
       return true;
     });
-    metrics.aiCall(properties.tts().provider(), "failure", latency);
+    metrics.aiCall(work.provider(), "failure", latency);
     if (!current) {
       return Outcome.STALE;
     }
@@ -364,6 +379,30 @@ public class VoiceSynthesisHandler {
     return speech;
   }
 
+  /**
+   * Best-effort cleanup of audio the final transaction did not persist (stale final fence or
+   * text drift): the storage key is immutable and shared across generations by design
+   * (rewrite semantics), so a delete must never remove a file a live row references — the
+   * guard deletes only when the row is absent or FAILED without a storage key. The residual
+   * window (a crash between the store and this cleanup, or a retry racing the re-read) can
+   * still leave an unreferenced file; Task 11's sweeper owns that reclamation, and readers
+   * tolerate missing files per the store's {@link VoiceMediaNotFoundException} contract.
+   */
+  private void deleteOrphanedAudio(Work work, String storageKey) {
+    Boolean deletable = transactions.execute(status -> speeches.findBySpeechId(work.speechId())
+        .map(speech -> speech.getStatus() == QuestionSpeechStatus.FAILED
+            && speech.getStorageKey() == null)
+        .orElse(true));
+    if (!Boolean.TRUE.equals(deletable)) {
+      return;
+    }
+    try {
+      mediaStore.delete(storageKey);
+    } catch (VoiceMediaNotFoundException | IllegalArgumentException ignored) {
+      // nothing installed at the key (or the key is invalid) — already clean
+    }
+  }
+
   /** The turn text must still hash to the value pinned at creation (immutable question text). */
   private boolean textStillMatches(Work work, QuestionSpeechEntity speech) {
     InterviewTurnEntity turn = turns.findById(speech.getTurnId()).orElse(null);
@@ -413,7 +452,14 @@ public class VoiceSynthesisHandler {
   }
 
   public enum Outcome {
+    /** The final transaction persisted the audio (or terminalized without any stored audio). */
     TERMINAL,
+    /**
+     * The final transaction terminalized the message without persisting the audio (text
+     * drift after the store): the just-stored file is deleted after the transaction; the
+     * listener completes the claim exactly like TERMINAL.
+     */
+    TERMINAL_WITHOUT_AUDIO,
     STALE
   }
 
@@ -422,7 +468,8 @@ public class VoiceSynthesisHandler {
 
   private record Work(
       UUID taskId, UUID speechId, UUID userId, Long sessionId,
-      long epoch, int attemptGeneration, String questionText) {}
+      long epoch, int attemptGeneration, String questionText,
+      String provider, String model, String voice) {}
 
   private record BeginResult(Work work, boolean stale, boolean terminal) {}
 }

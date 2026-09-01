@@ -1,6 +1,7 @@
 package interview.pilot.voice.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.clearInvocations;
@@ -68,10 +69,15 @@ import interview.pilot.voice.application.QuestionSpeechHashes;
 import interview.pilot.voice.application.SpeechSynthesisFailedException;
 import interview.pilot.voice.application.SpeechSynthesisRetryableException;
 import interview.pilot.voice.application.SynthesizedSpeech;
+import interview.pilot.voice.application.VoiceProfile;
 import interview.pilot.voice.application.VoiceSynthesisHandler;
 import interview.pilot.voice.domain.ProbedAudio;
 import interview.pilot.voice.domain.QuestionSpeechStatus;
 import interview.pilot.voice.domain.VoiceErrorCodes;
+import interview.pilot.voice.domain.VoiceMediaKey;
+import interview.pilot.voice.domain.VoiceMediaKind;
+import interview.pilot.voice.domain.VoiceMediaNotFoundException;
+import interview.pilot.voice.domain.VoiceMediaStorageException;
 import interview.pilot.voice.domain.VoiceMediaUnsupportedException;
 import interview.pilot.voice.infrastructure.AudioProbe;
 import interview.pilot.voice.storage.VoiceMediaStore;
@@ -351,6 +357,70 @@ class VoiceSynthesisListenerIT {
     assertThat(failed.getStatus()).isEqualTo(QuestionSpeechStatus.FAILED);
     assertThat(failed.getSafeError()).isEqualTo(VoiceErrorCodes.VOICE_QUESTION_SPEECH_FAILED);
     assertThat(taskOf(failed).getStatus()).isEqualTo(AsyncTaskStatus.FAILED);
+    // The audio stored before the drift check was orphaned: it is deleted best-effort.
+    assertThatThrownBy(() -> mediaStore.open(speechKey(speech)))
+        .isInstanceOf(VoiceMediaNotFoundException.class);
+  }
+
+  @Test
+  void theAdapterReceivesTheRowPinnedVoiceProfileNotTheLiveConfiguration() {
+    var start = startInterview.start(user, session.getSessionId());
+    var speech = speechOf(start);
+    // Simulate a redeploy with a different TTS config: the row's pinned columns must win.
+    speeches.delete(speech);
+    var pinned = speeches.saveAndFlush(QuestionSpeechEntity.pending(
+        speech.getUserAccountId(), speech.getSpeechId(), speech.getSessionId(),
+        speech.getTurnId(), speech.getTextSha256(),
+        "pinned-provider", "pinned-model", "pinned-voice"));
+    var captured = new java.util.concurrent.atomic.AtomicReference<VoiceProfile>();
+    fakeSynthesizer.respondWith((text, profile) -> {
+      captured.set(profile);
+      return new SynthesizedSpeech(
+          ("audio:" + profile.voice()).getBytes(StandardCharsets.UTF_8),
+          "audio/mpeg", "fake-request-1");
+    });
+
+    listener.receive(message(pinned, 0), source(0));
+
+    assertThat(captured.get()).isNotNull();
+    assertThat(captured.get().provider()).isEqualTo("pinned-provider");
+    assertThat(captured.get().model()).isEqualTo("pinned-model");
+    assertThat(captured.get().voice()).isEqualTo("pinned-voice");
+    assertThat(speeches.findBySpeechId(speech.getSpeechId()).orElseThrow()
+        .getStatus()).isEqualTo(QuestionSpeechStatus.READY);
+  }
+
+  @Test
+  void oversizedSynthesizedAudioIsADeterministicFailure() {
+    var start = startInterview.start(user, session.getSessionId());
+    var speech = speechOf(start);
+    // Over the 8 MiB store cap: the store rejects the copy deterministically.
+    fakeSynthesizer.respondWith((text, profile) ->
+        new SynthesizedSpeech(new byte[8_388_609], "audio/mpeg", "req-oversized"));
+
+    listener.receive(message(speech, 0), source(0));
+
+    var failed = speeches.findBySpeechId(speech.getSpeechId()).orElseThrow();
+    assertThat(failed.getStatus()).isEqualTo(QuestionSpeechStatus.FAILED);
+    assertThat(failed.getSafeError()).isEqualTo(VoiceErrorCodes.VOICE_QUESTION_SPEECH_FAILED);
+    assertThat(taskOf(failed).getStatus()).isEqualTo(AsyncTaskStatus.FAILED);
+  }
+
+  @Test
+  void storageFailureIsRetryableAndKeepsTheSpeechSynthesizing() {
+    var start = startInterview.start(user, session.getSessionId());
+    var speech = speechOf(start);
+    when(probe.probe(any())).thenThrow(new VoiceMediaStorageException(
+        "disk full", new java.io.IOException("disk full")));
+
+    listener.receive(message(speech, 0), source(0));
+
+    var inFlight = speeches.findBySpeechId(speech.getSpeechId()).orElseThrow();
+    assertThat(inFlight.getStatus()).isEqualTo(QuestionSpeechStatus.SYNTHESIZING);
+    var task = taskOf(inFlight);
+    assertThat(task.getStatus()).isEqualTo(AsyncTaskStatus.PUBLISHED);
+    assertThat(task.getAttemptCount()).isEqualTo(1);
+    assertThat(task.getLastError()).isNotNull();
   }
 
   // ---------------------------------------------------------------- retryable failures
@@ -490,6 +560,11 @@ class VoiceSynthesisListenerIT {
     var turn = turns.findBySessionIdAndTurnNo(session.getId(), start.currentTurn().turnNo())
         .orElseThrow();
     return speeches.findByTurnId(turn.getId()).orElseThrow();
+  }
+
+  private String speechKey(QuestionSpeechEntity speech) {
+    return new VoiceMediaKey(user.userId(), session.getId(),
+        VoiceMediaKind.SPEECH, speech.getSpeechId()).storageKey();
   }
 
   private AsyncTaskEntity taskOf(QuestionSpeechEntity speech) {
