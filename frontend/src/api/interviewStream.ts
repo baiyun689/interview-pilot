@@ -1,5 +1,13 @@
 import { ApiClientError, fetchWithAuthRetry } from './request'
-import type { InterviewStreamEvent } from '../types/interview'
+import type { InputMode, InterviewStreamEvent } from '../types/interview'
+
+/** 答案提交载荷：语音答案携带 inputMode=VOICE 与 recordingId（后端据此绑定录音）。 */
+export interface AnswerStreamInput {
+  requestId: string
+  answer: string
+  inputMode?: InputMode
+  recordingId?: string
+}
 
 interface StreamOptions {
   signal?: AbortSignal
@@ -25,7 +33,7 @@ async function httpError(response: Response): Promise<ApiClientError> {
 
 export async function postInterviewAnswerStream(
   sessionId: string,
-  input: { requestId: string; answer: string },
+  input: AnswerStreamInput,
   options: StreamOptions,
 ): Promise<void> {
   let response: Response

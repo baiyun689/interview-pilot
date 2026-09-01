@@ -107,6 +107,9 @@ export function VoiceRecorder({
             <span className="voice-meter-fill" style={{ width: `${levelPercent}%` }} />
           </span>
         </div>
+        {state === 'PAUSED' && (
+          <p className="voice-note" role="status">麦克风仍开启，暂停期间不计入录音时长</p>
+        )}
         {nearLimit && (
           <p className="voice-warning" role="alert">即将到达最长录音时长（{formatDuration(maxMs)}），到时将自动停止</p>
         )}

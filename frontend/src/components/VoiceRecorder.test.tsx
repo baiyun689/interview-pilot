@@ -67,6 +67,13 @@ describe('VoiceRecorder', () => {
     expect(screen.getByRole('timer', { name: '录音时长' })).toHaveTextContent('00:02')
   })
 
+  it('暂停时提示麦克风仍开启（评审 M3）', async () => {
+    await renderRecording()
+    fireEvent.click(screen.getByRole('button', { name: '暂停录音' }))
+
+    expect(screen.getByText(/麦克风仍开启/)).toBeInTheDocument()
+  })
+
   it('停止后进入 RECORDED：可试听、可重录，重录回到 IDLE', async () => {
     const onUpload = vi.fn()
     await renderRecording({ onUpload })

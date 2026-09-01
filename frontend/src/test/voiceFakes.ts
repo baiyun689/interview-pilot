@@ -98,3 +98,29 @@ export function recorderTestEnv(overrides: Partial<VoiceRecorderEnvironment> = {
 export function lastRecorder(): FakeMediaRecorder {
   return FakeMediaRecorder.instances[FakeMediaRecorder.instances.length - 1]
 }
+
+/** 上传用 XMLHttpRequest 假件（voice.test.ts 内另有私有副本；页面级测试复用此件）。 */
+export class FakeXHR {
+  static instances: FakeXHR[] = []
+  open = vi.fn()
+  setRequestHeader = vi.fn()
+  send = vi.fn()
+  abort = vi.fn(() => { this.onabort?.() })
+  upload: { onprogress: ((event: { loaded: number; total: number; lengthComputable: boolean }) => void) | null } = { onprogress: null }
+  onload: (() => void) | null = null
+  onerror: (() => void) | null = null
+  onabort: (() => void) | null = null
+  status = 0
+  responseText = ''
+  responseHeaders: Record<string, string> = {}
+  getResponseHeader(name: string) {
+    return this.responseHeaders[name] ?? null
+  }
+  constructor() {
+    FakeXHR.instances.push(this)
+  }
+}
+
+export function lastXhr(): FakeXHR {
+  return FakeXHR.instances[FakeXHR.instances.length - 1]
+}

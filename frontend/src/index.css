@@ -1130,3 +1130,16 @@ a:focus-visible {
 .voice-preview audio {
   width: 100%;
 }
+
+/* 面试页语音交互（Task 10） */
+.form-hint,
+.voice-note {
+  margin: 0;
+  color: var(--slate-500);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.question-speech-area {
+  display: grid;
+  gap: 8px;
+}
