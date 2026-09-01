@@ -1075,3 +1075,58 @@ a:focus-visible {
 .history-card-side { display: grid; gap: 4px; align-content: center; justify-items: end; }
 .history-card-side p { margin: 0; }
 .provider-actions { display: grid; gap: 8px; justify-items: end; align-content: center; }
+
+/* 语音录音与播放（Task 9 前端录音基础设施） */
+.voice-panel {
+  display: grid;
+  gap: 14px;
+  max-width: 560px;
+}
+.voice-status-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.voice-timer {
+  min-width: 76px;
+  color: var(--slate-950);
+  font-size: 22px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.voice-meter {
+  display: block;
+  flex: 1;
+  height: 8px;
+  background: var(--slate-100);
+  border: 1px solid var(--slate-200);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.voice-meter-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--indigo-100), var(--indigo-600));
+  transition: width 120ms linear;
+}
+.voice-warning {
+  margin: 0;
+  padding: 9px 12px;
+  color: var(--warning);
+  background: var(--warning-soft);
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.voice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.voice-actions .button {
+  width: fit-content;
+}
+.voice-preview audio {
+  width: 100%;
+}
