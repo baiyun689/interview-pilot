@@ -441,19 +441,41 @@ class QuestionSpeechModuleTest {
         HttpRange.createByteRange(2, 5))) {
       assertThat(bytes(media)).isEqualTo("2345");
       assertThat(media.resource().contentLength()).isEqualTo(10);
+      // The resolved slice is carried on the media so the controller emits Content-Range
+      // from the module's resolution — never its own re-computation.
+      assertThat(media.rangeStart()).isEqualTo(2);
+      assertThat(media.rangeEnd()).isEqualTo(5);
     }
     try (var media = module.open(user, session.getSessionId(), speech.getSpeechId(),
         HttpRange.createByteRange(6))) {
       assertThat(bytes(media)).isEqualTo("6789");
+      assertThat(media.rangeStart()).isEqualTo(6);
+      assertThat(media.rangeEnd()).isEqualTo(9);
     }
     try (var media = module.open(user, session.getSessionId(), speech.getSpeechId(),
         HttpRange.createSuffixRange(3))) {
       assertThat(bytes(media)).isEqualTo("789");
+      assertThat(media.rangeStart()).isEqualTo(7);
+      assertThat(media.rangeEnd()).isEqualTo(9);
     }
     // A suffix longer than the file is the whole file.
     try (var media = module.open(user, session.getSessionId(), speech.getSpeechId(),
         HttpRange.createSuffixRange(100))) {
       assertThat(bytes(media)).isEqualTo("0123456789");
+      assertThat(media.rangeStart()).isEqualTo(0);
+      assertThat(media.rangeEnd()).isEqualTo(9);
+    }
+  }
+
+  @Test
+  void openClampsTheRangeEndToTheMediaLength() throws Exception {
+    var speech = synthesizeReady("0123456789");
+
+    try (var media = module.open(user, session.getSessionId(), speech.getSpeechId(),
+        HttpRange.createByteRange(2, 999))) {
+      assertThat(bytes(media)).isEqualTo("23456789");
+      assertThat(media.rangeStart()).isEqualTo(2);
+      assertThat(media.rangeEnd()).isEqualTo(9);
     }
   }
 

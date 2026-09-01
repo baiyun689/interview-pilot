@@ -136,7 +136,7 @@ public class QuestionSpeechServiceImpl implements QuestionSpeechModule {
     String mediaType = speech.getContentType() != null
         ? speech.getContentType() : full.mediaType();
     if (range == null) {
-      return new QuestionSpeechMedia(withMediaType(full, mediaType), etag(speech));
+      return new QuestionSpeechMedia(withMediaType(full, mediaType), etag(speech), null, null);
     }
     long length = full.contentLength();
     long start = range.getRangeStart(length);
@@ -145,7 +145,9 @@ public class QuestionSpeechServiceImpl implements QuestionSpeechModule {
       closeQuietly(full);
       throw new VoiceRangeNotSatisfiableException(length);
     }
-    return new QuestionSpeechMedia(sliced(full, start, end, mediaType), etag(speech));
+    // The resolved-and-clamped bounds travel with the media: the controller emits
+    // Content-Range/Content-Length from them, never from its own re-computation.
+    return new QuestionSpeechMedia(sliced(full, start, end, mediaType), etag(speech), start, end);
   }
 
   @Override
@@ -234,9 +236,13 @@ public class QuestionSpeechServiceImpl implements QuestionSpeechModule {
 
   /**
    * Resets the unique task row to a fresh PENDING execution (V9 fenced-epoch precedent): the
-   * task epoch is bumped in lockstep with the speech epoch so stale listener messages cannot
-   * overwrite the new result. The existing row is reused — uq_async_task_type_biz_key
-   * guarantees one task row per speech.
+   * task epoch is joined to the speech's ALREADY-FENCED epoch (beginRetry bumped it first) so
+   * stale listener messages cannot overwrite the new result. The existing row is reused —
+   * uq_async_task_type_biz_key guarantees one task row per speech; a defensively recreated
+   * row must join the exact speech generation too — a naive +1 over a fresh epoch-0 row would
+   * silently break the lockstep on any retry after the first, and a current-generation
+   * dead-letter could then never pass markDead's epoch triple-check (the speech would stick
+   * in SYNTHESIZING forever).
    */
   private void resetSynthesisTask(QuestionSpeechEntity speech) {
     String bizKey = QuestionSpeechSynthesisRetryPolicy.BIZ_KEY_PREFIX + speech.getSpeechId();
@@ -246,7 +252,10 @@ public class QuestionSpeechServiceImpl implements QuestionSpeechModule {
             speech.getUserAccountId(), AsyncTaskType.QUESTION_SPEECH_SYNTHESIS, bizKey,
             "{\"speechId\":\"" + speech.getSpeechId() + "\"}")));
     task.setStatus(AsyncTaskStatus.PENDING);
-    task.setExecutionEpoch(task.getExecutionEpoch() + 1);
+    // The speech epoch is a long (V21 bigint) but the task epoch is an int (V9 schema); the
+    // cast is safe because both advance once per manual retry in lockstep — 2^31 retries is
+    // beyond any conceivable bound (the recording module shares this implicit limit).
+    task.setExecutionEpoch((int) speech.getExecutionEpoch());
     task.setLastPublishedAt(null);
     task.setLastError(null);
   }

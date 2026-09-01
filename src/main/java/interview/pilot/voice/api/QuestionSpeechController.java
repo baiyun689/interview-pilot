@@ -123,9 +123,11 @@ public class QuestionSpeechController {
     } catch (VoiceRangeNotSatisfiableException unsatisfiable) {
       return rangeNotSatisfiable(unsatisfiable.contentLength());
     }
+    // The module resolved and clamped the range; the wire headers derive from the carried
+    // slice bounds — the arithmetic lives in exactly one place.
     long length = media.resource().contentLength();
-    long start = range.getRangeStart(length);
-    long end = range.getRangeEnd(length);
+    long start = media.rangeStart();
+    long end = media.rangeEnd();
     return ResponseEntity.status(HttpStatus.PARTIAL_CONTENT)
         .headers(mediaHeaders(media))
         .header(HttpHeaders.CONTENT_RANGE, "bytes " + start + "-" + end + "/" + length)

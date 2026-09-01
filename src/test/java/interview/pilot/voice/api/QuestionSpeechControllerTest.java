@@ -176,10 +176,12 @@ class QuestionSpeechControllerTest {
 
   @Test
   void mediaServesEverySingleByteRangeFormAs206WithContentRange() throws Exception {
+    // The module resolves and clamps the range; the controller emits the wire headers from
+    // the carried slice bounds, never from its own arithmetic.
     when(module.open(org.mockito.ArgumentMatchers.eq(user),
         org.mockito.ArgumentMatchers.eq(sessionId), org.mockito.ArgumentMatchers.eq(speechId),
         org.mockito.ArgumentMatchers.any()))
-        .thenReturn(media("2345", 10, etag()));
+        .thenReturn(slice("2345", 10, 2, 5, etag()));
     mvc.perform(get(MEDIA_URL, sessionId, speechId).header("Range", "bytes=2-5"))
         .andExpect(status().isPartialContent())
         .andExpect(header().string("Content-Range", "bytes 2-5/10"))
@@ -189,7 +191,7 @@ class QuestionSpeechControllerTest {
     when(module.open(org.mockito.ArgumentMatchers.eq(user),
         org.mockito.ArgumentMatchers.eq(sessionId), org.mockito.ArgumentMatchers.eq(speechId),
         org.mockito.ArgumentMatchers.any()))
-        .thenReturn(media("6789", 10, etag()));
+        .thenReturn(slice("6789", 10, 6, 9, etag()));
     mvc.perform(get(MEDIA_URL, sessionId, speechId).header("Range", "bytes=6-"))
         .andExpect(status().isPartialContent())
         .andExpect(header().string("Content-Range", "bytes 6-9/10"))
@@ -198,12 +200,26 @@ class QuestionSpeechControllerTest {
     when(module.open(org.mockito.ArgumentMatchers.eq(user),
         org.mockito.ArgumentMatchers.eq(sessionId), org.mockito.ArgumentMatchers.eq(speechId),
         org.mockito.ArgumentMatchers.any()))
-        .thenReturn(media("789", 10, etag()));
+        .thenReturn(slice("789", 10, 7, 9, etag()));
     mvc.perform(get(MEDIA_URL, sessionId, speechId).header("Range", "bytes=-3"))
         .andExpect(status().isPartialContent())
         .andExpect(header().string("Content-Range", "bytes 7-9/10"))
         .andExpect(header().string("Content-Length", "3"))
         .andExpect(content().bytes("789".getBytes(StandardCharsets.UTF_8)));
+  }
+
+  @Test
+  void mediaClampsTheRangeEndToTheMediaLength() throws Exception {
+    when(module.open(org.mockito.ArgumentMatchers.eq(user),
+        org.mockito.ArgumentMatchers.eq(sessionId), org.mockito.ArgumentMatchers.eq(speechId),
+        org.mockito.ArgumentMatchers.any()))
+        .thenReturn(slice("23456789", 10, 2, 9, etag()));
+
+    mvc.perform(get(MEDIA_URL, sessionId, speechId).header("Range", "bytes=2-999"))
+        .andExpect(status().isPartialContent())
+        .andExpect(header().string("Content-Range", "bytes 2-9/10"))
+        .andExpect(header().string("Content-Length", "8"))
+        .andExpect(content().bytes("23456789".getBytes(StandardCharsets.UTF_8)));
   }
 
   @Test
@@ -315,11 +331,21 @@ class QuestionSpeechControllerTest {
   }
 
   private static QuestionSpeechMedia media(String stream, long totalLength, String etag) {
+    return media(stream, totalLength, null, null, etag);
+  }
+
+  private static QuestionSpeechMedia slice(
+      String stream, long totalLength, long start, long end, String etag) {
+    return media(stream, totalLength, start, end, etag);
+  }
+
+  private static QuestionSpeechMedia media(
+      String stream, long totalLength, Long start, Long end, String etag) {
     byte[] content = stream.getBytes(StandardCharsets.UTF_8);
     return new QuestionSpeechMedia(
         new VoiceMediaResource(
             new ByteArrayInputStream(content), totalLength, "audio/mpeg", null),
-        etag);
+        etag, start, end);
   }
 
   private static BusinessException rejection(String code, HttpStatus status) {
