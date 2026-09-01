@@ -12,6 +12,7 @@ import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.async.messaging.RabbitTopologyConfig;
 import interview.pilot.async.messaging.TaskMessage;
 import interview.pilot.async.messaging.TaskRetryPolicy;
+import interview.pilot.async.policy.AbstractKnowledgeDocumentRetryPolicy;
 
 @Component
 public class KnowledgeIndexListener {
@@ -43,7 +44,7 @@ public class KnowledgeIndexListener {
     }
     if (target.terminal()) return;
 
-    String claimKey = "knowledge-index:" + target.documentUuid();
+    String claimKey = AbstractKnowledgeDocumentRetryPolicy.CLAIM_KEY_PREFIX + target.documentUuid();
     String token;
     try {
       token = claims.acquire(claimKey, PROCESSING_TTL).orElse(null);

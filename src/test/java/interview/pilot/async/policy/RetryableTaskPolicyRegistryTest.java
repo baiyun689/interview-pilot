@@ -49,7 +49,15 @@ class RetryableTaskPolicyRegistryTest {
   }
 
   @Test
-  void anUnregisteredTypeFailsLoudlyInsteadOfDefaulting() {
+  void anUnregisteredTaskTypeFailsLoudlyInsteadOfDefaulting() {
+    var partial = new RetryableTaskPolicyRegistry(List.of(new VoiceTranscriptionRetryPolicy()));
+    assertThatThrownBy(() -> partial.forType(AsyncTaskType.RESUME_ANALYSIS))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("No RetryableTaskPolicy registered for RESUME_ANALYSIS");
+  }
+
+  @Test
+  void aNullTypeIsRejected() {
     assertThatThrownBy(() -> registry.forType(null))
         .isInstanceOf(NullPointerException.class);
   }

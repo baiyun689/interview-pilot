@@ -12,6 +12,7 @@ import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.messaging.RabbitTopologyConfig;
 import interview.pilot.async.messaging.TaskMessage;
 import interview.pilot.async.messaging.TaskRetryPolicy;
+import interview.pilot.async.policy.ResumeAnalysisRetryPolicy;
 import interview.pilot.resume.application.ResumeAnalysisHandler;
 import interview.pilot.resume.application.ResumeAnalysisRetryableException;
 
@@ -49,7 +50,7 @@ public class ResumeAnalysisListener {
       return;
     }
 
-    String claimKey = "resume-analysis:" + target.resumeId();
+    String claimKey = ResumeAnalysisRetryPolicy.CLAIM_KEY_PREFIX + target.resumeId();
     String token;
     try {
       token = processingClaim.acquire(claimKey, PROCESSING_TTL).orElse(null);

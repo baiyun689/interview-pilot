@@ -251,7 +251,7 @@ class AsyncTaskRetryEquivalenceTest {
   @ParameterizedTest
   @MethodSource("wrongBusinessStates")
   void wrongBusinessStateFailsWithTaskStateInvalidAfterClearingTheClaim(
-      AsyncTaskType type, String bizKey) {
+      AsyncTaskType type, String bizKey, String claimKey) {
     var task = task(type, bizKey, AsyncTaskStatus.FAILED);
     wire(task);
     if (type == AsyncTaskType.RESUME_ANALYSIS) {
@@ -273,6 +273,9 @@ class AsyncTaskRetryEquivalenceTest {
     var error = retryError(service(), task.getTaskId());
 
     assertThat(error.code()).isEqualTo("TASK_STATE_INVALID");
+    // The claim is cleared before the business-state check refuses the reset — if this
+    // drifted from the listener-side key, manual retry would clear a claim nobody holds.
+    verify(claims).clearTerminal(claimKey);
   }
 
   @Test
@@ -316,12 +319,16 @@ class AsyncTaskRetryEquivalenceTest {
   }
 
   private static Stream<Arguments> wrongBusinessStates() {
+    UUID preparationSession = UUID.randomUUID();
+    UUID evaluationSession = UUID.randomUUID();
+    UUID documentId = UUID.randomUUID();
     return Stream.of(
-        Arguments.of(AsyncTaskType.RESUME_ANALYSIS, "resume:42"),
+        Arguments.of(AsyncTaskType.RESUME_ANALYSIS, "resume:42", "resume-analysis:42"),
         Arguments.of(AsyncTaskType.INTERVIEW_QUESTION_PREPARATION,
-            "interview:" + UUID.randomUUID()),
-        Arguments.of(AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + UUID.randomUUID()),
+            "interview:" + preparationSession, "interview-preparation:" + preparationSession),
+        Arguments.of(AsyncTaskType.INTERVIEW_EVALUATION,
+            "interview:" + evaluationSession, "interview-report:" + evaluationSession),
         Arguments.of(AsyncTaskType.KNOWLEDGE_DOCUMENT_INDEX,
-            "knowledge-document:" + UUID.randomUUID()));
+            "knowledge-document:" + documentId, "knowledge-index:" + documentId));
   }
 }

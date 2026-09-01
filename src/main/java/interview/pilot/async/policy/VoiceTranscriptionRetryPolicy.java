@@ -25,7 +25,9 @@ import interview.pilot.async.infrastructure.AsyncTaskEntity;
 @Component
 public class VoiceTranscriptionRetryPolicy extends AbstractRetryableTaskPolicy {
   public static final String BIZ_KEY_PREFIX = "voice-recording:";
-  private static final String CLAIM_KEY_PREFIX = "voice-recording:";
+  // The voice claim key IS the bizKey: the recording id fences both the upload path and the
+  // listener-side processing claim, so retry clears exactly the claim the listener acquires.
+  private static final String CLAIM_KEY_PREFIX = BIZ_KEY_PREFIX;
 
   @Override
   public AsyncTaskType type() {

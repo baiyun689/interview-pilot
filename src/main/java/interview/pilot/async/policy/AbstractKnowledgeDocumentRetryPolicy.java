@@ -13,9 +13,13 @@ import interview.pilot.knowledge.infrastructure.KnowledgeDocumentRepository;
  * {@code beginReindex()}. Kept as separate policy beans (one per {@link
  * AsyncTaskType}) so the two types can diverge later without touching shared code.
  */
-abstract class AbstractKnowledgeDocumentRetryPolicy extends AbstractRetryableTaskPolicy {
+public abstract class AbstractKnowledgeDocumentRetryPolicy extends AbstractRetryableTaskPolicy {
   private static final String BIZ_KEY_PREFIX = "knowledge-document:";
-  private static final String CLAIM_KEY_PREFIX = "knowledge-index:";
+  /**
+   * Public so {@code KnowledgeIndexListener} acquires the very key this policy clears on
+   * manual retry — a drifted literal on either side would silently break retry idempotency.
+   */
+  public static final String CLAIM_KEY_PREFIX = "knowledge-index:";
 
   private final KnowledgeDocumentRepository knowledgeDocuments;
 

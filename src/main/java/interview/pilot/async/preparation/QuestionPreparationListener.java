@@ -11,6 +11,7 @@ import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.async.messaging.RabbitTopologyConfig;
 import interview.pilot.async.messaging.TaskMessage;
 import interview.pilot.async.messaging.TaskRetryPolicy;
+import interview.pilot.async.policy.InterviewPreparationRetryPolicy;
 import interview.pilot.interview.application.InvalidQuestionDeckException;
 import interview.pilot.interview.application.QuestionPreparationHandler;
 
@@ -38,7 +39,7 @@ public class QuestionPreparationListener {
   public void receive(TaskMessage message, Message source) {
     QuestionPreparationHandler.Target target = handler.inspect(message);
     if (target.terminal()) return;
-    String key = "interview-preparation:" + target.sessionId();
+    String key = InterviewPreparationRetryPolicy.CLAIM_KEY_PREFIX + target.sessionId();
     String token;
     try {
       token = claims.acquire(key, PROCESSING_TTL).orElse(null);

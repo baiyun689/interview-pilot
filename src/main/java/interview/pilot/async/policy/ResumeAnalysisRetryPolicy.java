@@ -16,7 +16,11 @@ import interview.pilot.resume.infrastructure.ResumeRepository;
 @Component
 public class ResumeAnalysisRetryPolicy extends AbstractRetryableTaskPolicy {
   private static final String BIZ_KEY_PREFIX = "resume:";
-  private static final String CLAIM_KEY_PREFIX = "resume-analysis:";
+  /**
+   * Public so {@code ResumeAnalysisListener} acquires the very key this policy clears on
+   * manual retry — a drifted literal on either side would silently break retry idempotency.
+   */
+  public static final String CLAIM_KEY_PREFIX = "resume-analysis:";
 
   private final ResumeRepository resumes;
 

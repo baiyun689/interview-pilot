@@ -20,6 +20,11 @@ import interview.pilot.async.infrastructure.AsyncTaskEntity;
  * <p>Adding a new task type is a single-point change: implement this interface as a Spring
  * {@code @Component} and the {@link RetryableTaskPolicyRegistry} picks it up automatically.
  * No switch in {@code AsyncTaskService} grows.
+ *
+ * <p>The plan §12 sketch also listed an {@code inspect(...)} step; it is intentionally
+ * absent here. Per-type inspection already lives in the listener-side handlers (e.g. {@code
+ * ResumeAnalysisHandler.inspect}), while this policy serves only the generic manual-retry
+ * endpoint — importing inspection here would duplicate the handlers' terminal-state logic.
  */
 public interface RetryableTaskPolicy {
   AsyncTaskType type();

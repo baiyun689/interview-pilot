@@ -10,6 +10,7 @@ import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.async.messaging.RabbitTopologyConfig;
 import interview.pilot.async.messaging.TaskMessage;
 import interview.pilot.async.messaging.TaskRetryPolicy;
+import interview.pilot.async.policy.InterviewEvaluationRetryPolicy;
 import interview.pilot.interview.application.FixedInterviewReportHandler;
 import interview.pilot.interview.application.ReportGenerationRetryableException;
 
@@ -34,7 +35,7 @@ public class InterviewReportListener {
   public void receive(TaskMessage message, Message source) {
     FixedInterviewReportHandler.Target target = handler.inspect(message);
     if (target.terminal()) return;
-    String key = "interview-report:" + target.sessionId();
+    String key = InterviewEvaluationRetryPolicy.CLAIM_KEY_PREFIX + target.sessionId();
     String token;
     try {
       token = claims.acquire(key, PROCESSING_TTL).orElse(null);

@@ -15,14 +15,15 @@ import interview.pilot.interview.infrastructure.InterviewSessionRepository;
  * task is reset, and the retry re-queues evaluation.
  */
 @Component
-public class InterviewEvaluationRetryPolicy extends AbstractRetryableTaskPolicy {
-  private static final String BIZ_KEY_PREFIX = "interview:";
-  private static final String CLAIM_KEY_PREFIX = "interview-report:";
-
-  private final InterviewSessionRepository sessions;
+public class InterviewEvaluationRetryPolicy extends AbstractInterviewSessionRetryPolicy {
+  /**
+   * Public so {@code InterviewReportListener} acquires the very key this policy clears on
+   * manual retry — a drifted literal on either side would silently break retry idempotency.
+   */
+  public static final String CLAIM_KEY_PREFIX = "interview-report:";
 
   public InterviewEvaluationRetryPolicy(InterviewSessionRepository sessions) {
-    this.sessions = sessions;
+    super(sessions);
   }
 
   @Override
@@ -39,22 +40,11 @@ public class InterviewEvaluationRetryPolicy extends AbstractRetryableTaskPolicy 
   public void reset(AsyncTaskEntity task, long userAccountId) {
     UUID sessionId = parseInterviewId(task.getBizKey());
     InterviewSessionEntity session =
-        sessions.findBySessionIdAndUserAccountId(sessionId, userAccountId)
+        sessions().findBySessionIdAndUserAccountId(sessionId, userAccountId)
             .orElseThrow(AbstractRetryableTaskPolicy::stateInvalid);
     if (session.getStatus() != SessionStatus.EVALUATION_FAILED) {
       throw stateInvalid();
     }
     session.retryEvaluation();
-  }
-
-  private UUID parseInterviewId(String bizKey) {
-    try {
-      if (bizKey == null || !bizKey.startsWith(BIZ_KEY_PREFIX)) {
-        throw new IllegalArgumentException();
-      }
-      return UUID.fromString(bizKey.substring(BIZ_KEY_PREFIX.length()));
-    } catch (IllegalArgumentException exception) {
-      throw stateInvalid();
-    }
   }
 }
