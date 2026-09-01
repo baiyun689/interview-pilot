@@ -15,6 +15,7 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
@@ -63,7 +64,7 @@ class QuestionSpeechTaskCreatorTest {
     assertThat(speechId).isNotNull();
     ArgumentCaptor<QuestionSpeechEntity> speechCaptor =
         ArgumentCaptor.forClass(QuestionSpeechEntity.class);
-    verify(speeches).save(speechCaptor.capture());
+    verify(speeches).saveAndFlush(speechCaptor.capture());
     QuestionSpeechEntity speech = speechCaptor.getValue();
     assertThat(speech.getStatus()).isEqualTo(QuestionSpeechStatus.PENDING);
     assertThat(speech.getSpeechId()).isEqualTo(speechId);
@@ -75,7 +76,7 @@ class QuestionSpeechTaskCreatorTest {
     assertThat(speech.getTurnId()).isEqualTo(7L);
     ArgumentCaptor<AsyncTaskEntity> taskCaptor =
         ArgumentCaptor.forClass(AsyncTaskEntity.class);
-    verify(tasks).save(taskCaptor.capture());
+    verify(tasks).saveAndFlush(taskCaptor.capture());
     AsyncTaskEntity task = taskCaptor.getValue();
     assertThat(task.getTaskType()).isEqualTo(AsyncTaskType.QUESTION_SPEECH_SYNTHESIS);
     assertThat(task.getBizKey()).isEqualTo(
@@ -116,8 +117,8 @@ class QuestionSpeechTaskCreatorTest {
     UUID speechId = creator(voiceWithTts(TTS)).createForTurn(session, turn);
 
     assertThat(speechId).isEqualTo(existingSpeechId);
-    verify(speeches, never()).save(any());
-    verify(tasks, never()).save(any());
+    verify(speeches, never()).saveAndFlush(any());
+    verify(tasks, never()).saveAndFlush(any());
   }
 
   @Test
@@ -141,8 +142,46 @@ class QuestionSpeechTaskCreatorTest {
     UUID created = creator(voiceWithTts(TTS)).createForTurn(session, turn);
 
     assertThat(created).isNotNull();
-    verify(speeches).save(any());
-    verify(tasks, never()).save(any());
+    verify(speeches).saveAndFlush(any());
+    verify(tasks, never()).saveAndFlush(any());
+  }
+
+  @Test
+  void aLostInsertRaceReturnsTheWinnersCommittedSpeechRow() {
+    // uq_question_speech_turn backstop: the flush forces the duplicate-key violation inside
+    // the creator, and the re-read finds the winner's committed row.
+    var session = session(InterviewMode.VOICE);
+    var turn = turn(7L, "请自我介绍");
+    UUID winnerSpeechId = UUID.randomUUID();
+    when(speeches.findByTurnId(7L)).thenReturn(Optional.empty(),
+        Optional.of(QuestionSpeechEntity.pending(3L, winnerSpeechId, 9L, 7L,
+            QuestionSpeechHashes.of("请自我介绍"), "dashscope", "cosyvoice-v3-flash", "longanyang")));
+    when(speeches.saveAndFlush(any())).thenThrow(new DataIntegrityViolationException("dup turn"));
+    when(tasks.findByTaskTypeAndBizKeyAndUserAccountId(
+        any(AsyncTaskType.class), any(String.class), any(Long.class)))
+        .thenReturn(Optional.of(AsyncTaskEntity.pending(
+            3L, AsyncTaskType.QUESTION_SPEECH_SYNTHESIS,
+            QuestionSpeechSynthesisRetryPolicy.BIZ_KEY_PREFIX + winnerSpeechId, "{}")));
+
+    UUID speechId = creator(voiceWithTts(TTS)).createForTurn(session, turn);
+
+    assertThat(speechId).isEqualTo(winnerSpeechId);
+  }
+
+  @Test
+  void aLostTaskInsertRaceIsSwallowedByTheUniqueBizKeyBackstop() {
+    var session = session(InterviewMode.VOICE);
+    var turn = turn(7L, "请自我介绍");
+    when(speeches.findByTurnId(7L)).thenReturn(Optional.empty());
+    when(tasks.findByTaskTypeAndBizKeyAndUserAccountId(
+        any(AsyncTaskType.class), any(String.class), any(Long.class)))
+        .thenReturn(Optional.empty());
+    when(tasks.saveAndFlush(any())).thenThrow(new DataIntegrityViolationException("dup biz key"));
+
+    UUID speechId = creator(voiceWithTts(TTS)).createForTurn(session, turn);
+
+    assertThat(speechId).isNotNull();
+    verify(speeches).saveAndFlush(any());
   }
 
   private static InterviewSessionEntity session(InterviewMode mode) {

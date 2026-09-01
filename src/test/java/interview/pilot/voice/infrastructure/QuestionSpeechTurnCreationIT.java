@@ -36,12 +36,15 @@ import interview.pilot.interview.domain.InterviewMode;
 import interview.pilot.interview.domain.InterviewPhase;
 import interview.pilot.interview.domain.InterviewSize;
 import interview.pilot.interview.domain.JobSourceType;
+import interview.pilot.interview.domain.QuestionType;
 import interview.pilot.interview.infrastructure.InterviewQuestionCardEntity;
 import interview.pilot.interview.infrastructure.InterviewQuestionCardRepository;
 import interview.pilot.interview.infrastructure.InterviewSessionEntity;
 import interview.pilot.interview.infrastructure.InterviewSessionRepository;
+import interview.pilot.interview.infrastructure.InterviewTurnEntity;
 import interview.pilot.interview.infrastructure.InterviewTurnRepository;
 import interview.pilot.interview.rag.RagStatus;
+import interview.pilot.voice.application.QuestionSpeechTaskCreator;
 import interview.pilot.voice.domain.QuestionSpeechStatus;
 import tools.jackson.databind.ObjectMapper;
 
@@ -99,6 +102,9 @@ class QuestionSpeechTurnCreationIT {
 
   @Autowired
   private StartInterviewService startInterview;
+
+  @Autowired
+  private QuestionSpeechTaskCreator questionSpeeches;
 
   @Autowired
   private InterviewSessionRepository sessions;
@@ -202,6 +208,46 @@ class QuestionSpeechTurnCreationIT {
     assertThat(tasks.findAll().stream()
         .filter(task -> task.getTaskType() == AsyncTaskType.QUESTION_SPEECH_SYNTHESIS)
         .count()).isZero();
+  }
+
+  @Test
+  void concurrentCreationForOneTurnYieldsExactlyOneSpeechRowAndTask() throws Exception {
+    var session = seedSession(InterviewMode.VOICE);
+    var card = cards.save(InterviewQuestionCardEntity.create(
+        session.getId(), InterviewPhase.SELF_INTRODUCTION, 1, "自我介绍", "请自我介绍",
+        "[]", GroundingMode.GENERAL, RagStatus.DISABLED, "{}", "[]", 0, null));
+    var turn = turns.save(InterviewTurnEntity.asked(
+        session.getId(), 1, InterviewPhase.SELF_INTRODUCTION,
+        QuestionType.SELF_INTRODUCTION, card.getId(), "请自我介绍"));
+
+    int threads = 4;
+    var barrier = new java.util.concurrent.CyclicBarrier(threads);
+    var ids = new java.util.concurrent.ConcurrentLinkedQueue<UUID>();
+    var errors = new java.util.concurrent.ConcurrentLinkedQueue<Throwable>();
+    var executor = java.util.concurrent.Executors.newFixedThreadPool(threads);
+    try {
+      for (int i = 0; i < threads; i++) {
+        executor.submit(() -> {
+          try {
+            barrier.await();
+            ids.add(questionSpeeches.createForTurn(session, turn));
+          } catch (Throwable failure) {
+            errors.add(failure);
+          }
+        });
+      }
+    } finally {
+      executor.shutdown();
+      assertThat(executor.awaitTermination(30, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+    }
+
+    assertThat(errors).isEmpty();
+    // uq_question_speech_turn backstop: every racer returns the one winning speech id.
+    assertThat(ids.stream().distinct().count()).isEqualTo(1);
+    assertThat(speeches.count()).isEqualTo(1);
+    assertThat(tasks.findAll().stream()
+        .filter(task -> task.getTaskType() == AsyncTaskType.QUESTION_SPEECH_SYNTHESIS)
+        .count()).isEqualTo(1);
   }
 
   private InterviewSessionEntity seedSession(InterviewMode mode) {

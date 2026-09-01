@@ -3,6 +3,7 @@ package interview.pilot.voice.application;
 import java.util.Objects;
 import java.util.UUID;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 import interview.pilot.async.domain.AsyncTaskType;
@@ -31,8 +32,11 @@ import interview.pilot.voice.infrastructure.QuestionSpeechRepository;
  * A repeated execution (e.g. {@code FixedAnswerService.completeInTransaction} re-run after an
  * optimistic-lock rollback, or a replayed request) returns the existing row instead of
  * failing — the same getOrCreate pattern as
- * {@code VoiceAnswerServiceImpl.createTranscriptionTask}. The task bizKey format
- * {@code question-speech:{speechId}} is owned by
+ * {@code VoiceAnswerServiceImpl.createTranscriptionTask}. A concurrent execution that loses
+ * the insert race surfaces as {@link DataIntegrityViolationException}, which is translated
+ * back into the winner's row: the flush forces the unique-constraint violation to happen
+ * inside this method, and the post-violation re-read sees the committed winner. The task
+ * bizKey format {@code question-speech:{speechId}} is owned by
  * {@link QuestionSpeechSynthesisRetryPolicy#BIZ_KEY_PREFIX} — never a literal.
  */
 @Service
@@ -63,10 +67,22 @@ public class QuestionSpeechTaskCreator {
       return existing.get().getSpeechId(); // repeated execution: return the existing row
     }
     UUID speechId = UUID.randomUUID();
-    speeches.save(QuestionSpeechEntity.pending(
-        session.getUserAccountId(), speechId, turn.getSessionId(), turn.getId(),
-        QuestionSpeechHashes.of(turn.getQuestionText()),
-        properties.tts().provider(), properties.tts().model(), properties.tts().voice()));
+    try {
+      speeches.saveAndFlush(QuestionSpeechEntity.pending(
+          session.getUserAccountId(), speechId, turn.getSessionId(), turn.getId(),
+          QuestionSpeechHashes.of(turn.getQuestionText()),
+          properties.tts().provider(), properties.tts().model(), properties.tts().voice()));
+    } catch (DataIntegrityViolationException exception) {
+      // uq_question_speech_turn backstop: a competing creator won; return its committed row.
+      // The losing insert blocked on the winner's commit, so a fresh read sees it (unless
+      // this method runs inside a REPEATABLE READ transaction that pre-dates the winner —
+      // the production callers serialize per session, so that read cannot go blind here).
+      UUID winnerId = speeches.findByTurnId(turn.getId())
+          .map(QuestionSpeechEntity::getSpeechId)
+          .orElseThrow(() -> exception);
+      createTask(session.getUserAccountId(), winnerId);
+      return winnerId;
+    }
     createTask(session.getUserAccountId(), speechId);
     return speechId;
   }
@@ -75,10 +91,15 @@ public class QuestionSpeechTaskCreator {
     String bizKey = QuestionSpeechSynthesisRetryPolicy.BIZ_KEY_PREFIX + speechId;
     var existing = tasks.findByTaskTypeAndBizKeyAndUserAccountId(
         AsyncTaskType.QUESTION_SPEECH_SYNTHESIS, bizKey, userAccountId);
-    if (existing.isEmpty()) {
-      tasks.save(AsyncTaskEntity.pending(
+    if (existing.isPresent()) {
+      return;
+    }
+    try {
+      tasks.saveAndFlush(AsyncTaskEntity.pending(
           userAccountId, AsyncTaskType.QUESTION_SPEECH_SYNTHESIS, bizKey,
           "{\"speechId\":\"" + speechId + "\"}"));
+    } catch (DataIntegrityViolationException ignored) {
+      // uq_async_task_type_biz_key backstop: a competing creator's task row won.
     }
   }
 }
