@@ -55,11 +55,19 @@ public class RabbitTopologyConfig {
   public static final String KNOWLEDGE_DELETE_DLQ =
       "interview-pilot.knowledge.delete.dlq";
 
+  public static final String VOICE_TRANSCRIPTION_MAIN_EXCHANGE =
+      "interview-pilot.voice.transcription";
+  public static final String VOICE_TRANSCRIPTION_MAIN_QUEUE =
+      "interview-pilot.voice.transcription.main";
+  public static final String VOICE_TRANSCRIPTION_DLQ =
+      "interview-pilot.voice.transcription.dlq";
+
   static final String RESUME_ANALYSIS_ROUTING_KEY = "resume.analysis";
   static final String INTERVIEW_REPORT_ROUTING_KEY = "interview.report";
   static final String INTERVIEW_PREPARATION_ROUTING_KEY = "interview.preparation";
   static final String KNOWLEDGE_INDEX_ROUTING_KEY = "knowledge.index";
   static final String KNOWLEDGE_DELETE_ROUTING_KEY = "knowledge.delete";
+  static final String VOICE_TRANSCRIPTION_ROUTING_KEY = "voice.transcription";
   static final String RETRY_COUNT_HEADER = "x-retry-count";
   static final int[] RETRY_DELAYS_MILLIS = {5_000, 30_000, 120_000};
 
@@ -76,6 +84,7 @@ public class RabbitTopologyConfig {
     declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.INTERVIEW_EVALUATION)));
     declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.KNOWLEDGE_DOCUMENT_INDEX)));
     declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.KNOWLEDGE_DOCUMENT_DELETE)));
+    declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.VOICE_TRANSCRIPTION)));
     return new Declarables(declarations);
   }
 
@@ -116,6 +125,13 @@ public class RabbitTopologyConfig {
           "interview-pilot.knowledge.delete.dead-letter",
           KNOWLEDGE_DELETE_DLQ,
           "knowledge.delete.dead");
+      case VOICE_TRANSCRIPTION -> new PipelineRoute(
+          VOICE_TRANSCRIPTION_MAIN_EXCHANGE,
+          VOICE_TRANSCRIPTION_MAIN_QUEUE,
+          VOICE_TRANSCRIPTION_ROUTING_KEY,
+          "interview-pilot.voice.transcription.dead-letter",
+          VOICE_TRANSCRIPTION_DLQ,
+          "voice.transcription.dead");
     };
   }
 

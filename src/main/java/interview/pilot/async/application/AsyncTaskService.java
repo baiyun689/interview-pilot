@@ -123,6 +123,11 @@ public class AsyncTaskService {
         throw conflict("TASK_STATE_INVALID", "Task state is inconsistent");
       }
       session.retryPreparation();
+    } else if (task.getTaskType() == AsyncTaskType.VOICE_TRANSCRIPTION) {
+      // Voice transcription retry is owned by VoiceAnswerModule.retry, which resets the
+      // recording row and the task row in lockstep (V9 fenced epoch). The generic endpoint
+      // must not reset the task alone. Task R owns the policy registry refactor.
+      throw conflict("TASK_NOT_RETRYABLE", "Voice transcription retry is managed by the recording");
     } else {
       UUID sessionId = parseInterviewId(task.getBizKey());
       var session = sessions.findBySessionIdAndUserAccountId(sessionId, target.userAccountId())
@@ -154,6 +159,7 @@ public class AsyncTaskService {
       case INTERVIEW_EVALUATION -> "interview-report:" + parseInterviewId(task.getBizKey());
       case KNOWLEDGE_DOCUMENT_INDEX, KNOWLEDGE_DOCUMENT_DELETE ->
           "knowledge-index:" + parseKnowledgeDocumentId(task.getBizKey());
+      case VOICE_TRANSCRIPTION -> "voice-recording:" + parseVoiceRecordingId(task.getBizKey());
     };
   }
 
@@ -180,6 +186,16 @@ public class AsyncTaskService {
       if (bizKey == null || !bizKey.startsWith("knowledge-document:"))
         throw new IllegalArgumentException();
       return UUID.fromString(bizKey.substring("knowledge-document:".length()));
+    } catch (IllegalArgumentException exception) {
+      throw conflict("TASK_STATE_INVALID", "Task state is inconsistent");
+    }
+  }
+
+  private UUID parseVoiceRecordingId(String bizKey) {
+    try {
+      if (bizKey == null || !bizKey.startsWith("voice-recording:"))
+        throw new IllegalArgumentException();
+      return UUID.fromString(bizKey.substring("voice-recording:".length()));
     } catch (IllegalArgumentException exception) {
       throw conflict("TASK_STATE_INVALID", "Task state is inconsistent");
     }

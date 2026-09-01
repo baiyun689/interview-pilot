@@ -1,0 +1,79 @@
+package interview.pilot.async.application;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import java.util.Optional;
+import java.util.UUID;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.SimpleTransactionStatus;
+
+import interview.pilot.async.domain.AsyncTaskStatus;
+import interview.pilot.async.domain.AsyncTaskType;
+import interview.pilot.async.idempotency.ProcessingClaim;
+import interview.pilot.async.infrastructure.AsyncTaskEntity;
+import interview.pilot.async.infrastructure.AsyncTaskRepository;
+import interview.pilot.async.messaging.RabbitTopologyConfig;
+import interview.pilot.auth.application.CurrentUser;
+import interview.pilot.common.exception.BusinessException;
+import interview.pilot.common.observability.AiMetrics;
+import interview.pilot.interview.infrastructure.InterviewSessionRepository;
+import interview.pilot.resume.infrastructure.ResumeRepository;
+
+/**
+ * Task 4's minimal routing for VOICE_TRANSCRIPTION: the plan §12 pipeline naming is
+ * declared, and the generic task retry endpoint refuses to reset voice tasks — recording
+ * retry is owned by VoiceAnswerModule (V9 fenced-epoch lockstep). Task R owns the policy
+ * registry refactor.
+ */
+class VoiceAsyncRoutingTest {
+
+  @Test
+  void voiceTranscriptionRoutesToTheDedicatedDurablePipeline() {
+    var route = RabbitTopologyConfig.routeFor(AsyncTaskType.VOICE_TRANSCRIPTION);
+
+    assertThat(route.mainExchange()).isEqualTo("interview-pilot.voice.transcription");
+    assertThat(route.mainQueue()).isEqualTo("interview-pilot.voice.transcription.main");
+    assertThat(route.mainRoutingKey()).isEqualTo("voice.transcription");
+    assertThat(route.deadLetterExchange())
+        .isEqualTo("interview-pilot.voice.transcription.dead-letter");
+    assertThat(route.deadLetterQueue()).isEqualTo("interview-pilot.voice.transcription.dlq");
+    assertThat(route.deadLetterRoutingKey()).isEqualTo("voice.transcription.dead");
+  }
+
+  @Test
+  void genericTaskRetryRefusesVoiceTranscriptionTasks() {
+    UUID taskId = UUID.randomUUID();
+    UUID recordingId = UUID.randomUUID();
+    AsyncTaskEntity failed = AsyncTaskEntity.pending(
+        1L, AsyncTaskType.VOICE_TRANSCRIPTION, "voice-recording:" + recordingId, "{}");
+    failed.setId(7L);
+    failed.setTaskId(taskId);
+    failed.setStatus(AsyncTaskStatus.FAILED);
+    failed.setVersion(3L);
+    var tasks = mock(AsyncTaskRepository.class);
+    when(tasks.findByTaskIdAndUserAccountId(taskId, 1L)).thenReturn(Optional.of(failed));
+    when(tasks.findByIdAndUserAccountId(7L, 1L)).thenReturn(Optional.of(failed));
+    var claims = mock(ProcessingClaim.class);
+    when(claims.clearTerminal("voice-recording:" + recordingId))
+        .thenReturn(ProcessingClaim.ClearResult.ABSENT);
+    var transactionManager = mock(PlatformTransactionManager.class);
+    when(transactionManager.getTransaction(any()))
+        .thenAnswer(invocation -> new SimpleTransactionStatus());
+    var service = new AsyncTaskService(
+        tasks, mock(ResumeRepository.class), mock(InterviewSessionRepository.class),
+        mock(interview.pilot.knowledge.infrastructure.KnowledgeDocumentRepository.class),
+        claims, transactionManager, mock(AiMetrics.class));
+
+    assertThatThrownBy(() -> service.retry(
+        new CurrentUser(1L, new UUID(0L, 1L), "owner@example.com", "Owner"), taskId,
+        UUID.randomUUID()))
+        .isInstanceOfSatisfying(BusinessException.class,
+            error -> assertThat(error.code()).isEqualTo("TASK_NOT_RETRYABLE"));
+  }
+}
