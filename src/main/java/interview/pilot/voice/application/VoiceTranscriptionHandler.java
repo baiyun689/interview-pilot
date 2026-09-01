@@ -105,13 +105,19 @@ public class VoiceTranscriptionHandler {
     if (message.executionEpoch() != task.getExecutionEpoch()) {
       throw new IllegalArgumentException("Voice transcription message epoch is invalid");
     }
-    boolean succeeded = task.getStatus() == AsyncTaskStatus.COMPLETED
-        && recording.getStatus() == VoiceRecordingStatus.READY;
-    boolean failed = (task.getStatus() == AsyncTaskStatus.FAILED
-        || task.getStatus() == AsyncTaskStatus.DEAD)
-        && recording.getStatus() == VoiceRecordingStatus.FAILED;
+    boolean taskTerminal = task.getStatus() == AsyncTaskStatus.COMPLETED
+        || task.getStatus() == AsyncTaskStatus.FAILED
+        || task.getStatus() == AsyncTaskStatus.DEAD;
+    // A terminal recording is any status the claim transaction cannot act on: READY/FAILED
+    // are the direct outcomes, ATTACHED/DISCARDED are later user actions on a READY recording.
+    // Without this, a duplicate delivery arriving after discard would dead-letter and requeue
+    // forever (begin refuses, markDead refuses → IllegalStateException → requeue).
+    boolean recordingTerminal = recording.getStatus() == VoiceRecordingStatus.READY
+        || recording.getStatus() == VoiceRecordingStatus.FAILED
+        || recording.getStatus() == VoiceRecordingStatus.ATTACHED
+        || recording.getStatus() == VoiceRecordingStatus.DISCARDED;
     return new VoiceTranscriptionTarget(
-        recording.getRecordingId(), succeeded || failed,
+        recording.getRecordingId(), taskTerminal && recordingTerminal,
         task.getAttemptCount(), task.getExecutionEpoch());
   }
 

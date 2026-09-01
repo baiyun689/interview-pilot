@@ -2,6 +2,9 @@ package interview.pilot.voice.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.charset.StandardCharsets;
@@ -21,6 +24,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -33,6 +37,7 @@ import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.async.messaging.RabbitTopologyConfig;
 import interview.pilot.async.messaging.TaskMessage;
 import interview.pilot.async.messaging.TaskMessagePublisher;
+import interview.pilot.async.messaging.TaskRetryPolicy;
 import interview.pilot.async.policy.VoiceTranscriptionRetryPolicy;
 import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.auth.infrastructure.UserAccountEntity;
@@ -59,10 +64,12 @@ import interview.pilot.voice.application.VoiceTranscriptionHandler;
 import interview.pilot.voice.application.VoiceTranscriptionRetryableException;
 import interview.pilot.voice.domain.ProbedAudio;
 import interview.pilot.voice.domain.VoiceErrorCodes;
+import interview.pilot.voice.domain.VoiceMediaNotFoundException;
 import interview.pilot.voice.domain.VoiceRecordingStatus;
 import interview.pilot.voice.infrastructure.AudioProbe;
 import interview.pilot.voice.infrastructure.VoiceRecordingRepository;
 import interview.pilot.voice.infrastructure.VoiceTranscriptionListener;
+import interview.pilot.voice.storage.VoiceMediaStore;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -81,7 +88,6 @@ import tools.jackson.databind.ObjectMapper;
     "VOICE_MEDIA_RETENTION=7d",
     "DASHSCOPE_SPEECH_BASE_URL=https://dashscope.aliyuncs.com/api/v1",
     "DASHSCOPE_SPEECH_API_KEY=sk-listener-it",
-    "DASHSCOPE_WORKSPACE_ID=",
     "DASHSCOPE_ASR_MODEL=fun-asr-flash-2026-06-15",
     "DASHSCOPE_ASR_TIMEOUT=60s",
     "DASHSCOPE_TTS_MODEL=cosyvoice-v3-flash",
@@ -118,8 +124,14 @@ class VoiceTranscriptionListenerIT {
   @MockitoBean
   private AudioProbe probe;
 
+  @MockitoSpyBean
+  private TaskRetryPolicy retryPolicy;
+
   @Autowired
   private VoiceAnswerModule module;
+
+  @Autowired
+  private VoiceMediaStore mediaStore;
 
   @Autowired
   private VoiceTranscriptionListener listener;
@@ -225,6 +237,50 @@ class VoiceTranscriptionListenerIT {
     assertThat(recording.getStatus()).isEqualTo(VoiceRecordingStatus.FAILED);
     assertThat(recording.getSafeError()).isEqualTo(VoiceErrorCodes.VOICE_TRANSCRIPTION_FAILED);
     assertThat(taskOf(receipt).getStatus()).isEqualTo(AsyncTaskStatus.FAILED);
+  }
+
+  @Test
+  void missingMediaAtTranscriptionTimeIsADeterministicFailure() {
+    var receipt = module.accept(user, session.getSessionId(), 1, UUID.randomUUID(), audio("a"));
+    var recording = recordings.findByRecordingId(receipt.recordingId()).orElseThrow();
+    mediaStore.delete(recording.getStorageKey());
+    // The fake recognizer never reads the store itself; the production adapter surfaces the
+    // missing media as VoiceMediaNotFoundException and the handler must map it deterministically
+    // (retrying cannot restore a deleted file).
+    fakeRecognizer.respondWith(context -> {
+      throw new VoiceMediaNotFoundException();
+    });
+
+    listener.receive(message(receipt, 0), source(0));
+
+    var failed = recordings.findByRecordingId(receipt.recordingId()).orElseThrow();
+    assertThat(failed.getStatus()).isEqualTo(VoiceRecordingStatus.FAILED);
+    assertThat(failed.getSafeError()).isEqualTo(VoiceErrorCodes.VOICE_MEDIA_STORAGE_FAILED);
+    assertThat(taskOf(receipt).getStatus()).isEqualTo(AsyncTaskStatus.FAILED);
+  }
+
+  @Test
+  void duplicateDeliveryAfterDiscardIsTerminalAndDoesNotRequeueOrDeadLetter() {
+    var receipt = module.accept(user, session.getSessionId(), 1, UUID.randomUUID(), audio("a"));
+    listener.receive(message(receipt, 0), source(0));
+    assertThat(recordings.findByRecordingId(receipt.recordingId()).orElseThrow()
+        .getStatus()).isEqualTo(VoiceRecordingStatus.READY);
+
+    module.discard(user, session.getSessionId(), receipt.recordingId());
+    assertThat(recordings.findByRecordingId(receipt.recordingId()).orElseThrow()
+        .getStatus()).isEqualTo(VoiceRecordingStatus.DISCARDED);
+
+    // A duplicate delivery (crash between the final transaction and the ack) must be
+    // terminal: begin and markDead both refuse a DISCARDED recording, and a non-terminal
+    // classification would dead-letter and requeue the message forever.
+    assertThat(handler.inspect(message(receipt, 0)).terminal()).isTrue();
+    clearInvocations(retryPolicy);
+    listener.receive(message(receipt, 0), source(0));
+
+    verify(retryPolicy, never()).routeFailure(any(), any());
+    assertThat(recordings.findByRecordingId(receipt.recordingId()).orElseThrow()
+        .getStatus()).isEqualTo(VoiceRecordingStatus.DISCARDED);
+    assertThat(taskOf(receipt).getStatus()).isEqualTo(AsyncTaskStatus.COMPLETED);
   }
 
   // ---------------------------------------------------------------- retryable failures
