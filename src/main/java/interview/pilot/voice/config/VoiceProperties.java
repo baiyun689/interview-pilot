@@ -54,7 +54,7 @@ public record VoiceProperties(
     }
     if (!asrComplete(asr)) {
       throw new IllegalArgumentException(
-          "Voice ASR requires a provider, model, base URL, and an API key or workspace ID");
+          "Voice ASR requires a provider, model, base URL, and API key");
     }
     if (asr.timeout() == null || asr.timeout().isZero() || asr.timeout().isNegative()) {
       throw new IllegalArgumentException("Voice ASR timeout must be positive");
@@ -69,13 +69,18 @@ public record VoiceProperties(
     return enabled && asrComplete(asr);
   }
 
-  /** Canonical ASR readiness predicate shared by startup validation and runtime checks. */
+  /**
+   * Canonical ASR readiness predicate shared by startup validation and runtime checks. The
+   * DashScope Authorization header is {@code Bearer <api-key>} in every deployment mode — the
+   * MaaS workspace form (workspace-specific hostname) still authenticates with an API key and
+   * is not supported in this release — so an API key is the only accepted credential.
+   */
   private static boolean asrComplete(Asr asr) {
     return asr != null
         && hasText(asr.provider())
         && hasText(asr.model())
         && hasText(asr.baseUrl())
-        && (hasText(asr.apiKey()) || hasText(asr.workspaceId()));
+        && hasText(asr.apiKey());
   }
 
   public boolean ttsConfigured() {
@@ -125,7 +130,6 @@ public record VoiceProperties(
   public record Asr(
       String provider,
       String baseUrl,
-      String workspaceId,
       String apiKey,
       String model,
       Duration timeout) {}

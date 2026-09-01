@@ -106,7 +106,7 @@ class VoiceCapabilitiesControllerTest {
 
   private static VoiceProperties.Asr asr() {
     return new VoiceProperties.Asr(
-        "dashscope", "https://dashscope.aliyuncs.com/api/v1", "", "sk-test",
+        "dashscope", "https://dashscope.aliyuncs.com/api/v1", "sk-test",
         "fun-asr-flash-2026-06-15", Duration.ofSeconds(60));
   }
 }

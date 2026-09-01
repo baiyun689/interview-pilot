@@ -1,7 +1,6 @@
 package interview.pilot.voice.infrastructure;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -43,6 +42,11 @@ import tools.jackson.databind.ObjectMapper;
  * <p>Vocabulary hints are ignored silently: fun-asr-flash only supports a pre-compiled
  * {@code vocabulary_id} list managed through the separate customization API — there is no
  * inline hotword parameter — so passing nothing keeps the request shape stable (plan §10).
+ *
+ * <p>Authentication is {@code Authorization: Bearer <api-key>} in every DashScope deployment
+ * mode — the MaaS workspace form (workspace-specific hostname) still authenticates with an
+ * API key and is not supported in this release ({@code VoiceProperties} validates the key as
+ * required). A workspace id is never used as a bearer token.
  */
 public class DashScopeSpeechRecognizer implements SpeechRecognizer {
 
@@ -66,7 +70,7 @@ public class DashScopeSpeechRecognizer implements SpeechRecognizer {
     try {
       response = rest.post()
           .uri(config.baseUrl() + ENDPOINT_PATH)
-          .header("Authorization", "Bearer " + credential())
+          .header("Authorization", "Bearer " + config.apiKey())
           .header("Content-Type", "application/json")
           .header("X-DashScope-SSE", "disable")
           .body(requestBody(audio, base64))
@@ -88,17 +92,6 @@ public class DashScopeSpeechRecognizer implements SpeechRecognizer {
           "DashScope recognition was unreachable", 0);
     }
     return parse(response);
-  }
-
-  /**
-   * The config allows an api key OR a workspace id (VoiceProperties.asrComplete); a workspace
-   * that authenticates by id uses it here — the Authorization header must never be "Bearer null".
-   */
-  private String credential() {
-    if (config.apiKey() != null && !config.apiKey().isBlank()) {
-      return config.apiKey();
-    }
-    return config.workspaceId() == null ? "" : config.workspaceId();
   }
 
   private String readBase64(StoredVoiceMedia audio) {

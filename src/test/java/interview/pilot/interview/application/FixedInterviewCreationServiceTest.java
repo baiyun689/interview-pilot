@@ -162,7 +162,7 @@ class FixedInterviewCreationServiceTest {
     return new VoiceProperties(
         enabled, Path.of("./data/voice"), 8_388_608, Duration.ofMinutes(5), Duration.ofDays(7),
         new VoiceProperties.Asr(
-            "dashscope", "https://dashscope.aliyuncs.com/api/v1", "", "sk-test",
+            "dashscope", "https://dashscope.aliyuncs.com/api/v1", "sk-test",
             "fun-asr-flash-2026-06-15", Duration.ofSeconds(60)),
         ttsConfigured
             ? new VoiceProperties.Tts("dashscope", "cosyvoice-v3-flash", "longanyang", Duration.ofSeconds(30))

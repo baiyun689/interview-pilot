@@ -51,7 +51,6 @@ import interview.pilot.voice.storage.VoiceMediaStore;
     "VOICE_ENABLED=false",
     "DASHSCOPE_SPEECH_BASE_URL=garbage-base-url",
     "DASHSCOPE_SPEECH_API_KEY=",
-    "DASHSCOPE_WORKSPACE_ID=",
     "DASHSCOPE_ASR_MODEL=",
     "DASHSCOPE_TTS_MODEL=",
     "DASHSCOPE_TTS_VOICE=",

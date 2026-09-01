@@ -70,6 +70,10 @@ class InfrastructureConfigurationTest {
     assertTrue(environmentExample.contains("DASHSCOPE_SPEECH_API_KEY="));
     assertTrue(environmentExample.contains("DASHSCOPE_TTS_MODEL=cosyvoice-v3-flash"));
     assertFalse(application.contains("DASHSCOPE_SPEECH_API_KEY:sk"));
+    // DashScope authenticates with Bearer <api-key> in every deployment mode; the MaaS
+    // workspace-id credential was removed — no workspace config may creep back in.
+    assertFalse(application.contains("WORKSPACE_ID"));
+    assertFalse(environmentExample.contains("DASHSCOPE_WORKSPACE_ID"));
   }
 
   private String read(String path) throws IOException {

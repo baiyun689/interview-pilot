@@ -90,7 +90,6 @@ import interview.pilot.voice.storage.VoiceMediaStore;
     "VOICE_MEDIA_RETENTION=7d",
     "DASHSCOPE_SPEECH_BASE_URL=https://dashscope.aliyuncs.com/api/v1",
     "DASHSCOPE_SPEECH_API_KEY=sk-module-test",
-    "DASHSCOPE_WORKSPACE_ID=",
     "DASHSCOPE_ASR_MODEL=fun-asr-flash-2026-06-15",
     "DASHSCOPE_ASR_TIMEOUT=60s",
     "DASHSCOPE_TTS_MODEL=cosyvoice-v3-flash",

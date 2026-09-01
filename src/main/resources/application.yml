@@ -105,7 +105,6 @@ app:
     asr:
       provider: dashscope
       base-url: ${DASHSCOPE_SPEECH_BASE_URL:https://dashscope.aliyuncs.com/api/v1}
-      workspace-id: ${DASHSCOPE_WORKSPACE_ID:}
       api-key: ${DASHSCOPE_SPEECH_API_KEY:}
       model: ${DASHSCOPE_ASR_MODEL:fun-asr-flash-2026-06-15}
       timeout: ${DASHSCOPE_ASR_TIMEOUT:60s}

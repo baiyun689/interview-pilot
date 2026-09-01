@@ -19,7 +19,7 @@ class VoicePropertiesTest {
     return new VoiceProperties(
         true, Path.of("./data/voice"), 8_388_608, Duration.ofMinutes(5), Duration.ofDays(7),
         new VoiceProperties.Asr(
-            "dashscope", "https://dashscope.aliyuncs.com/api/v1", "", "sk-test", "fun-asr-flash-2026-06-15",
+            "dashscope", "https://dashscope.aliyuncs.com/api/v1", "sk-test", "fun-asr-flash-2026-06-15",
             Duration.ofSeconds(60)),
         new VoiceProperties.Tts("dashscope", "cosyvoice-v3-flash", "longanyang", Duration.ofSeconds(30)));
   }
@@ -38,7 +38,7 @@ class VoicePropertiesTest {
     var properties = new VoiceProperties(
         false, Path.of("./data/voice"), 8_388_608, Duration.ofMinutes(5), Duration.ofDays(7),
         new VoiceProperties.Asr(
-            "dashscope", "https://dashscope.aliyuncs.com/api/v1", "", "sk-test", "fun-asr-flash-2026-06-15",
+            "dashscope", "https://dashscope.aliyuncs.com/api/v1", "sk-test", "fun-asr-flash-2026-06-15",
             Duration.ofSeconds(60)),
         new VoiceProperties.Tts("dashscope", "cosyvoice-v3-flash", "longanyang", Duration.ofSeconds(30)));
 
@@ -59,11 +59,11 @@ class VoicePropertiesTest {
   }
 
   @Test
-  void enabledRejectsBothBlankApiKeyAndWorkspaceId() {
+  void enabledRejectsBlankApiKey() {
     assertThatThrownBy(() -> new VoiceProperties(
         true, Path.of("./data/voice"), 8_388_608, Duration.ofMinutes(5), Duration.ofDays(7),
         new VoiceProperties.Asr(
-            "dashscope", "https://dashscope.aliyuncs.com/api/v1", "", "", "fun-asr-flash-2026-06-15",
+            "dashscope", "https://dashscope.aliyuncs.com/api/v1", "", "fun-asr-flash-2026-06-15",
             Duration.ofSeconds(60)),
         new VoiceProperties.Tts("dashscope", "cosyvoice-v3-flash", "longanyang", Duration.ofSeconds(30))))
         .isInstanceOf(IllegalArgumentException.class)
@@ -71,11 +71,13 @@ class VoicePropertiesTest {
   }
 
   @Test
-  void enabledAcceptsWorkspaceIdInsteadOfApiKey() {
+  void enabledRequiresAnApiKeyForEveryDeploymentMode() {
+    // The MaaS workspace form also authenticates with Bearer <api-key>; a workspace id is
+    // never an acceptable credential, so there is no workspaceId field to configure.
     var properties = new VoiceProperties(
         true, Path.of("./data/voice"), 8_388_608, Duration.ofMinutes(5), Duration.ofDays(7),
         new VoiceProperties.Asr(
-            "dashscope", "https://dashscope.aliyuncs.com/api/v1", "ws-123", "", "fun-asr-flash-2026-06-15",
+            "dashscope", "https://dashscope.aliyuncs.com/api/v1", "sk-test", "fun-asr-flash-2026-06-15",
             Duration.ofSeconds(60)),
         null);
 
@@ -87,7 +89,7 @@ class VoicePropertiesTest {
   void enabledRejectsBlankAsrProvider() {
     assertThatThrownBy(() -> withAsr(
         new VoiceProperties.Asr(
-            " ", "https://dashscope.aliyuncs.com/api/v1", "", "sk-test", "fun-asr-flash-2026-06-15",
+            " ", "https://dashscope.aliyuncs.com/api/v1", "sk-test", "fun-asr-flash-2026-06-15",
             Duration.ofSeconds(60))))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Voice ASR requires");
@@ -97,7 +99,7 @@ class VoicePropertiesTest {
   void enabledRejectsBlankAsrModel() {
     assertThatThrownBy(() -> withAsr(
         new VoiceProperties.Asr(
-            "dashscope", "https://dashscope.aliyuncs.com/api/v1", "", "sk-test", "  ",
+            "dashscope", "https://dashscope.aliyuncs.com/api/v1", "sk-test", "  ",
             Duration.ofSeconds(60))))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Voice ASR requires");
@@ -107,7 +109,7 @@ class VoicePropertiesTest {
   void enabledRejectsBlankAsrBaseUrl() {
     assertThatThrownBy(() -> withAsr(
         new VoiceProperties.Asr(
-            "dashscope", "", "", "sk-test", "fun-asr-flash-2026-06-15",
+            "dashscope", "", "sk-test", "fun-asr-flash-2026-06-15",
             Duration.ofSeconds(60))))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Voice ASR requires");
@@ -232,7 +234,7 @@ class VoicePropertiesTest {
 
   private static VoiceProperties.Asr asrComplete() {
     return new VoiceProperties.Asr(
-        "dashscope", "https://dashscope.aliyuncs.com/api/v1", "", "sk-test", "fun-asr-flash-2026-06-15",
+        "dashscope", "https://dashscope.aliyuncs.com/api/v1", "sk-test", "fun-asr-flash-2026-06-15",
         Duration.ofSeconds(60));
   }
 

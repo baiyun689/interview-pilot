@@ -44,7 +44,7 @@ import interview.pilot.voice.storage.InMemoryVoiceMediaStore;
 class DashScopeSpeechRecognizerTest {
   private static final String MEDIA = "fake audio bytes";
   private static final Asr ASR = new Asr(
-      "dashscope", "http://localhost:PORT", "ws-test", "sk-test",
+      "dashscope", "http://localhost:PORT", "sk-test",
       "fun-asr-flash-2026-06-15", Duration.ofSeconds(30));
 
   private WireMockServer wireMock;
@@ -162,6 +162,29 @@ class DashScopeSpeechRecognizerTest {
   }
 
   @Test
+  void unauthorizedIsDeterministic() {
+    wireMock.stubFor(post(urlEqualTo(DashScopeSpeechRecognizer.ENDPOINT_PATH))
+        .willReturn(aResponse().withStatus(401).withBody(errorBody("InvalidApiKey", "bad key"))));
+
+    assertThatThrownBy(() -> recognizer.transcribe(media("audio/webm"), context()))
+        .isInstanceOf(VoiceTranscriptionFailedException.class);
+  }
+
+  @Test
+  void connectTimeoutIsOperationalAndRetryable() {
+    // 10.255.255.1 is non-routable: the connect phase hangs until the 300ms connect timeout
+    // (an instant refusal on some networks is the same ResourceAccessException family and
+    // stays retryable either way).
+    var unreachable = new DashScopeSpeechRecognizer(
+        new Asr(ASR.provider(), "http://10.255.255.1:9999", ASR.apiKey(), ASR.model(),
+            Duration.ofMillis(300)),
+        restClient("http://10.255.255.1:9999", Duration.ofMillis(300)), media);
+
+    assertThatThrownBy(() -> unreachable.transcribe(media("audio/webm"), context()))
+        .isInstanceOf(VoiceTranscriptionRetryableException.class);
+  }
+
+  @Test
   void emptyTranscriptIsDeterministic() {
     wireMock.stubFor(post(urlEqualTo(DashScopeSpeechRecognizer.ENDPOINT_PATH))
         .willReturn(aResponse().withStatus(200)
@@ -208,14 +231,18 @@ class DashScopeSpeechRecognizerTest {
   }
 
   private static RestClient restClient(int port, Duration timeout) {
+    return restClient("http://localhost:" + port, timeout);
+  }
+
+  private static RestClient restClient(String baseUrl, Duration timeout) {
     var requestFactory = new SimpleClientHttpRequestFactory();
     requestFactory.setConnectTimeout(timeout);
     requestFactory.setReadTimeout(timeout);
-    return RestClient.builder().baseUrl("http://localhost:" + port).requestFactory(requestFactory).build();
+    return RestClient.builder().baseUrl(baseUrl).requestFactory(requestFactory).build();
   }
 
   private static Asr withPort(Asr asr, int port) {
-    return new Asr(asr.provider(), "http://localhost:" + port, asr.workspaceId(),
+    return new Asr(asr.provider(), "http://localhost:" + port,
         asr.apiKey(), asr.model(), asr.timeout());
   }
 
