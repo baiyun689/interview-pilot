@@ -2,6 +2,7 @@ package interview.pilot.voice.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -114,6 +115,43 @@ class VoiceRecordingEntityTest {
     recording.startTranscription();
     assertThatIllegalStateException().isThrownBy(recording::beginTranscription);
     assertThat(recording.getExecutionEpoch()).isZero();
+  }
+
+  @Test
+  void attachMovesReadyToAttachedWithTheAnswerRequestId() {
+    recording.acceptUpload("key", "audio/webm", 1024, 30_000, "abc");
+    recording.startTranscription();
+    recording.completeTranscription("dashscope", "m", "r", "转写结果", 100L);
+    UUID answerRequestId = UUID.randomUUID();
+
+    recording.attach(answerRequestId);
+
+    assertThat(recording.getStatus()).isEqualTo(VoiceRecordingStatus.ATTACHED);
+    assertThat(recording.getAttachedAnswerRequestId()).isEqualTo(answerRequestId);
+    assertThat(recording.getRawTranscript()).isEqualTo("转写结果");
+  }
+
+  @Test
+  void attachRefusesFromNonReadyStatesAndRequiresTheAnswerRequestId() {
+    assertThatIllegalStateException().isThrownBy(() -> recording.attach(UUID.randomUUID()));
+    recording.acceptUpload("key", "audio/webm", 1024, 30_000, "abc");
+    assertThatIllegalStateException().isThrownBy(() -> recording.attach(UUID.randomUUID()));
+    recording.startTranscription();
+    assertThatIllegalStateException().isThrownBy(() -> recording.attach(UUID.randomUUID()));
+    recording.failTranscription("VOICE_TRANSCRIPTION_FAILED");
+    assertThatIllegalStateException().isThrownBy(() -> recording.attach(UUID.randomUUID()));
+    recording.discard();
+    assertThatIllegalStateException().isThrownBy(() -> recording.attach(UUID.randomUUID()));
+    assertThat(recording.getStatus()).isEqualTo(VoiceRecordingStatus.DISCARDED);
+
+    var ready = VoiceRecordingEntity.receiving(
+        1L, UUID.randomUUID(), UUID.randomUUID(), 7L, 9L, Instant.now().plusSeconds(600));
+    ready.acceptUpload("key", "audio/webm", 1024, 30_000, "abc");
+    ready.startTranscription();
+    ready.completeTranscription("dashscope", "m", "r", "t", 100L);
+    assertThatThrownBy(() -> ready.attach(null))
+        .isInstanceOf(NullPointerException.class);
+    assertThat(ready.getStatus()).isEqualTo(VoiceRecordingStatus.READY);
   }
 
   @Test

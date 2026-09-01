@@ -198,4 +198,15 @@ public class VoiceRecordingEntity {
   public void discard() {
     moveTo(VoiceRecordingStatus.DISCARDED);
   }
+
+  /**
+   * READY → ATTACHED: the confirmed transcript is bound to the submitted answer (plan §8.4).
+   * The transition guard plus the optimistic lock make double-binding impossible; the
+   * recording's {@code attachedAnswerRequestId} records the winning submission requestId.
+   */
+  public void attach(UUID answerRequestId) {
+    Objects.requireNonNull(answerRequestId);
+    moveTo(VoiceRecordingStatus.ATTACHED);
+    this.attachedAnswerRequestId = answerRequestId;
+  }
 }
