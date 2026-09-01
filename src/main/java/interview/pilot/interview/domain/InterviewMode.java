@@ -1,6 +1,6 @@
 package interview.pilot.interview.domain;
 
-public enum InputMode {
+public enum InterviewMode {
   TEXT,
   VOICE
 }

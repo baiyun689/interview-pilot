@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.UUID;
 
 import interview.pilot.interview.domain.Difficulty;
+import interview.pilot.interview.domain.InterviewMode;
 import interview.pilot.interview.domain.InterviewSize;
 import interview.pilot.interview.domain.JobSourceType;
 import jakarta.validation.Valid;
@@ -19,10 +20,19 @@ public record CreateInterviewRequest(
     @NotNull Difficulty difficulty,
     @NotNull InterviewSize interviewSize,
     @NotBlank @Size(max = 64) String providerId,
-    @Size(max = 5) List<UUID> knowledgeBaseIds) {
+    @Size(max = 5) List<UUID> knowledgeBaseIds,
+    InterviewMode interviewMode) {
 
   public CreateInterviewRequest {
     knowledgeBaseIds = knowledgeBaseIds == null ? List.of() : List.copyOf(knowledgeBaseIds);
+    interviewMode = interviewMode == null ? InterviewMode.TEXT : interviewMode;
+  }
+
+  public CreateInterviewRequest(
+      Long resumeId, JobSource jobSource, Difficulty difficulty, InterviewSize interviewSize,
+      String providerId, List<UUID> knowledgeBaseIds) {
+    this(resumeId, jobSource, difficulty, interviewSize, providerId, knowledgeBaseIds,
+        InterviewMode.TEXT);
   }
 
   public record JobSource(

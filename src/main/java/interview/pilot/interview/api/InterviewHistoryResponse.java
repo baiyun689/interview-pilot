@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 import interview.pilot.interview.domain.Difficulty;
+import interview.pilot.interview.domain.InterviewMode;
 import interview.pilot.interview.domain.InterviewSize;
 import interview.pilot.interview.domain.JobSourceType;
 import interview.pilot.interview.domain.SessionStatus;
@@ -14,6 +15,7 @@ public record InterviewHistoryResponse(
     SessionStatus status,
     Difficulty difficulty,
     InterviewSize interviewSize,
+    InterviewMode interviewMode,
     JobSourceType jobSourceType,
     int currentTurnNo,
     int currentMainQuestionNo,

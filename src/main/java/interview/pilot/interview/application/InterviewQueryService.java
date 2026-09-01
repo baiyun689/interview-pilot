@@ -58,7 +58,8 @@ public class InterviewQueryService {
     return sessions.findAllByUserAccountIdOrderByCreatedAtDesc(requireOwner(user)).stream()
         .map(session -> new InterviewHistoryResponse(
             session.getSessionId(), session.getJobTitle(), session.getStatus(),
-            session.getDifficulty(), session.getInterviewSize(), session.getJobSourceType(),
+            session.getDifficulty(), session.getInterviewSize(), session.getInterviewMode(),
+            session.getJobSourceType(),
             session.getCurrentTurnNo(), session.getCurrentMainQuestionNo(),
             session.getTotalMainQuestionCount(), session.getProviderId(),
             session.getModelName(), session.getSafeError(), session.getCreatedAt(),
@@ -104,7 +105,7 @@ public class InterviewQueryService {
     return new InterviewSessionResponse(
         session.getSessionId(), session.getResumeId(), brief.jobTitle(), brief.jobDescription(),
         session.getStatus(), session.getDifficulty(), session.getInterviewSize(),
-        session.getJobSourceType(), session.getCurrentTurnNo(),
+        session.getInterviewMode(), session.getJobSourceType(), session.getCurrentTurnNo(),
         session.getCurrentMainQuestionNo(), session.getTotalMainQuestionCount(),
         session.getProviderId(), session.getModelName(),
         preparation == null ? null : preparation.getTaskId(), session.getSafeError(), turnViews);

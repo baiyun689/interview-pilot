@@ -68,5 +68,15 @@ class ApplicationSchemaStartupIT {
             + "where table_schema = database() and table_name = 'interview_session' "
             + "and column_name in ('current_main_question_no','total_main_question_count')",
         Integer.class)).isEqualTo(2);
+    assertThat(jdbcTemplate.queryForObject(
+        "select count(*) from information_schema.columns "
+            + "where table_schema = database() and table_name = 'interview_session' "
+            + "and column_name in ('interview_mode','voice_snapshot')",
+        Integer.class)).isEqualTo(2);
+    assertThat(jdbcTemplate.queryForObject(
+        "select count(*) from information_schema.tables "
+            + "where table_schema = database() and table_name in "
+            + "('voice_recording','question_speech')",
+        Integer.class)).isEqualTo(2);
   }
 }

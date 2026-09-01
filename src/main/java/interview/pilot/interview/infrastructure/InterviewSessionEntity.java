@@ -11,6 +11,7 @@ import org.hibernate.annotations.UuidGenerator;
 import org.hibernate.type.SqlTypes;
 
 import interview.pilot.interview.domain.Difficulty;
+import interview.pilot.interview.domain.InterviewMode;
 import interview.pilot.interview.domain.InterviewSize;
 import interview.pilot.interview.domain.JobSourceType;
 import interview.pilot.interview.domain.QuestionType;
@@ -59,6 +60,10 @@ public class InterviewSessionEntity {
   private InterviewSize interviewSize;
 
   @Enumerated(EnumType.STRING)
+  @Column(name = "interview_mode", nullable = false, updatable = false, length = 16)
+  private InterviewMode interviewMode;
+
+  @Enumerated(EnumType.STRING)
   @Column(name = "job_source_type", nullable = false, updatable = false, length = 16)
   private JobSourceType jobSourceType;
 
@@ -88,6 +93,10 @@ public class InterviewSessionEntity {
   @Column(name = "knowledge_scope_snapshot", updatable = false, columnDefinition = "json")
   private String knowledgeScopeSnapshot;
 
+  @JdbcTypeCode(SqlTypes.JSON)
+  @Column(name = "voice_snapshot", updatable = false, columnDefinition = "json")
+  private String voiceSnapshot;
+
   @Column(name = "safe_error", length = 255)
   private String safeError;
 
@@ -107,6 +116,16 @@ public class InterviewSessionEntity {
       Long userAccountId, Long resumeId, Difficulty difficulty, InterviewSize interviewSize,
       JobSourceType jobSourceType, String jobTitle, String providerId, String modelName,
       String briefSnapshot, String knowledgeScopeSnapshot) {
+    return preparing(userAccountId, resumeId, difficulty, interviewSize, jobSourceType,
+        jobTitle, providerId, modelName, briefSnapshot, knowledgeScopeSnapshot,
+        InterviewMode.TEXT, null);
+  }
+
+  public static InterviewSessionEntity preparing(
+      Long userAccountId, Long resumeId, Difficulty difficulty, InterviewSize interviewSize,
+      JobSourceType jobSourceType, String jobTitle, String providerId, String modelName,
+      String briefSnapshot, String knowledgeScopeSnapshot, InterviewMode interviewMode,
+      String voiceSnapshot) {
     var session = new InterviewSessionEntity();
     session.userAccountId = Objects.requireNonNull(userAccountId);
     session.sessionId = UUID.randomUUID();
@@ -114,6 +133,7 @@ public class InterviewSessionEntity {
     session.status = SessionStatus.PREPARING;
     session.difficulty = Objects.requireNonNull(difficulty);
     session.interviewSize = Objects.requireNonNull(interviewSize);
+    session.interviewMode = interviewMode == null ? InterviewMode.TEXT : interviewMode;
     session.jobSourceType = Objects.requireNonNull(jobSourceType);
     session.jobTitle = Objects.requireNonNull(jobTitle);
     session.totalMainQuestionCount = interviewSize.totalMainQuestionCount();
@@ -121,6 +141,7 @@ public class InterviewSessionEntity {
     session.modelName = Objects.requireNonNull(modelName);
     session.briefSnapshot = Objects.requireNonNull(briefSnapshot);
     session.knowledgeScopeSnapshot = knowledgeScopeSnapshot;
+    session.voiceSnapshot = voiceSnapshot;
     return session;
   }
 

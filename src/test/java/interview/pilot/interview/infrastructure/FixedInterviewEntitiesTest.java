@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test;
 
 import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.domain.GroundingMode;
+import interview.pilot.interview.domain.InputMode;
+import interview.pilot.interview.domain.InterviewMode;
 import interview.pilot.interview.domain.InterviewPhase;
 import interview.pilot.interview.domain.InterviewSize;
 import interview.pilot.interview.domain.JobSourceType;
@@ -37,6 +39,35 @@ class FixedInterviewEntitiesTest {
 
     assertThat(session.getStatus()).isEqualTo(SessionStatus.EVALUATING);
     assertThat(session.getSafeError()).isNull();
+  }
+
+  @Test
+  void sessionDefaultsToTextModeAndVoiceSnapshotIsAnImmutableCreationColumn() {
+    var text = InterviewSessionEntity.preparing(
+        7L, null, Difficulty.MEDIUM, InterviewSize.STANDARD,
+        JobSourceType.CUSTOM, "Java 后端", "dashscope", "qwen", "{}", null);
+    assertThat(text.getInterviewMode()).isEqualTo(InterviewMode.TEXT);
+    assertThat(text.getVoiceSnapshot()).isNull();
+
+    var voice = InterviewSessionEntity.preparing(
+        7L, null, Difficulty.MEDIUM, InterviewSize.STANDARD,
+        JobSourceType.CUSTOM, "Java 后端", "dashscope", "qwen", "{}", null,
+        InterviewMode.VOICE, "{\"schemaVersion\":1}");
+    assertThat(voice.getInterviewMode()).isEqualTo(InterviewMode.VOICE);
+    assertThat(voice.getVoiceSnapshot()).isEqualTo("{\"schemaVersion\":1}");
+
+    var nullMode = InterviewSessionEntity.preparing(
+        7L, null, Difficulty.MEDIUM, InterviewSize.STANDARD,
+        JobSourceType.CUSTOM, "Java 后端", "dashscope", "qwen", "{}", null,
+        null, null);
+    assertThat(nullMode.getInterviewMode()).isEqualTo(InterviewMode.TEXT);
+  }
+
+  @Test
+  void askedTurnDefaultsToTextInputMode() {
+    var turn = InterviewTurnEntity.asked(
+        1L, 1, InterviewPhase.FUNDAMENTALS, QuestionType.MAIN, 1L, "问题");
+    assertThat(turn.getInputMode()).isEqualTo(InputMode.TEXT);
   }
 
   @Test

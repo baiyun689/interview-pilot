@@ -51,7 +51,7 @@ public class InterviewTurnEntity {
   private String questionText;
   @Column(name = "answer_text", columnDefinition = "longtext")
   private String answerText;
-  @Enumerated(EnumType.STRING) @Column(name = "input_mode", length = 16)
+  @Enumerated(EnumType.STRING) @Column(name = "input_mode", nullable = false, length = 16)
   private InputMode inputMode;
   @Column(name = "processing_error", length = 255)
   private String processingError;
@@ -77,6 +77,8 @@ public class InterviewTurnEntity {
     turn.sourceCardId = Objects.requireNonNull(sourceCardId);
     turn.status = TurnStatus.ASKED;
     turn.questionText = Objects.requireNonNull(questionText);
+    // V21 makes input_mode NOT NULL; an unanswered turn has no real input yet, so it starts as TEXT.
+    turn.inputMode = InputMode.TEXT;
     turn.askedAt = Instant.now();
     return turn;
   }
