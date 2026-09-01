@@ -246,6 +246,9 @@ export function useVoiceRecorder(options?: VoiceRecorderOptions): VoiceRecorderC
    */
   const materializeStop = useCallback((reason: StopReason, generation: number) => {
     if (stopFinalizedRef.current) return
+    // 评审 R1：迟到的 onstop/超时属于旧录音代数（reset 已清理并清算）时完整跳过，
+    // 不得误杀新录音的 tick/analyser，也不能置位 finalized 阻塞下一次 stop
+    if (generationRef.current !== generation) return
     stopFinalizedRef.current = true
     stopTick()
     cleanupAnalyser()
@@ -255,8 +258,8 @@ export function useVoiceRecorder(options?: VoiceRecorderOptions): VoiceRecorderC
     stopPendingRef.current = null
     if (pending?.timer !== undefined) window.clearTimeout(pending.timer)
     const materialize = reason !== 'discard' && reason !== 'error'
-    const fresh = generationRef.current === generation
-    if (materialize && fresh && liveRef.current) {
+    const fresh = liveRef.current
+    if (materialize && fresh) {
       blobRef.current = audio
       setBlob(audio)
       const url = URL.createObjectURL(audio)
@@ -430,6 +433,9 @@ export function useVoiceRecorder(options?: VoiceRecorderOptions): VoiceRecorderC
   const reset = useCallback(() => {
     generationRef.current += 1
     if (recorderRef.current) stopRecorder('discard')
+    // 评审 R1：清算挂起的 stop（兑现其 Promise 并清除超时定时器），
+    // 否则迟到的 onstop/超时会在重录后误杀新录音的 tick/analyser
+    if (stopPendingRef.current) materializeStop('discard', generationRef.current)
     stopAllTracks(streamRef.current)
     streamRef.current = null
     if (blobUrlRef.current) {
@@ -453,7 +459,7 @@ export function useVoiceRecorder(options?: VoiceRecorderOptions): VoiceRecorderC
     setLevel(0)
     setError(null)
     transition('IDLE')
-  }, [cleanupAnalyser, stopRecorder, stopTick, transition])
+  }, [cleanupAnalyser, materializeStop, stopRecorder, stopTick, transition])
 
   // 卸载清理：停止所有 tracks（不留麦克风指示灯）、撤销 Object URL、断开分析节点；
   // 录音中卸载直接丢弃录音（见文件头设计决策 3）。

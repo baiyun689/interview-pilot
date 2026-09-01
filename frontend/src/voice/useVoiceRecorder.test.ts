@@ -315,4 +315,35 @@ describe('useVoiceRecorder', () => {
     expect(result.current.blobUrl).toBe('blob:mock-url')
     expect(result.current.elapsedMs).toBeGreaterThanOrEqual(1_000)
   })
+
+  // 评审 R1：stop → reset → start，旧 onstop 迟到不得误杀新录音的 tick/analyser，
+  // 第二次 stop 仍必须正常兑现（reset 已清算第一次 stop）
+  it('stop 后 reset 再 start（旧 onstop 迟到）：新录音正常计时，第二次 stop 兑现', async () => {
+    FakeMediaRecorder.deferStopMs = 500
+    const { result } = renderHook(() => useVoiceRecorder({ env: recorderTestEnv().env }))
+    await act(async () => { await result.current.start() })
+
+    let first!: Promise<Blob>
+    act(() => { first = result.current.stop() })
+    act(() => { result.current.reset() })
+    // reset 立即清算挂起的 stop，Promise 兑现
+    await act(async () => { await first })
+
+    // 旧 recorder 的 onstop 将在 +500ms 迟到；新录音不受其影响
+    FakeMediaRecorder.deferStopMs = 0
+    await act(async () => { await result.current.start() })
+    act(() => { vi.advanceTimersByTime(1_000) })
+    expect(result.current.state).toBe('RECORDING')
+    // 新录音的 tick 未被旧 onstop 杀死：计时持续累计
+    expect(result.current.elapsedMs).toBeGreaterThanOrEqual(1_000)
+
+    let second!: Promise<Blob>
+    act(() => { second = result.current.stop() })
+    await act(async () => { await second })
+
+    expect(result.current.state).toBe('RECORDED')
+    expect(result.current.blob).not.toBeNull()
+    expect(result.current.blobUrl).toBe('blob:mock-url')
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
+  })
 })
