@@ -135,7 +135,7 @@ public class FixedAnswerService {
     long ownerId = owner(user);
     var session = sessions.findBySessionIdAndUserAccountId(sessionId, ownerId)
         .orElseThrow(() -> notFound());
-    String hash = AnswerFingerprint.sha256(request.answer());
+    String hash = SubmissionFingerprint.of(request.answer(), request.inputMode(), request.recordingId());
     var existing = attempts.findByRequestId(request.requestId());
     if (existing.isPresent()) return replay(existing.get(), sessionId, request, hash);
     if (session.getStatus() != SessionStatus.INTERVIEWING) {
@@ -162,7 +162,7 @@ public class FixedAnswerService {
     sessions.findBySessionIdAndUserAccountId(sessionId, ownerId).orElseThrow(this::notFound);
     var attempt = attempts.findByRequestId(request.requestId())
         .orElseThrow(() -> conflict("ANSWER_CLAIM_CONFLICT", "Answer claim conflicted"));
-    String hash = AnswerFingerprint.sha256(request.answer());
+    String hash = SubmissionFingerprint.of(request.answer(), request.inputMode(), request.recordingId());
     return replay(attempt, sessionId, request, hash);
   }
 
