@@ -4,15 +4,18 @@ import { createInterview, listInterviewPresets } from '../api/interviews'
 import { listKnowledgeBases } from '../api/knowledgeBases'
 import { listProviders } from '../api/providers'
 import { listResumes } from '../api/resumes'
+import { fetchVoiceCapabilities } from '../api/voice'
 import { ErrorNotice } from '../components/InterviewUi'
 import type { AiProvider } from '../types/provider'
 import type { ResumeDetail } from '../types/resume'
-import type { Difficulty, InterviewPreset, InterviewSize, JobSourceType } from '../types/interview'
+import type { Difficulty, InterviewMode, InterviewPreset, InterviewSize, JobSourceType } from '../types/interview'
 import type { KnowledgeBase } from '../types/knowledge'
+import type { VoiceCapabilities } from '../types/voice'
 
 export function InterviewCreatePage() {
   const navigate = useNavigate()
   const owner = useRef(0)
+  const voiceOwner = useRef(0)
   const [resumes, setResumes] = useState<ResumeDetail[]>([])
   const [providers, setProviders] = useState<AiProvider[]>([])
   const [presets, setPresets] = useState<InterviewPreset[]>([])
@@ -25,7 +28,18 @@ export function InterviewCreatePage() {
     resumeId: '', sourceType: 'PRESET' as JobSourceType, presetId: '',
     jobTitle: '', jobDescription: '', difficulty: 'MEDIUM' as Difficulty,
     interviewSize: 'STANDARD' as InterviewSize, providerId: '',
+    interviewMode: 'TEXT' as InterviewMode,
   })
+  const [voiceCapabilities, setVoiceCapabilities] = useState<VoiceCapabilities | null>(null)
+  const [voiceCapabilitiesError, setVoiceCapabilitiesError] = useState<unknown>()
+
+  // 语音能力探测（计划 §13.1）：失败只影响语音选项的可用性，不阻断表单其余部分
+  const voiceDisabled = !voiceCapabilities || !voiceCapabilities.enabled
+  const voiceReason = voiceDisabled
+    ? voiceCapabilities
+      ? '语音面试未启用：未配置语音识别 Provider'
+      : voiceCapabilitiesError ? '语音面试未启用：语音服务暂时不可用' : ''
+    : ''
 
   useEffect(() => {
     const id = ++owner.current
@@ -49,6 +63,28 @@ export function InterviewCreatePage() {
     })
     return () => { owner.current++; controller.abort() }
   }, [])
+
+  // 语音能力探测（计划 §13.1）：失败只影响语音选项的可用性，不阻断表单其余部分。
+  // 使用独立的 voiceOwner：不能共享主加载的 owner，否则会作废主请求的异步回执。
+  useEffect(() => {
+    const id = ++voiceOwner.current
+    const controller = new AbortController()
+    fetchVoiceCapabilities(controller.signal)
+      .then((caps) => { if (voiceOwner.current === id) setVoiceCapabilities(caps) })
+      .catch((error) => {
+        if (voiceOwner.current === id && !(error instanceof DOMException && error.name === 'AbortError')) {
+          setVoiceCapabilitiesError(error)
+        }
+      })
+    return () => { voiceOwner.current++; controller.abort() }
+  }, [])
+
+  // 语音不可用时强制回到文字模式（防御：UI 禁用时不应能保持 VOICE 选中）
+  useEffect(() => {
+    if (voiceDisabled && values.interviewMode === 'VOICE') {
+      setValues((old) => ({ ...old, interviewMode: 'TEXT' }))
+    }
+  })
 
   function toggleKb(id: string) {
     setSelectedKbIds((current) => current.includes(id)
@@ -74,6 +110,7 @@ export function InterviewCreatePage() {
           : { type: 'CUSTOM', jobTitle: title, jobDescription: description },
         difficulty: values.difficulty,
         interviewSize: values.interviewSize,
+        interviewMode: values.interviewMode,
         providerId: values.providerId,
         knowledgeBaseIds: selectedKbIds,
       })
@@ -110,6 +147,13 @@ export function InterviewCreatePage() {
         <label>岗位名称<input value={values.jobTitle} maxLength={200} onChange={(event) => setValues({ ...values, jobTitle: event.target.value })} required /></label>
         <label>完整 JD<textarea value={values.jobDescription} maxLength={20_000} rows={10} onChange={(event) => setValues({ ...values, jobDescription: event.target.value })} required /></label>
       </>}
+      <fieldset><legend>面试模式</legend><div className="form-row">
+        <label><input type="radio" checked={values.interviewMode === 'TEXT'} onChange={() => setValues({ ...values, interviewMode: 'TEXT' })} /> 文字面试</label>
+        <label><input type="radio" checked={values.interviewMode === 'VOICE'} disabled={voiceDisabled} onChange={() => setValues({ ...values, interviewMode: 'VOICE' })} /> 语音面试</label>
+      </div>
+        {voiceReason && <p className="form-hint" role="status">{voiceReason}</p>}
+        <p className="form-hint">语音面试会朗读题目，并用你的录音转写后确认提交；面试模式在创建时确定。</p>
+      </fieldset>
       <div className="form-row">
         <label>难度<select value={values.difficulty} onChange={(event) => setValues({ ...values, difficulty: event.target.value as Difficulty })}><option value="EASY">简单</option><option value="MEDIUM">中等</option><option value="HARD">困难</option></select></label>
         <label>面试规模<select value={values.interviewSize} onChange={(event) => setValues({ ...values, interviewSize: event.target.value as InterviewSize })}><option value="QUICK">快速面试 · 6 个主问题</option><option value="STANDARD">标准面试 · 9 个主问题</option><option value="DEEP">深度面试 · 12 个主问题</option></select></label>

@@ -70,6 +70,7 @@ describe('固定流程面试创建', () => {
       resumeId: null,
       jobSource: { type: 'PRESET', presetId: 'java-backend' },
       difficulty: 'MEDIUM', interviewSize: 'DEEP', providerId: 'dashscope', knowledgeBaseIds: [],
+      interviewMode: 'TEXT',
     })
   })
 

@@ -1,5 +1,7 @@
 export type Difficulty = 'EASY' | 'MEDIUM' | 'HARD'
 export type InterviewSize = 'QUICK' | 'STANDARD' | 'DEEP'
+export type InterviewMode = 'TEXT' | 'VOICE'
+export type InputMode = 'TEXT' | 'VOICE'
 export type JobSourceType = 'PRESET' | 'CUSTOM'
 export type SessionStatus = 'PREPARING' | 'READY' | 'INTERVIEWING' | 'EVALUATING' | 'COMPLETED' | 'PREPARATION_FAILED' | 'EVALUATION_FAILED'
 export type TurnStatus = 'ASKED' | 'PROCESSING' | 'COMPLETED' | 'FAILED'
@@ -34,6 +36,7 @@ export interface InterviewSession {
   status: SessionStatus
   difficulty: Difficulty
   interviewSize: InterviewSize
+  interviewMode: InterviewMode
   jobSourceType: JobSourceType
   currentTurnNo: number
   currentMainQuestionNo: number
@@ -69,6 +72,7 @@ export interface CreateInterviewInput {
     | { type: 'CUSTOM'; jobTitle: string; jobDescription: string }
   difficulty: Difficulty
   interviewSize: InterviewSize
+  interviewMode: InterviewMode
   providerId: string
   knowledgeBaseIds: string[]
 }
