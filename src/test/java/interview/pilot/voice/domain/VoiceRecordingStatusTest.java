@@ -15,6 +15,7 @@ class VoiceRecordingStatusTest {
         new Step(VoiceRecordingStatus.RECEIVING, VoiceRecordingStatus.FAILED),
         new Step(VoiceRecordingStatus.RECEIVING, VoiceRecordingStatus.DISCARDED),
         new Step(VoiceRecordingStatus.UPLOADED, VoiceRecordingStatus.TRANSCRIBING),
+        new Step(VoiceRecordingStatus.UPLOADED, VoiceRecordingStatus.FAILED),
         new Step(VoiceRecordingStatus.TRANSCRIBING, VoiceRecordingStatus.READY),
         new Step(VoiceRecordingStatus.TRANSCRIBING, VoiceRecordingStatus.FAILED),
         new Step(VoiceRecordingStatus.READY, VoiceRecordingStatus.ATTACHED),

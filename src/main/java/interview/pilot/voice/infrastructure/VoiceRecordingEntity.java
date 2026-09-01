@@ -76,6 +76,9 @@ public class VoiceRecordingEntity {
   @Column(name = "provider_request_id", length = 128)
   private String providerRequestId;
 
+  @Column(name = "asr_duration_millis")
+  private Long asrDurationMillis;
+
   @Column(name = "raw_transcript", columnDefinition = "longtext")
   private String rawTranscript;
 
@@ -147,10 +150,48 @@ public class VoiceRecordingEntity {
     }
   }
 
-  /** FAILED → TRANSCRIBING with a fenced execution epoch (V9 precedent): stale messages lose. */
+  /**
+   * FAILED → TRANSCRIBING with a fenced execution epoch (V9 precedent): stale messages lose.
+   * Guarded to FAILED on purpose — since UPLOADED → TRANSCRIBING became legal for the
+   * listener's claim path ({@link #startTranscription}), a retry-style epoch bump from any
+   * other state would silently break the recording/task lockstep.
+   */
   public void beginTranscription() {
+    if (status != VoiceRecordingStatus.FAILED) {
+      throw new IllegalStateException("recording cannot begin a retried transcription from " + status);
+    }
     moveTo(VoiceRecordingStatus.TRANSCRIBING);
     executionEpoch++;
+  }
+
+  /**
+   * UPLOADED → TRANSCRIBING: the listener's claim path (plan §10 step 2). The epoch is
+   * untouched — it only moves on a manual retry ({@link #beginTranscription}), which keeps the
+   * recording and task rows in lockstep.
+   */
+  public void startTranscription() {
+    moveTo(VoiceRecordingStatus.TRANSCRIBING);
+  }
+
+  /** TRANSCRIBING → READY with the transcription result (plan §10 steps 4-5). */
+  public void completeTranscription(
+      String providerId, String modelName, String providerRequestId,
+      String rawTranscript, Long asrDurationMillis) {
+    moveTo(VoiceRecordingStatus.READY);
+    this.providerId = providerId;
+    this.modelName = modelName;
+    this.providerRequestId = providerRequestId;
+    this.rawTranscript = rawTranscript;
+    this.asrDurationMillis = asrDurationMillis;
+  }
+
+  /**
+   * UPLOADED/TRANSCRIBING → FAILED: a deterministic transcription failure or retry exhaustion
+   * (plan §10 steps 7-8 — UPLOADED covers the message that dies before the claim transaction).
+   */
+  public void failTranscription(String error) {
+    moveTo(VoiceRecordingStatus.FAILED);
+    this.safeError = error;
   }
 
   /** RECEIVING/READY/FAILED → DISCARDED: the recording can never be bound to an answer. */

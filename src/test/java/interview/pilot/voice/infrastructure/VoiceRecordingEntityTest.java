@@ -68,6 +68,55 @@ class VoiceRecordingEntityTest {
   }
 
   @Test
+  void startTranscriptionMovesUploadedToTranscribingWithoutTouchingTheEpoch() {
+    recording.acceptUpload("key", "audio/webm", 1024, 30_000, "abc");
+
+    recording.startTranscription();
+
+    assertThat(recording.getStatus()).isEqualTo(VoiceRecordingStatus.TRANSCRIBING);
+    assertThat(recording.getExecutionEpoch()).isZero();
+    assertThat(recording.getRawTranscript()).isNull();
+  }
+
+  @Test
+  void completeTranscriptionMovesTranscribingToReadyWithTheResultMetadata() {
+    recording.acceptUpload("key", "audio/webm", 1024, 30_000, "abc");
+    recording.startTranscription();
+
+    recording.completeTranscription(
+        "dashscope", "fun-asr-flash-2026-06-15", "req-123", "转写结果", 512L);
+
+    assertThat(recording.getStatus()).isEqualTo(VoiceRecordingStatus.READY);
+    assertThat(recording.getProviderId()).isEqualTo("dashscope");
+    assertThat(recording.getModelName()).isEqualTo("fun-asr-flash-2026-06-15");
+    assertThat(recording.getProviderRequestId()).isEqualTo("req-123");
+    assertThat(recording.getRawTranscript()).isEqualTo("转写结果");
+    assertThat(recording.getAsrDurationMillis()).isEqualTo(512L);
+    assertThat(recording.getSafeError()).isNull();
+  }
+
+  @Test
+  void failTranscriptionMovesUploadedOrTranscribingToFailedWithSafeError() {
+    recording.acceptUpload("key", "audio/webm", 1024, 30_000, "abc");
+
+    recording.failTranscription("VOICE_TRANSCRIPTION_FAILED");
+
+    assertThat(recording.getStatus()).isEqualTo(VoiceRecordingStatus.FAILED);
+    assertThat(recording.getSafeError()).isEqualTo("VOICE_TRANSCRIPTION_FAILED");
+  }
+
+  @Test
+  void beginTranscriptionRefusesToBumpTheEpochFromAnyNonFailedState() {
+    recording.acceptUpload("key", "audio/webm", 1024, 30_000, "abc");
+
+    assertThatIllegalStateException().isThrownBy(recording::beginTranscription);
+
+    recording.startTranscription();
+    assertThatIllegalStateException().isThrownBy(recording::beginTranscription);
+    assertThat(recording.getExecutionEpoch()).isZero();
+  }
+
+  @Test
   void rejectsTransitionsOutsideTheStatusGraph() {
     recording.moveTo(VoiceRecordingStatus.DISCARDED);
 
