@@ -28,6 +28,7 @@ import interview.pilot.async.domain.AsyncTaskStatus;
 import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
+import interview.pilot.async.policy.VoiceTranscriptionRetryPolicy;
 import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.common.exception.BusinessException;
 import interview.pilot.interview.domain.SessionStatus;
@@ -101,7 +102,9 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
   private static final Logger log = LoggerFactory.getLogger(VoiceAnswerServiceImpl.class);
   /** RECEIVING rows expire after 10 minutes; Task 11's sweeper reclaims them (plan §9). */
   private static final Duration RECEIVING_TTL = Duration.ofMinutes(10);
-  private static final String TASK_BIZ_KEY_PREFIX = "voice-recording:";
+  // The task bizKey format is owned by the VOICE_TRANSCRIPTION retry policy (Task R M4):
+  // one constant shared by creation here, the claim key, and the tests.
+  private static final String TASK_BIZ_KEY_PREFIX = VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX;
 
   private final VoiceRecordingRepository recordings;
   private final InterviewSessionRepository sessions;

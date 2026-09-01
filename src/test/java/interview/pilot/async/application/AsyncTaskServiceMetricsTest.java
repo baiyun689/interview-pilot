@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -18,6 +19,8 @@ import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
+import interview.pilot.async.policy.InterviewEvaluationRetryPolicy;
+import interview.pilot.async.policy.RetryableTaskPolicyRegistry;
 import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.common.exception.BusinessException;
 import interview.pilot.common.observability.AiMetrics;
@@ -43,10 +46,9 @@ class AsyncTaskServiceMetricsTest {
     when(transactionManager.getTransaction(any()))
         .thenAnswer(invocation -> new SimpleTransactionStatus());
     var metrics = mock(AiMetrics.class);
-    var service = new AsyncTaskService(
-        tasks, mock(ResumeRepository.class), mock(InterviewSessionRepository.class),
-        mock(interview.pilot.knowledge.infrastructure.KnowledgeDocumentRepository.class),
-        claims, transactionManager, metrics);
+    var registry = new RetryableTaskPolicyRegistry(List.of(
+        new InterviewEvaluationRetryPolicy(mock(InterviewSessionRepository.class))));
+    var service = new AsyncTaskService(tasks, claims, transactionManager, metrics, registry);
 
     assertThatThrownBy(() -> service.retry(OWNER, taskId, UUID.randomUUID()))
         .isInstanceOfSatisfying(BusinessException.class,

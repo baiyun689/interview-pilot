@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -19,11 +20,11 @@ import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.async.messaging.RabbitTopologyConfig;
+import interview.pilot.async.policy.RetryableTaskPolicyRegistry;
+import interview.pilot.async.policy.VoiceTranscriptionRetryPolicy;
 import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.common.exception.BusinessException;
 import interview.pilot.common.observability.AiMetrics;
-import interview.pilot.interview.infrastructure.InterviewSessionRepository;
-import interview.pilot.resume.infrastructure.ResumeRepository;
 
 /**
  * Task 4's minimal routing for VOICE_TRANSCRIPTION: the plan §12 pipeline naming is
@@ -51,7 +52,8 @@ class VoiceAsyncRoutingTest {
     UUID taskId = UUID.randomUUID();
     UUID recordingId = UUID.randomUUID();
     AsyncTaskEntity failed = AsyncTaskEntity.pending(
-        1L, AsyncTaskType.VOICE_TRANSCRIPTION, "voice-recording:" + recordingId, "{}");
+        1L, AsyncTaskType.VOICE_TRANSCRIPTION,
+        VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + recordingId, "{}");
     failed.setId(7L);
     failed.setTaskId(taskId);
     failed.setStatus(AsyncTaskStatus.FAILED);
@@ -60,15 +62,14 @@ class VoiceAsyncRoutingTest {
     when(tasks.findByTaskIdAndUserAccountId(taskId, 1L)).thenReturn(Optional.of(failed));
     when(tasks.findByIdAndUserAccountId(7L, 1L)).thenReturn(Optional.of(failed));
     var claims = mock(ProcessingClaim.class);
-    when(claims.clearTerminal("voice-recording:" + recordingId))
+    when(claims.clearTerminal(VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + recordingId))
         .thenReturn(ProcessingClaim.ClearResult.ABSENT);
     var transactionManager = mock(PlatformTransactionManager.class);
     when(transactionManager.getTransaction(any()))
         .thenAnswer(invocation -> new SimpleTransactionStatus());
+    var registry = new RetryableTaskPolicyRegistry(List.of(new VoiceTranscriptionRetryPolicy()));
     var service = new AsyncTaskService(
-        tasks, mock(ResumeRepository.class), mock(InterviewSessionRepository.class),
-        mock(interview.pilot.knowledge.infrastructure.KnowledgeDocumentRepository.class),
-        claims, transactionManager, mock(AiMetrics.class));
+        tasks, claims, transactionManager, mock(AiMetrics.class), registry);
 
     assertThatThrownBy(() -> service.retry(
         new CurrentUser(1L, new UUID(0L, 1L), "owner@example.com", "Owner"), taskId,

@@ -42,6 +42,7 @@ import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.async.messaging.PendingTaskDispatcher;
 import interview.pilot.async.messaging.TaskMessage;
 import interview.pilot.async.messaging.TaskMessagePublisher;
+import interview.pilot.async.policy.VoiceTranscriptionRetryPolicy;
 import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.auth.infrastructure.UserAccountEntity;
 import interview.pilot.auth.infrastructure.UserAccountRepository;
@@ -208,7 +209,7 @@ class VoiceAnswerModuleTest {
 
     var task = tasks.findByTaskTypeAndBizKey(
         AsyncTaskType.VOICE_TRANSCRIPTION,
-        "voice-recording:" + receipt.recordingId()).orElseThrow();
+        VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + receipt.recordingId()).orElseThrow();
     assertThat(task.getTaskId()).isEqualTo(receipt.transcriptionTaskId());
     assertThat(task.getStatus()).isEqualTo(AsyncTaskStatus.PENDING);
     assertThat(task.getExecutionEpoch()).isZero();
@@ -220,7 +221,7 @@ class VoiceAnswerModuleTest {
     dispatcher.dispatchPendingTasks();
     verify(publisher).publish(new TaskMessage(
         task.getTaskId(), AsyncTaskType.VOICE_TRANSCRIPTION,
-        "voice-recording:" + receipt.recordingId(), 0));
+        VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + receipt.recordingId(), 0));
   }
 
   @Test
@@ -578,7 +579,7 @@ class VoiceAnswerModuleTest {
     assertThat(retried.getStatus()).isEqualTo(VoiceRecordingStatus.TRANSCRIBING);
     assertThat(retried.getExecutionEpoch()).isEqualTo(1);
     var task = tasks.findByTaskTypeAndBizKey(
-        AsyncTaskType.VOICE_TRANSCRIPTION, "voice-recording:" + receipt.recordingId()).orElseThrow();
+        AsyncTaskType.VOICE_TRANSCRIPTION, VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + receipt.recordingId()).orElseThrow();
     assertThat(task.getStatus()).isEqualTo(AsyncTaskStatus.PENDING);
     assertThat(task.getExecutionEpoch()).isEqualTo(1);
     assertThat(task.getLastPublishedAt()).isNull();
@@ -587,7 +588,7 @@ class VoiceAnswerModuleTest {
     dispatcher.dispatchPendingTasks();
     verify(publisher).publish(new TaskMessage(
         task.getTaskId(), AsyncTaskType.VOICE_TRANSCRIPTION,
-        "voice-recording:" + receipt.recordingId(), 1));
+        VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + receipt.recordingId(), 1));
   }
 
   @Test

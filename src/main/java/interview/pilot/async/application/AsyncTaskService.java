@@ -12,47 +12,41 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import interview.pilot.async.api.AsyncTaskResponse;
 import interview.pilot.async.domain.AsyncTaskStatus;
-import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
+import interview.pilot.async.policy.RetryableTaskPolicyRegistry;
 import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.common.exception.BusinessException;
 import interview.pilot.common.observability.AiMetrics;
-import interview.pilot.interview.domain.SessionStatus;
-import interview.pilot.interview.infrastructure.InterviewSessionRepository;
-import interview.pilot.knowledge.domain.KnowledgeDocumentStatus;
-import interview.pilot.knowledge.infrastructure.KnowledgeDocumentRepository;
-import interview.pilot.resume.domain.ResumeStatus;
-import interview.pilot.resume.infrastructure.ResumeRepository;
 
+/**
+ * Generic task lifecycle endpoint: lookup and manual retry. The task-type-specific parts of
+ * manual retry (claim key, per-type state recovery or refusal) live in
+ * {@link interview.pilot.async.policy.RetryableTaskPolicy policies} routed by
+ * {@link RetryableTaskPolicyRegistry} — adding a task type no longer grows a switch here.
+ */
 @Service
 public class AsyncTaskService {
   private static final Logger log = LoggerFactory.getLogger(AsyncTaskService.class);
 
   private final AsyncTaskRepository tasks;
-  private final ResumeRepository resumes;
-  private final InterviewSessionRepository sessions;
-  private final KnowledgeDocumentRepository knowledgeDocuments;
   private final ProcessingClaim claims;
   private final TransactionTemplate transactions;
   private final AiMetrics metrics;
+  private final RetryableTaskPolicyRegistry policies;
 
   public AsyncTaskService(
       AsyncTaskRepository tasks,
-      ResumeRepository resumes,
-      InterviewSessionRepository sessions,
-      KnowledgeDocumentRepository knowledgeDocuments,
       ProcessingClaim claims,
       PlatformTransactionManager transactionManager,
-      AiMetrics metrics) {
+      AiMetrics metrics,
+      RetryableTaskPolicyRegistry policies) {
     this.tasks = tasks;
-    this.resumes = resumes;
-    this.sessions = sessions;
-    this.knowledgeDocuments = knowledgeDocuments;
     this.claims = claims;
     this.transactions = new TransactionTemplate(transactionManager);
     this.metrics = metrics;
+    this.policies = policies;
   }
 
   public AsyncTaskResponse get(CurrentUser user, UUID taskId) {
@@ -84,7 +78,8 @@ public class AsyncTaskService {
   private RetryTarget retryTarget(CurrentUser user, UUID taskId) {
     AsyncTaskEntity task = requireTask(user, taskId);
     requireRetryable(task);
-    return new RetryTarget(task.getId(), requireOwner(user), task.getVersion(), claimKey(task));
+    return new RetryTarget(task.getId(), requireOwner(user), task.getVersion(),
+        policies.forType(task.getTaskType()).claimKey(task));
   }
 
   private AsyncTaskResponse reset(RetryTarget target) {
@@ -95,48 +90,7 @@ public class AsyncTaskService {
       throw conflict("TASK_RETRY_CONFLICT", "Task retry conflicted with another request");
     }
     requireRetryable(task);
-    if (task.getTaskType() == AsyncTaskType.RESUME_ANALYSIS) {
-      Long resumeId = parseResumeId(task.getBizKey());
-      var resume = resumes.findByIdAndUserAccountId(resumeId, target.userAccountId())
-          .orElseThrow(() -> conflict("TASK_STATE_INVALID", "Task state is inconsistent"));
-      if (resume.getStatus() != ResumeStatus.FAILED) {
-        throw conflict("TASK_STATE_INVALID", "Task state is inconsistent");
-      }
-      resume.setStatus(ResumeStatus.PENDING);
-      resume.setFailureReason(null);
-      resume.setSkillsSnapshot(null);
-      resume.setEvaluationSnapshot(null);
-    } else if (task.getTaskType() == AsyncTaskType.KNOWLEDGE_DOCUMENT_INDEX
-        || task.getTaskType() == AsyncTaskType.KNOWLEDGE_DOCUMENT_DELETE) {
-      UUID documentId = parseKnowledgeDocumentId(task.getBizKey());
-      var document = knowledgeDocuments.findByDocumentId(documentId)
-          .orElseThrow(() -> conflict("TASK_STATE_INVALID", "Task state is inconsistent"));
-      if (document.getStatus() != KnowledgeDocumentStatus.FAILED) {
-        throw conflict("TASK_STATE_INVALID", "Task state is inconsistent");
-      }
-      document.beginReindex();
-    } else if (task.getTaskType() == AsyncTaskType.INTERVIEW_QUESTION_PREPARATION) {
-      UUID sessionId = parseInterviewId(task.getBizKey());
-      var session = sessions.findBySessionIdAndUserAccountId(sessionId, target.userAccountId())
-          .orElseThrow(() -> conflict("TASK_STATE_INVALID", "Task state is inconsistent"));
-      if (session.getStatus() != SessionStatus.PREPARATION_FAILED) {
-        throw conflict("TASK_STATE_INVALID", "Task state is inconsistent");
-      }
-      session.retryPreparation();
-    } else if (task.getTaskType() == AsyncTaskType.VOICE_TRANSCRIPTION) {
-      // Voice transcription retry is owned by VoiceAnswerModule.retry, which resets the
-      // recording row and the task row in lockstep (V9 fenced epoch). The generic endpoint
-      // must not reset the task alone. Task R owns the policy registry refactor.
-      throw conflict("TASK_NOT_RETRYABLE", "Voice transcription retry is managed by the recording");
-    } else {
-      UUID sessionId = parseInterviewId(task.getBizKey());
-      var session = sessions.findBySessionIdAndUserAccountId(sessionId, target.userAccountId())
-          .orElseThrow(() -> conflict("TASK_STATE_INVALID", "Task state is inconsistent"));
-      if (session.getStatus() != SessionStatus.EVALUATION_FAILED) {
-        throw conflict("TASK_STATE_INVALID", "Task state is inconsistent");
-      }
-      session.retryEvaluation();
-    }
+    policies.forType(task.getTaskType()).reset(task, target.userAccountId());
     task.setStatus(AsyncTaskStatus.PENDING);
     task.setExecutionEpoch(task.getExecutionEpoch() + 1);
     task.setLastPublishedAt(null);
@@ -148,56 +102,6 @@ public class AsyncTaskService {
     if (task.getStatus() != AsyncTaskStatus.FAILED
         && task.getStatus() != AsyncTaskStatus.DEAD) {
       throw conflict("TASK_NOT_RETRYABLE", "Only failed or dead tasks can be retried");
-    }
-  }
-
-  private String claimKey(AsyncTaskEntity task) {
-    return switch (task.getTaskType()) {
-      case RESUME_ANALYSIS -> "resume-analysis:" + parseResumeId(task.getBizKey());
-      case INTERVIEW_QUESTION_PREPARATION ->
-          "interview-preparation:" + parseInterviewId(task.getBizKey());
-      case INTERVIEW_EVALUATION -> "interview-report:" + parseInterviewId(task.getBizKey());
-      case KNOWLEDGE_DOCUMENT_INDEX, KNOWLEDGE_DOCUMENT_DELETE ->
-          "knowledge-index:" + parseKnowledgeDocumentId(task.getBizKey());
-      case VOICE_TRANSCRIPTION -> "voice-recording:" + parseVoiceRecordingId(task.getBizKey());
-    };
-  }
-
-  private Long parseResumeId(String bizKey) {
-    try {
-      if (bizKey == null || !bizKey.startsWith("resume:")) throw new IllegalArgumentException();
-      return Long.valueOf(bizKey.substring("resume:".length()));
-    } catch (IllegalArgumentException exception) {
-      throw conflict("TASK_STATE_INVALID", "Task state is inconsistent");
-    }
-  }
-
-  private UUID parseInterviewId(String bizKey) {
-    try {
-      if (bizKey == null || !bizKey.startsWith("interview:")) throw new IllegalArgumentException();
-      return UUID.fromString(bizKey.substring("interview:".length()));
-    } catch (IllegalArgumentException exception) {
-      throw conflict("TASK_STATE_INVALID", "Task state is inconsistent");
-    }
-  }
-
-  private UUID parseKnowledgeDocumentId(String bizKey) {
-    try {
-      if (bizKey == null || !bizKey.startsWith("knowledge-document:"))
-        throw new IllegalArgumentException();
-      return UUID.fromString(bizKey.substring("knowledge-document:".length()));
-    } catch (IllegalArgumentException exception) {
-      throw conflict("TASK_STATE_INVALID", "Task state is inconsistent");
-    }
-  }
-
-  private UUID parseVoiceRecordingId(String bizKey) {
-    try {
-      if (bizKey == null || !bizKey.startsWith("voice-recording:"))
-        throw new IllegalArgumentException();
-      return UUID.fromString(bizKey.substring("voice-recording:".length()));
-    } catch (IllegalArgumentException exception) {
-      throw conflict("TASK_STATE_INVALID", "Task state is inconsistent");
     }
   }
 
