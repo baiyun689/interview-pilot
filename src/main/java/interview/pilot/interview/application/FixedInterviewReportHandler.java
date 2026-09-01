@@ -127,11 +127,13 @@ public class FixedInterviewReportHandler {
 
     InterviewBriefSnapshot brief = decode(session.getBriefSnapshot(), InterviewBriefSnapshot.class);
     var storedTurns = turns.findAllBySessionIdOrderByTurnNo(session.getId());
-    if (storedTurns.size() != brief.totalTurns()
+    var storedCards = cards.findAllBySessionIdOrderByPhaseAscPhaseSequenceAsc(session.getId());
+    int expectedTurnCount = brief.totalMainQuestionCount()
+        + storedCards.stream().mapToInt(card -> card.getFollowUpQuota()).sum();
+    if (storedTurns.size() != expectedTurnCount
         || storedTurns.stream().anyMatch(turn -> turn.getStatus() != TurnStatus.COMPLETED)) {
       throw new IllegalStateException("Completed interview evidence is incomplete");
     }
-    var storedCards = cards.findAllBySessionIdOrderByPhaseAscPhaseSequenceAsc(session.getId());
     var evidence = new ArrayList<FixedReportInput.TurnEvidence>();
     var allowed = new HashSet<String>();
     var availability = new EnumMap<InterviewPhase, String>(InterviewPhase.class);

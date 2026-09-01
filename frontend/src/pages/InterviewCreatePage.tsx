@@ -100,7 +100,7 @@ export function InterviewCreatePage() {
       </>}
       <div className="form-row">
         <label>难度<select value={values.difficulty} onChange={(event) => setValues({ ...values, difficulty: event.target.value as Difficulty })}><option value="EASY">简单</option><option value="MEDIUM">中等</option><option value="HARD">困难</option></select></label>
-        <label>面试规模<select value={values.interviewSize} onChange={(event) => setValues({ ...values, interviewSize: event.target.value as InterviewSize })}><option value="QUICK">快速面试 · 6 轮</option><option value="STANDARD">标准面试 · 9 轮</option><option value="DEEP">深度面试 · 12 轮</option></select></label>
+        <label>面试规模<select value={values.interviewSize} onChange={(event) => setValues({ ...values, interviewSize: event.target.value as InterviewSize })}><option value="QUICK">快速面试 · 6 个主问题</option><option value="STANDARD">标准面试 · 9 个主问题</option><option value="DEEP">深度面试 · 12 个主问题</option></select></label>
       </div>
       <label>模型<select value={values.providerId} onChange={(event) => setValues({ ...values, providerId: event.target.value })} required><option value="">请选择</option>{providers.map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName} · {provider.model}</option>)}</select></label>
       {!providers.length && !loadError && <p className="empty-copy">没有可用模型。<Link to="/settings">前往模型设置</Link></p>}

@@ -38,7 +38,7 @@ public class QuestionDeckValidator {
           .filter(question -> question != null && question.phase() == phase)
           .sorted(java.util.Comparator.comparingInt(QuestionDeckOutput.Question::sequence))
           .toList();
-      int expected = size.turnBudget(phase);
+      int expected = size.mainQuestionCount(phase);
       require(phaseQuestions.size() == expected,
           phase + " requires exactly " + expected + " questions");
       for (int index = 0; index < phaseQuestions.size(); index++) {
@@ -70,12 +70,8 @@ public class QuestionDeckValidator {
         .map(point -> bounded(point, 2, 80, "focusPoint"))
         .toList();
 
-    if (value.phase() == InterviewPhase.FUNDAMENTALS) {
-      require(value.fallbackFollowUp() == null,
-          "fundamentals fallbackFollowUp must be null");
-    } else {
-      bounded(value.fallbackFollowUp(), 20, 160, "fallbackFollowUp");
-    }
+    String fallbackFollowUp = bounded(
+        value.fallbackFollowUp(), 20, 160, "fallbackFollowUp");
 
     GroundingMode mode = value.groundingMode();
     require(value.evidenceRefs() != null, "evidenceRefs are required");
@@ -97,7 +93,7 @@ public class QuestionDeckValidator {
 
     return new PreparedQuestionDeck.PreparedQuestion(
         value.phase(), value.sequence(), topic, question, focusPoints,
-        mode, value.evidenceRefs(), value.fallbackFollowUp());
+        mode, value.evidenceRefs(), fallbackFollowUp);
   }
 
   private String bounded(String value, int minimum, int maximum, String field) {

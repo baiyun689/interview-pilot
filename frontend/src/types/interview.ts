@@ -36,7 +36,8 @@ export interface InterviewSession {
   interviewSize: InterviewSize
   jobSourceType: JobSourceType
   currentTurnNo: number
-  totalTurnBudget: number
+  currentMainQuestionNo: number
+  totalMainQuestionCount: number
   providerId: string
   modelName: string
   preparationTaskId: string | null
@@ -52,7 +53,8 @@ export interface InterviewHistory {
   interviewSize: InterviewSize
   jobSourceType: JobSourceType
   currentTurnNo: number
-  totalTurnBudget: number
+  currentMainQuestionNo: number
+  totalMainQuestionCount: number
   providerId: string
   modelName: string
   safeError: string | null

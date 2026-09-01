@@ -10,6 +10,7 @@ import interview.pilot.interview.domain.GroundingMode;
 import interview.pilot.interview.domain.InterviewPhase;
 import interview.pilot.interview.domain.InterviewSize;
 import interview.pilot.interview.domain.JobSourceType;
+import interview.pilot.interview.domain.QuestionType;
 import interview.pilot.interview.domain.SessionStatus;
 import interview.pilot.interview.rag.RagStatus;
 
@@ -24,6 +25,12 @@ class FixedInterviewEntitiesTest {
     assertThatThrownBy(session::beginFixedInterview).isInstanceOf(IllegalStateException.class);
     session.preparationReady();
     session.beginFixedInterview();
+    assertThat(session.getCurrentTurnNo()).isEqualTo(1);
+    assertThat(session.getCurrentMainQuestionNo()).isEqualTo(1);
+    session.advanceTo(2, QuestionType.FOLLOW_UP);
+    assertThat(session.getCurrentMainQuestionNo()).isEqualTo(1);
+    session.advanceTo(3, QuestionType.MAIN);
+    assertThat(session.getCurrentMainQuestionNo()).isEqualTo(2);
     session.beginEvaluation();
     session.evaluationFailed("INVALID_REPORT");
     session.retryEvaluation();
@@ -34,8 +41,14 @@ class FixedInterviewEntitiesTest {
 
   @Test
   void cardQuotaIsConstrainedByPhase() {
-    assertThatThrownBy(() -> InterviewQuestionCardEntity.create(
+    var fundamentals = InterviewQuestionCardEntity.create(
         1L, InterviewPhase.FUNDAMENTALS, 1, "并发", "这是一个长度足够的基础并发问题文本",
+        "[]", GroundingMode.GENERAL, RagStatus.NOT_REQUESTED, "{}", "[]", 1,
+        "如果出现复合写操作，你会怎样进一步保证原子性？");
+    assertThat(fundamentals.getFollowUpQuota()).isEqualTo(1);
+
+    assertThatThrownBy(() -> InterviewQuestionCardEntity.create(
+        1L, InterviewPhase.SELF_INTRODUCTION, 1, "自我介绍", "这是一个长度足够的自我介绍问题文本",
         "[]", GroundingMode.GENERAL, RagStatus.NOT_REQUESTED, "{}", "[]", 1, null))
         .isInstanceOf(IllegalArgumentException.class);
 

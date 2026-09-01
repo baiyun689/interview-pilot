@@ -21,6 +21,7 @@ import interview.pilot.interview.api.InterviewTurnView;
 import interview.pilot.interview.api.SubmitAnswerRequest;
 import interview.pilot.interview.domain.AnswerAttemptStatus;
 import interview.pilot.interview.domain.Difficulty;
+import interview.pilot.interview.domain.FixedInterviewFlowPolicy;
 import interview.pilot.interview.domain.InterviewPhase;
 import interview.pilot.interview.domain.InterviewSize;
 import interview.pilot.interview.domain.QuestionType;
@@ -47,6 +48,7 @@ public class FixedAnswerService {
   private final FollowUpGenerator followUps;
   private final ObjectMapper objectMapper;
   private final TransactionTemplate transactions;
+  private final FixedInterviewFlowPolicy flow = new FixedInterviewFlowPolicy();
 
   public FixedAnswerService(
       InterviewSessionRepository sessions,
@@ -202,27 +204,21 @@ public class FixedAnswerService {
       List<InterviewTurnEntity> allTurns,
       List<InterviewQuestionCardEntity> allCards,
       InterviewQuestionCardEntity parent) {
-    if (current.getTurnNo() >= size.totalTurns()) return Next.end();
     InterviewPhase phase = current.getPhase();
-    int phaseTurnsUsed = (int) allTurns.stream().filter(turn -> turn.getPhase() == phase).count();
     int mainAsked = (int) allTurns.stream().filter(turn ->
         turn.getPhase() == phase && turn.getQuestionType() == QuestionType.MAIN).count();
     int followUpsForCard = (int) allTurns.stream().filter(turn ->
         turn.getQuestionType() == QuestionType.FOLLOW_UP
             && parent.getId().equals(turn.getSourceCardId())).count();
 
-    if (phase.allowsFollowUp()
-        && parent.getFollowUpQuota() > followUpsForCard
-        && size.canAskFollowUp(phase, mainAsked, phaseTurnsUsed)) {
-      return Next.followUp(phase, parent.getId());
-    }
-    if (phaseTurnsUsed < size.turnBudget(phase)) {
-      var nextCard = card(allCards, phase, mainAsked + 1);
-      return Next.main(phase, nextCard);
-    }
-    InterviewPhase nextPhase = nextPhase(phase);
-    var nextCard = card(allCards, nextPhase, 1);
-    return Next.main(nextPhase, nextCard);
+    var decision = flow.next(size, new FixedInterviewFlowPolicy.Progress(
+        phase, mainAsked, followUpsForCard, parent.getFollowUpQuota()));
+    return switch (decision.kind()) {
+      case FOLLOW_UP -> Next.followUp(decision.phase(), parent.getId());
+      case MAIN -> Next.main(
+          decision.phase(), card(allCards, decision.phase(), decision.mainQuestionSequence()));
+      case END -> Next.end();
+    };
   }
 
   private InterviewQuestionCardEntity card(
@@ -232,15 +228,6 @@ public class FixedAnswerService {
     return cards.stream().filter(card ->
         card.getPhase() == phase && card.getPhaseSequence() == sequence)
         .findFirst().orElseThrow(() -> new IllegalStateException("Required question card is missing"));
-  }
-
-  private InterviewPhase nextPhase(InterviewPhase phase) {
-    return switch (phase) {
-      case SELF_INTRODUCTION -> InterviewPhase.FUNDAMENTALS;
-      case FUNDAMENTALS -> InterviewPhase.PROJECT_EXPERIENCE;
-      case PROJECT_EXPERIENCE -> InterviewPhase.SCENARIO_TRADEOFF;
-      case SCENARIO_TRADEOFF -> throw new IllegalStateException("No phase follows scenario");
-    };
   }
 
   private FixedAnswerResult completeInTransaction(Work work, String nextQuestion) {
@@ -268,7 +255,7 @@ public class FixedAnswerService {
           work.next().kind() == NextKind.MAIN ? QuestionType.MAIN : QuestionType.FOLLOW_UP,
           work.next().sourceCardId(), nextQuestion);
       turns.save(nextTurn);
-      session.advanceTo(nextTurn.getTurnNo());
+      session.advanceTo(nextTurn.getTurnNo(), nextTurn.getQuestionType());
     }
     FixedAnswerResult result = new FixedAnswerResult(
         session.getSessionId(), work.requestId(), current.getTurnNo(), session.getStatus(),

@@ -13,6 +13,7 @@ import org.hibernate.type.SqlTypes;
 import interview.pilot.interview.domain.Difficulty;
 import interview.pilot.interview.domain.InterviewSize;
 import interview.pilot.interview.domain.JobSourceType;
+import interview.pilot.interview.domain.QuestionType;
 import interview.pilot.interview.domain.SessionStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -67,8 +68,11 @@ public class InterviewSessionEntity {
   @Column(name = "current_turn_no", nullable = false)
   private int currentTurnNo;
 
-  @Column(name = "total_turn_budget", nullable = false, updatable = false)
-  private int totalTurnBudget;
+  @Column(name = "current_main_question_no", nullable = false)
+  private int currentMainQuestionNo;
+
+  @Column(name = "total_main_question_count", nullable = false, updatable = false)
+  private int totalMainQuestionCount;
 
   @Column(name = "provider_id", nullable = false, updatable = false, length = 64)
   private String providerId;
@@ -112,7 +116,7 @@ public class InterviewSessionEntity {
     session.interviewSize = Objects.requireNonNull(interviewSize);
     session.jobSourceType = Objects.requireNonNull(jobSourceType);
     session.jobTitle = Objects.requireNonNull(jobTitle);
-    session.totalTurnBudget = interviewSize.totalTurns();
+    session.totalMainQuestionCount = interviewSize.totalMainQuestionCount();
     session.providerId = Objects.requireNonNull(providerId);
     session.modelName = Objects.requireNonNull(modelName);
     session.briefSnapshot = Objects.requireNonNull(briefSnapshot);
@@ -123,13 +127,21 @@ public class InterviewSessionEntity {
   public void preparationReady() { transition(SessionStatus.READY, "preparation cannot complete"); safeError = null; }
   public void preparationFailed(String error) { transition(SessionStatus.PREPARATION_FAILED, "preparation cannot fail"); safeError = safe(error); }
   public void retryPreparation() { transition(SessionStatus.PREPARING, "preparation cannot retry"); safeError = null; }
-  public void beginFixedInterview() { transition(SessionStatus.INTERVIEWING, "interview cannot start"); currentTurnNo = 1; }
+  public void beginFixedInterview() {
+    transition(SessionStatus.INTERVIEWING, "interview cannot start");
+    currentTurnNo = 1;
+    currentMainQuestionNo = 1;
+  }
 
-  public void advanceTo(int nextTurnNo) {
+  public void advanceTo(int nextTurnNo, QuestionType questionType) {
     if (status != SessionStatus.INTERVIEWING || nextTurnNo != currentTurnNo + 1) {
       throw new IllegalStateException("interview cannot advance");
     }
+    if (questionType != QuestionType.MAIN && questionType != QuestionType.FOLLOW_UP) {
+      throw new IllegalArgumentException("next question type must be main or follow-up");
+    }
     currentTurnNo = nextTurnNo;
+    if (questionType == QuestionType.MAIN) currentMainQuestionNo++;
   }
 
   public void beginEvaluation() { transition(SessionStatus.EVALUATING, "evaluation cannot start"); }

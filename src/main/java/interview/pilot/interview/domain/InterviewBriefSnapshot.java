@@ -37,8 +37,8 @@ public record InterviewBriefSnapshot(
     if (flowVersion < 1) throw new IllegalArgumentException("flowVersion must be positive");
   }
 
-  public int totalTurns() {
-    return interviewSize.totalTurns();
+  public int totalMainQuestionCount() {
+    return interviewSize.totalMainQuestionCount();
   }
 
   private static String required(String value, int max, String name) {

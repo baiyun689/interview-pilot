@@ -69,8 +69,7 @@ public class AiQuestionDeckGenerator implements QuestionDeckGenerator {
         InterviewPhase.PROJECT_EXPERIENCE,
         InterviewPhase.SCENARIO_TRADEOFF}) {
       result.put(phase.name(), Map.of(
-          "questionCount", brief.interviewSize().turnBudget(phase),
-          "minimumUsedMainQuestions", brief.interviewSize().minimumMainQuestions(phase)));
+          "questionCount", brief.interviewSize().mainQuestionCount(phase)));
     }
     return result;
   }

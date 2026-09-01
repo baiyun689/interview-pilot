@@ -7,6 +7,6 @@ public enum InterviewPhase {
   SCENARIO_TRADEOFF;
 
   public boolean allowsFollowUp() {
-    return this == PROJECT_EXPERIENCE || this == SCENARIO_TRADEOFF;
+    return this != SELF_INTRODUCTION;
   }
 }

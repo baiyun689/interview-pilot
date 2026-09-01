@@ -66,16 +66,16 @@ class QuestionDeckValidatorTest {
   }
 
   @Test
-  void rejectsInvalidFallbackAndCrossPhaseEvidence() {
+  void requiresFallbackForEveryMainQuestionPhaseAndRejectsCrossPhaseEvidence() {
     var invalidFundamentals = new ArrayList<>(standardQuestions());
     invalidFundamentals.set(0, question(
         InterviewPhase.FUNDAMENTALS, 1, "Java 并发", "解释 volatile 的可见性边界以及它不能保证什么？",
-        GroundingMode.GENERAL, List.of(), "不应该出现的基础题追问内容必须足够长。"));
+        GroundingMode.GENERAL, List.of(), null));
 
     assertThatThrownBy(() -> validator.validate(
         new QuestionDeckOutput(1, invalidFundamentals), InterviewSize.STANDARD, ragByPhase()))
         .isInstanceOf(InvalidQuestionDeckException.class)
-        .hasMessageContaining("fundamentals fallbackFollowUp must be null");
+        .hasMessageContaining("fallbackFollowUp");
 
     var invalidEvidence = new ArrayList<>(standardQuestions());
     invalidEvidence.set(3, question(
@@ -104,9 +104,9 @@ class QuestionDeckValidatorTest {
 
   private List<QuestionDeckOutput.Question> standardQuestions() {
     return List.of(
-        question(InterviewPhase.FUNDAMENTALS, 1, "Java 并发", "解释 volatile 的可见性边界以及它不能保证什么？", GroundingMode.GENERAL, List.of(), null),
-        question(InterviewPhase.FUNDAMENTALS, 2, "Spring 事务", "Spring 声明式事务在哪些调用边界下可能失效，为什么？", GroundingMode.GENERAL, List.of(), null),
-        question(InterviewPhase.FUNDAMENTALS, 3, "MySQL 索引", "面对一条慢查询，你会如何结合执行计划定位索引问题？", GroundingMode.GENERAL, List.of(), null),
+        question(InterviewPhase.FUNDAMENTALS, 1, "Java 并发", "解释 volatile 的可见性边界以及它不能保证什么？", GroundingMode.GENERAL, List.of(), "如果多个线程还会执行复合写操作，你会怎样保证原子性？"),
+        question(InterviewPhase.FUNDAMENTALS, 2, "Spring 事务", "Spring 声明式事务在哪些调用边界下可能失效，为什么？", GroundingMode.GENERAL, List.of(), "如果事务注解没有生效，你会怎样定位代理调用边界？"),
+        question(InterviewPhase.FUNDAMENTALS, 3, "MySQL 索引", "面对一条慢查询，你会如何结合执行计划定位索引问题？", GroundingMode.GENERAL, List.of(), "如果增加索引后写入延迟明显上升，你会如何权衡和验证？"),
         question(InterviewPhase.PROJECT_EXPERIENCE, 1, "缓存一致性", "请说明项目中缓存与数据库更新的失败窗口和补偿设计。", GroundingMode.KNOWLEDGE_ASSISTED, List.of("project-point"), "如果依赖超时后出现重复执行，你会如何发现并恢复？"),
         question(InterviewPhase.PROJECT_EXPERIENCE, 2, "个人贡献", "选择一个真实项目，说明你的职责边界和最关键的实现决策。", GroundingMode.GENERAL, List.of(), "如果重新实现这部分，你会优先改变哪个设计决定？"),
         question(InterviewPhase.PROJECT_EXPERIENCE, 3, "故障处理", "描述一次你负责模块的故障定位过程以及用于验证恢复的指标。", GroundingMode.GENERAL, List.of(), "如果故障再次发生，你会增加哪些自动化保护措施？"),

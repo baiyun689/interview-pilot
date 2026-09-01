@@ -22,7 +22,8 @@ const preset = {
 const baseSession = {
   sessionId: 'session-1', resumeId: null, jobTitle: 'Java 后端开发工程师',
   jdText: '负责后端系统设计与开发', difficulty: 'MEDIUM', interviewSize: 'STANDARD',
-  jobSourceType: 'PRESET', currentTurnNo: 0, totalTurnBudget: 9,
+  jobSourceType: 'PRESET', currentTurnNo: 0, currentMainQuestionNo: 0,
+  totalMainQuestionCount: 9,
   providerId: 'dashscope', modelName: 'qwen-plus', preparationTaskId: 'task-1',
   safeError: null, turns: [],
 }
@@ -94,7 +95,7 @@ describe('固定流程文字面试', () => {
   it('READY 后显式开始，并显示固定自我介绍首轮', async () => {
     const ready = { ...baseSession, status: 'READY' }
     const interviewing = {
-      ...baseSession, status: 'INTERVIEWING', currentTurnNo: 1,
+      ...baseSession, status: 'INTERVIEWING', currentTurnNo: 1, currentMainQuestionNo: 1,
       turns: [{
         requestId: null, turnNo: 1, status: 'ASKED', difficulty: 'MEDIUM',
         phase: 'SELF_INTRODUCTION', questionType: 'SELF_INTRODUCTION',
@@ -114,8 +115,17 @@ describe('固定流程文字面试', () => {
 
     await user.click(await screen.findByRole('button', { name: '开始面试' }))
     expect(await screen.findByText(/请先做一个简短的自我介绍/)).toBeInTheDocument()
+    expect(screen.getByText('主问题进度 1 / 9')).toBeInTheDocument()
     expect(screen.getByLabelText('你的回答')).toBeEnabled()
     expect(screen.queryByText(/即时评分|反馈|能力标签/)).not.toBeInTheDocument()
+  })
+
+  it('READY 说明每个主问题包含一至两次不占主问题数量的追问', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ...baseSession, status: 'READY' })))
+    renderRoute('/interviews/session-1', <InterviewLivePage />, '/interviews/:sessionId')
+
+    expect(await screen.findByText('题库准备完成')).toBeInTheDocument()
+    expect(screen.getByText('共 9 个主流程问题；除自我介绍外，每题包含 1～2 次追问。')).toBeInTheDocument()
   })
 
   it('PREPARING 只展示可靠异步准备状态', async () => {

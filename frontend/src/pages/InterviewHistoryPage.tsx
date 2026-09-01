@@ -20,8 +20,9 @@ function toneFor(status: string) {
 }
 
 function progressPercent(row: InterviewHistory) {
-  if (!row.totalTurnBudget) return 0
-  return Math.min(100, Math.round((row.currentTurnNo / row.totalTurnBudget) * 100))
+  if (!row.totalMainQuestionCount) return 0
+  return Math.min(100, Math.round(
+    (row.currentMainQuestionNo / row.totalMainQuestionCount) * 100))
 }
 
 export function InterviewHistoryPage() {
@@ -55,7 +56,7 @@ export function InterviewHistoryPage() {
         <dl className="history-stats">
           <div><dt>状态</dt><dd><span className={`status-chip ${toneFor(row.status)}`}>{sessionStatusLabel[row.status]}</span></dd></div>
           <div><dt>难度</dt><dd>{difficultyLabel[row.difficulty]}</dd></div>
-          <div><dt>进度</dt><dd><div className="history-progress"><div className="history-progress-bar"><div className="history-progress-fill" style={{ width: `${progressPercent(row)}%` }} /></div><span>{row.currentTurnNo} / {row.totalTurnBudget}</span></div></dd></div>
+          <div><dt>主问题进度</dt><dd><div className="history-progress"><div className="history-progress-bar"><div className="history-progress-fill" style={{ width: `${progressPercent(row)}%` }} /></div><span>{row.currentMainQuestionNo} / {row.totalMainQuestionCount}</span></div></dd></div>
         </dl>
         <div className="history-card-side">
           <p>创建时间：<time dateTime={row.createdAt}>{new Date(row.createdAt).toLocaleString('zh-CN')}</time></p>

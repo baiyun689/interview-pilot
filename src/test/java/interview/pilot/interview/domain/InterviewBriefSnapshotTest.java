@@ -16,7 +16,7 @@ class InterviewBriefSnapshotTest {
 
     assertThat(brief.jobTitle()).isEqualTo("Java 开发");
     assertThat(brief.jobDescription()).isEqualTo("熟悉 Spring");
-    assertThat(brief.totalTurns()).isEqualTo(9);
+    assertThat(brief.totalMainQuestionCount()).isEqualTo(9);
   }
 
   @Test

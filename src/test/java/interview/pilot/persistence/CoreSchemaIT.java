@@ -67,7 +67,8 @@ class CoreSchemaIT {
         "select column_name from information_schema.columns "
             + "where table_schema = database() and table_name = 'interview_session' "
             + "and column_name in ('interview_size','job_source_type','job_title',"
-            + "'total_turn_budget','provider_id','model_name','brief_snapshot') "
+            + "'current_main_question_no','total_main_question_count',"
+            + "'provider_id','model_name','brief_snapshot') "
             + "and is_nullable = 'NO' order by ordinal_position",
         String.class);
     List<String> requiredTurnColumns = jdbcTemplate.queryForList(
@@ -78,8 +79,13 @@ class CoreSchemaIT {
         String.class);
 
     assertThat(requiredSessionColumns).containsExactly(
-        "interview_size", "job_source_type", "job_title", "total_turn_budget",
+        "interview_size", "job_source_type", "job_title", "current_main_question_no",
+        "total_main_question_count",
         "provider_id", "model_name", "brief_snapshot");
+    assertThat(jdbcTemplate.queryForObject(
+        "select count(*) from information_schema.columns where table_schema = database() "
+            + "and table_name = 'interview_session' and column_name = 'total_turn_budget'",
+        Integer.class)).isZero();
     assertThat(requiredTurnColumns).containsExactly(
         "phase", "phase_sequence", "rag_context_snapshot", "follow_up_quota");
 

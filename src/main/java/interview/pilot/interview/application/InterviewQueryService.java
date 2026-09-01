@@ -59,7 +59,8 @@ public class InterviewQueryService {
         .map(session -> new InterviewHistoryResponse(
             session.getSessionId(), session.getJobTitle(), session.getStatus(),
             session.getDifficulty(), session.getInterviewSize(), session.getJobSourceType(),
-            session.getCurrentTurnNo(), session.getTotalTurnBudget(), session.getProviderId(),
+            session.getCurrentTurnNo(), session.getCurrentMainQuestionNo(),
+            session.getTotalMainQuestionCount(), session.getProviderId(),
             session.getModelName(), session.getSafeError(), session.getCreatedAt(),
             session.getCompletedAt()))
         .toList();
@@ -103,7 +104,8 @@ public class InterviewQueryService {
     return new InterviewSessionResponse(
         session.getSessionId(), session.getResumeId(), brief.jobTitle(), brief.jobDescription(),
         session.getStatus(), session.getDifficulty(), session.getInterviewSize(),
-        session.getJobSourceType(), session.getCurrentTurnNo(), session.getTotalTurnBudget(),
+        session.getJobSourceType(), session.getCurrentTurnNo(),
+        session.getCurrentMainQuestionNo(), session.getTotalMainQuestionCount(),
         session.getProviderId(), session.getModelName(),
         preparation == null ? null : preparation.getTaskId(), session.getSafeError(), turnViews);
   }
