@@ -60,7 +60,8 @@ public class VoiceConfiguration {
    * {@code ttsConfigured()} is true). The endpoint lives under the ASR base URL and
    * authenticates with the ASR api-key: the TTS configuration carries no credentials of its
    * own (Task 2 decision, confirmed by review; voice enabled always implies ASR configured).
-   * The model and voice come from {@code app.voice.tts.*} at call time via the profile.
+   * The model and voice come from the question_speech row at call time via the profile; the
+   * {@code maxUploadBytes} cap bounds the adapter's audio reads (review fix).
    */
   @Bean
   @ConditionalOnProperty(prefix = "app.voice", name = "enabled", havingValue = "true")
@@ -70,6 +71,6 @@ public class VoiceConfiguration {
     requestFactory.setConnectTimeout(timeout);
     requestFactory.setReadTimeout(timeout);
     var restClient = RestClient.builder().requestFactory(requestFactory).build();
-    return new DashScopeSpeechSynthesizer(voice.asr(), restClient);
+    return new DashScopeSpeechSynthesizer(voice.asr(), restClient, voice.maxUploadBytes());
   }
 }
