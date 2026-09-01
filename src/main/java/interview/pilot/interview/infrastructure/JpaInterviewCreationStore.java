@@ -75,7 +75,6 @@ public class JpaInterviewCreationStore implements InterviewCreationStore {
           creation.userAccountId(), creation.resumeId(), job.getId(), creation.difficulty(),
           creation.totalTurnBudget(), creation.providerId(), creation.modelName(),
           objectMapper.writeValueAsString(creation.plan()));
-      session.setQuestionDeckSnapshot(objectMapper.writeValueAsString(creation.questionDeck()));
       if (creation.knowledgeScope() != null) {
         session.setKnowledgeScopeSnapshot(
             objectMapper.writeValueAsString(creation.knowledgeScope()));

@@ -1,9 +1,5 @@
 import { request, requestWithMeta, type ApiResponse } from './request'
-import type { CreateInterviewInput, InterviewHistory, InterviewPreset, InterviewReportResult, InterviewReportStatus, InterviewSession, InterviewSkill } from '../types/interview'
-
-export function listInterviewPresets(signal?: AbortSignal): Promise<InterviewPreset[]> {
-  return request('/api/interview-presets', { signal })
-}
+import type { CreateInterviewInput, InterviewHistory, InterviewReportResult, InterviewReportStatus, InterviewSession, InterviewSkill } from '../types/interview'
 
 export function listInterviewSkills(signal?: AbortSignal): Promise<InterviewSkill[]> {
   return request('/api/interview-skills', { signal })
@@ -11,10 +7,6 @@ export function listInterviewSkills(signal?: AbortSignal): Promise<InterviewSkil
 
 export function createInterview(input: CreateInterviewInput, signal?: AbortSignal): Promise<ApiResponse<InterviewSession>> {
   return requestWithMeta('/api/interviews', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal })
-}
-
-export function createVoiceTicket(sessionId: string, signal?: AbortSignal): Promise<{ ticket: string }> {
-  return request(`/api/interviews/${encodeURIComponent(sessionId)}/voice-ticket`, { method: 'POST', signal })
 }
 
 export function listInterviews(signal?: AbortSignal): Promise<InterviewHistory[]> {

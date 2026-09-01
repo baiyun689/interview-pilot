@@ -46,30 +46,6 @@ public final class DefaultInterviewStrategy implements InterviewStrategy {
           context.currentDifficulty());
     }
 
-    // The current product flow has four fixed sections.  In this mode a
-    // follow-up is a small conversational probe, not an evaluation-driven
-    // evidence loop.  The answer evaluator still produces the score/report,
-    // but it cannot unexpectedly reorder the interview or add a follow-up to
-    // the self-introduction.
-    if (isFixedFlow(plan)) {
-      if (!"self_introduction".equals(currentItem.stageId())
-          && current.turnCount() <= currentItem.followUpLimit()) {
-        return followUp(tentative, currentItem, current, suggestion, context);
-      }
-      Candidate next = nextFixedCandidate(plan, tentative, currentItem);
-      if (next == null) {
-        return finish("FIXED_FLOW_COMPLETED", confidenceOf(suggestion), plan, tentative,
-            context.currentDifficulty());
-      }
-      InterviewDecision decision = new InterviewDecision(
-          NextStep.NEXT_TOPIC, boundedAdjustment(suggestion, context.currentDifficulty()),
-          next.item().competency(), "", "FIXED_FLOW_NEXT_SECTION", confidenceOf(suggestion));
-      TurnDirective directive = directive(
-          next.item(), adjust(context.currentDifficulty(), decision.difficultyAdjustment()), 0,
-          firstMissing(next.progress()), "FIXED_FLOW_NEXT_SECTION", coveredTopics(tentative));
-      return new StrategyOutcome(decision, directive, tentative);
-    }
-
     if (current.status() == CompetencyStatus.OPEN) {
       return followUp(tentative, currentItem, current, suggestion, context);
     }
@@ -113,27 +89,6 @@ public final class DefaultInterviewStrategy implements InterviewStrategy {
   }
 
   private record Candidate(InterviewPlanItem item, CompetencyProgress progress, String reason) {}
-
-  private boolean isFixedFlow(InterviewPlan plan) {
-    return plan.items().size() == 4
-        && "self_introduction".equals(plan.items().getFirst().stageId())
-        && "fundamentals".equals(plan.items().get(1).stageId())
-        && "project_experience".equals(plan.items().get(2).stageId())
-        && "scenario_reflection".equals(plan.items().get(3).stageId());
-  }
-
-  private Candidate nextFixedCandidate(
-      InterviewPlan plan, InterviewProgress progress, InterviewPlanItem currentItem) {
-    int currentIndex = plan.items().indexOf(currentItem);
-    for (int index = currentIndex + 1; index < plan.items().size(); index++) {
-      InterviewPlanItem item = plan.items().get(index);
-      CompetencyProgress candidate = progress.progressOf(item.competencyId());
-      if (candidate != null && candidate.turnCount() < item.turnBudget()) {
-        return new Candidate(item, candidate, "FIXED_FLOW_NEXT_SECTION");
-      }
-    }
-    return null;
-  }
 
   /** 按 stage 顺序寻找下一个未充分能力：先同 stage，再后续 stage，最后回查前面的 stage。 */
   private Candidate nextCandidate(

@@ -26,7 +26,6 @@ import interview.pilot.interview.domain.InterviewPlan;
 import interview.pilot.interview.domain.JobRequirements;
 import interview.pilot.interview.domain.NextStep;
 import interview.pilot.interview.domain.QuestionContext;
-import interview.pilot.interview.domain.QuestionDeck;
 import interview.pilot.interview.domain.SessionStatus;
 import interview.pilot.interview.domain.TurnStatus;
 import interview.pilot.interview.infrastructure.InterviewSessionEntity;
@@ -209,36 +208,20 @@ public class SubmitAnswerService {
           sid, claim.turnNo(), decision.nextStep(), decision.targetCompetency(),
           nextDifficulty, decision.confidence());
 
-      // NEXT_TOPIC questions are selected from the pre-generated deck. Only FOLLOW_UP
-      // questions need the online generator, which removes one model call from the common path.
-      RagContextSnapshot nextRag = RagContextSnapshot.notConfigured();
-      GeneratedQuestion nextQuestion = null;
+      // Retrieve next RAG snapshot after Java decision
+      RagContextSnapshot nextRag = finish
+          ? RagContextSnapshot.notConfigured()
+          : retrieveNextGrounding(user, sessionId, claim.turnNo(), context, nextDirective);
+
       long genStart = System.nanoTime();
-      if (!finish && decision.nextStep() == NextStep.NEXT_TOPIC) {
-        nextQuestion = context.questionDeck().next(
-            decision.targetCompetency(), context.usedQuestions());
-      }
-      if (!finish && nextQuestion == null) {
-        nextRag = retrieveNextGrounding(
-            user, sessionId, claim.turnNo(), context, nextDirective, context.answer());
-        nextQuestion = decision.nextStep() == NextStep.FOLLOW_UP
-            ? questionGenerator.generateFollowUpQuestion(
-                context.providerId(), context.modelName(),
-                new QuestionContext(
-                    context.plan(), context.resume(), context.requirements(), nextDifficulty,
-                    context.question(), context.answer(), context.skill()).withRag(
-                        GroundingUsePolicy.allowsQuestionGeneration(nextDirective)
-                            ? nextRag : nextRag.hiddenForDisallowedUse()),
-                decision, nextDirective)
-            : questionGenerator.nextQuestion(
+      GeneratedQuestion nextQuestion = finish ? null : questionGenerator.nextQuestion(
           context.providerId(), context.modelName(),
           new QuestionContext(
               context.plan(), context.resume(), context.requirements(), nextDifficulty,
-                context.question(), context.answer(), context.skill()).withRag(
-                    GroundingUsePolicy.allowsQuestionGeneration(nextDirective)
-                        ? nextRag : nextRag.hiddenForDisallowedUse()),
-            decision, nextDirective);
-      }
+              context.question(), context.answer(), context.skill()).withRag(
+                  GroundingUsePolicy.allowsQuestionGeneration(nextDirective)
+                      ? nextRag : nextRag.hiddenForDisallowedUse()),
+          decision, nextDirective);
       if (!finish) nextQuestion = questionGrounding.validate(
           nextQuestion, nextRag, nextDirective);
       if (!finish) nextRag = nextRag.withQuestion(nextQuestion);
@@ -343,7 +326,6 @@ public class SubmitAnswerService {
       profile = ResumeProfile.empty();
     }
     InterviewPlan plan = read(session.getPlanSnapshot(), InterviewPlan.class);
-    QuestionDeck questionDeck = readQuestionDeck(session.getQuestionDeckSnapshot(), current);
     JobRequirements requirements = read(job.getRequirementsSnapshot(), JobRequirements.class);
     SkillSnapshot skill = read(job.getSkillSnapshot(), SkillSnapshot.class);
     if (!containsAllCompetencies(plan.competencies(), requirements.competencies())) {
@@ -356,8 +338,7 @@ public class SubmitAnswerService {
         session.getProviderId(), session.getModelName(), session.getDifficulty(),
         current.getTargetCompetency(), current.getQuestionText(), current.getAnswerText(),
         plan, requirements, profile, skill, currentDirective,
-        historicalEvidence(allTurns, publicSessionId), questionDeck,
-        allTurns.stream().map(InterviewTurnEntity::getQuestionText).collect(java.util.stream.Collectors.toSet()),
+        historicalEvidence(allTurns, publicSessionId),
         completedTurns(allTurns, publicSessionId, plan));
   }
 
@@ -566,34 +547,21 @@ public class SubmitAnswerService {
     }
   }
 
-  private QuestionDeck readQuestionDeck(String snapshot, InterviewTurnEntity current) {
-    if (snapshot == null || snapshot.isBlank()) return QuestionDeck.of(
-        new GeneratedQuestion(current.getQuestionText(), current.getTargetCompetency()));
-    try {
-      QuestionDeck deck = objectMapper.readValue(snapshot, QuestionDeck.class);
-      if (deck == null || deck.questions().isEmpty()) throw new IllegalArgumentException();
-      return deck;
-    } catch (JacksonException | IllegalArgumentException exception) {
-      return QuestionDeck.of(
-          new GeneratedQuestion(current.getQuestionText(), current.getTargetCompetency()));
-    }
-  }
-
   private RagContextSnapshot retrieveNextGrounding(
       CurrentUser user, UUID sessionId, int currentTurnNo, WorkContext context,
-      TurnDirective nextDirective, String answer) {
+      TurnDirective nextDirective) {
     try {
       var session = sessions.findBySessionIdAndUserAccountId(sessionId, requireOwner(user))
           .orElse(null);
       if (session == null || session.getKnowledgeScopeSnapshot() == null) {
         return grounding.ground(null,
-            GroundingDirective.from(nextDirective, answer)).toRagContext();
+            GroundingDirective.from(nextDirective)).toRagContext();
       }
       var scope = objectMapper.readValue(
           session.getKnowledgeScopeSnapshot(), ValidatedKnowledgeScope.class);
       long ragStart = System.nanoTime();
       var result = grounding.ground(
-          scope, GroundingDirective.from(nextDirective, answer));
+          scope, GroundingDirective.from(nextDirective));
       long ragMs = (System.nanoTime() - ragStart) / 1_000_000;
       log.info("interview session={} turn={} step=grounding status={} chunks={} scores={} latency_ms={}",
           shortId(sessionId), currentTurnNo, result.status(),
@@ -630,8 +598,6 @@ public class SubmitAnswerService {
       SkillSnapshot skill,
       TurnDirective currentDirective,
       List<String> priorEvidence,
-      QuestionDeck questionDeck,
-      java.util.Set<String> usedQuestions,
       List<InterviewProgress.CompletedTurn> completedTurns) {
 
   }
