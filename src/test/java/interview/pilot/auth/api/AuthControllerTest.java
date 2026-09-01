@@ -45,6 +45,7 @@ import interview.pilot.common.ratelimit.RateLimiter;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeBaseJpaRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentJpaRepository;
+import interview.pilot.voice.infrastructure.QuestionSpeechRepository;
 import interview.pilot.voice.infrastructure.VoiceRecordingRepository;
 
 @SpringBootTest(properties = {
@@ -74,6 +75,7 @@ class AuthControllerTest {
   @MockitoBean KnowledgeDocumentJpaRepository knowledgeDocumentJpaRepository;
   @MockitoBean InterviewKnowledgeBaseRepository interviewKnowledgeBaseRepository;
   @MockitoBean VoiceRecordingRepository voiceRecordingRepository;
+  @MockitoBean QuestionSpeechRepository questionSpeechRepository;
 
   @Autowired MockMvc mvc;
   @Autowired PasswordEncoder passwordEncoder;

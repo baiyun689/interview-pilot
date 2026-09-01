@@ -37,6 +37,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.async.messaging.TaskMessagePublisher;
+import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.auth.application.CurrentUser;
 import interview.pilot.auth.infrastructure.UserAccountEntity;
 import interview.pilot.auth.infrastructure.UserAccountRepository;
@@ -61,6 +62,7 @@ import interview.pilot.interview.infrastructure.InterviewTurnRepository;
 import interview.pilot.interview.rag.RagStatus;
 import interview.pilot.voice.domain.VoiceErrorCodes;
 import interview.pilot.voice.domain.VoiceRecordingStatus;
+import interview.pilot.voice.infrastructure.QuestionSpeechRepository;
 import interview.pilot.voice.infrastructure.VoiceRecordingEntity;
 import interview.pilot.voice.infrastructure.VoiceRecordingRepository;
 import jakarta.persistence.EntityManager;
@@ -123,6 +125,12 @@ class FixedAnswerBindingIT {
   private VoiceRecordingRepository recordings;
 
   @Autowired
+  private QuestionSpeechRepository speeches;
+
+  @Autowired
+  private AsyncTaskRepository tasks;
+
+  @Autowired
   private PlatformTransactionManager transactionManager;
 
   @PersistenceContext
@@ -157,6 +165,8 @@ class FixedAnswerBindingIT {
         .thenReturn("如果本轮的追问超时了，你会怎么处理并说明理由？");
     attempts.deleteAll();
     recordings.deleteAll();
+    speeches.deleteAll(); // question_speech rows reference turns (V21 FK)
+    tasks.deleteAll(); // question-speech synthesis tasks reference the user
     turns.deleteAll();
     cards.deleteAll();
     sessions.deleteAll();

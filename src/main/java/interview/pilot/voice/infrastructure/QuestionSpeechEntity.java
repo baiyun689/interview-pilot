@@ -112,4 +112,32 @@ public class QuestionSpeechEntity {
     }
     status = target;
   }
+
+  /** PENDING → SYNTHESIZING: the listener's claim path (plan §11 step 2). The epoch is untouched. */
+  public void startSynthesis() {
+    moveTo(QuestionSpeechStatus.SYNTHESIZING);
+  }
+
+  /** SYNTHESIZING → READY with the synthesis result (plan §11 steps 4-5). */
+  public void completeSynthesis(
+      String providerRequestId, String storageKey, String contentType,
+      long sizeBytes, long durationMillis) {
+    moveTo(QuestionSpeechStatus.READY);
+    this.providerRequestId = providerRequestId;
+    this.storageKey = storageKey;
+    this.contentType = contentType;
+    this.sizeBytes = sizeBytes;
+    this.durationMillis = durationMillis;
+  }
+
+  /**
+   * PENDING/SYNTHESIZING → FAILED: a deterministic synthesis failure or retry exhaustion
+   * (plan §11 steps 7-8). PENDING covers the message that dies before the claim transaction
+   * ever ran — the pre-approved PENDING → FAILED transition, mirror of the recording's
+   * UPLOADED → FAILED markDead path.
+   */
+  public void failSynthesis(String error) {
+    moveTo(QuestionSpeechStatus.FAILED);
+    this.safeError = error;
+  }
 }

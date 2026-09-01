@@ -17,20 +17,24 @@ import interview.pilot.interview.infrastructure.InterviewQuestionCardRepository;
 import interview.pilot.interview.infrastructure.InterviewSessionRepository;
 import interview.pilot.interview.infrastructure.InterviewTurnEntity;
 import interview.pilot.interview.infrastructure.InterviewTurnRepository;
+import interview.pilot.voice.application.QuestionSpeechTaskCreator;
 
 @Service
 public class StartInterviewService {
   private final InterviewSessionRepository sessions;
   private final InterviewQuestionCardRepository cards;
   private final InterviewTurnRepository turns;
+  private final QuestionSpeechTaskCreator questionSpeeches;
 
   public StartInterviewService(
       InterviewSessionRepository sessions,
       InterviewQuestionCardRepository cards,
-      InterviewTurnRepository turns) {
+      InterviewTurnRepository turns,
+      QuestionSpeechTaskCreator questionSpeeches) {
     this.sessions = sessions;
     this.cards = cards;
     this.turns = turns;
+    this.questionSpeeches = questionSpeeches;
   }
 
   @Transactional
@@ -57,6 +61,9 @@ public class StartInterviewService {
     var first = turns.save(InterviewTurnEntity.asked(
         session.getId(), 1, InterviewPhase.SELF_INTRODUCTION,
         QuestionType.SELF_INTRODUCTION, card.getId(), card.getQuestionText()));
+    // Same transaction (plan §11): VOICE sessions with TTS configured get a question_speech
+    // row and its unique synthesis task; anything else is a no-op.
+    questionSpeeches.createForTurn(session, first);
     return response(sessionId, first, false);
   }
 

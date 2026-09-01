@@ -34,6 +34,7 @@ import interview.pilot.interview.infrastructure.InterviewKnowledgeBaseRepository
 import interview.pilot.auth.infrastructure.UserAccountRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeBaseJpaRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentJpaRepository;
+import interview.pilot.voice.infrastructure.QuestionSpeechRepository;
 import interview.pilot.voice.infrastructure.VoiceRecordingRepository;
 import org.springframework.aop.support.AopUtils;
 
@@ -92,6 +93,9 @@ class InterviewPilotApplicationTest {
 
   @MockitoBean
   private VoiceRecordingRepository voiceRecordingRepository;
+
+  @MockitoBean
+  private QuestionSpeechRepository questionSpeechRepository;
 
   @Autowired
   private ApplicationContext applicationContext;

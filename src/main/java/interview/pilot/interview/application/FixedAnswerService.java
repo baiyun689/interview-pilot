@@ -37,6 +37,7 @@ import interview.pilot.interview.infrastructure.InterviewSessionRepository;
 import interview.pilot.interview.infrastructure.InterviewTurnEntity;
 import interview.pilot.interview.infrastructure.InterviewTurnRepository;
 import interview.pilot.interview.rag.RagContextSnapshot;
+import interview.pilot.voice.application.QuestionSpeechTaskCreator;
 import interview.pilot.voice.domain.VoiceErrorCodes;
 import interview.pilot.voice.domain.VoiceRecordingStatus;
 import interview.pilot.voice.infrastructure.VoiceRecordingEntity;
@@ -56,6 +57,7 @@ public class FixedAnswerService {
   private final ObjectMapper objectMapper;
   private final TransactionTemplate transactions;
   private final VoiceRecordingRepository recordings;
+  private final QuestionSpeechTaskCreator questionSpeeches;
   private final FixedInterviewFlowPolicy flow = new FixedInterviewFlowPolicy();
 
   public FixedAnswerService(
@@ -68,7 +70,8 @@ public class FixedAnswerService {
       FollowUpGenerator followUps,
       ObjectMapper objectMapper,
       PlatformTransactionManager transactionManager,
-      VoiceRecordingRepository recordings) {
+      VoiceRecordingRepository recordings,
+      QuestionSpeechTaskCreator questionSpeeches) {
     this.sessions = sessions;
     this.turns = turns;
     this.cards = cards;
@@ -79,6 +82,7 @@ public class FixedAnswerService {
     this.objectMapper = objectMapper;
     this.transactions = new TransactionTemplate(transactionManager);
     this.recordings = recordings;
+    this.questionSpeeches = questionSpeeches;
   }
 
   public FixedAnswerClaim claim(
@@ -322,6 +326,10 @@ public class FixedAnswerService {
           work.next().kind() == NextKind.MAIN ? QuestionType.MAIN : QuestionType.FOLLOW_UP,
           work.next().sourceCardId(), nextQuestion);
       turns.save(nextTurn);
+      // Same transaction as the turn (plan §11): VOICE sessions with TTS configured get a
+      // question_speech row and its unique synthesis task for every next turn; the speech
+      // status never influences the answer flow (TTS failure is a degradable capability).
+      questionSpeeches.createForTurn(session, nextTurn);
       session.advanceTo(nextTurn.getTurnNo(), nextTurn.getQuestionType());
     }
     FixedAnswerResult result = new FixedAnswerResult(

@@ -19,14 +19,16 @@ import interview.pilot.interview.infrastructure.InterviewSessionEntity;
 import interview.pilot.interview.infrastructure.InterviewSessionRepository;
 import interview.pilot.interview.infrastructure.InterviewTurnEntity;
 import interview.pilot.interview.infrastructure.InterviewTurnRepository;
+import interview.pilot.voice.application.QuestionSpeechTaskCreator;
 
 class StartInterviewServiceTest {
   @Test
-  void locksTheSessionAndCreatesTheFixedSelfIntroduction() {
+  void locksTheSessionAndCreatesTheFixedSelfIntroductionWithItsSpeechTask() {
     var sessions = mock(InterviewSessionRepository.class);
     var cards = mock(InterviewQuestionCardRepository.class);
     var turns = mock(InterviewTurnRepository.class);
-    var service = new StartInterviewService(sessions, cards, turns);
+    var questionSpeeches = mock(QuestionSpeechTaskCreator.class);
+    var service = new StartInterviewService(sessions, cards, turns, questionSpeeches);
     UUID sessionId = UUID.randomUUID();
     var session = mock(InterviewSessionEntity.class);
     var card = mock(InterviewQuestionCardEntity.class);
@@ -48,14 +50,23 @@ class StartInterviewServiceTest {
     assertThat(response.idempotentReplay()).isFalse();
     verify(session).beginFixedInterview();
     verify(sessions).findForStart(sessionId, 3L);
+    // The speech row + synthesis task are created in the same transaction as the turn
+    // (Task 7): the creator is invoked with the freshly saved first turn.
+    org.mockito.ArgumentCaptor<InterviewTurnEntity> turnCaptor =
+        org.mockito.ArgumentCaptor.forClass(InterviewTurnEntity.class);
+    verify(questionSpeeches).createForTurn(org.mockito.ArgumentMatchers.eq(session),
+        turnCaptor.capture());
+    assertThat(turnCaptor.getValue().getQuestionText())
+        .isEqualTo(QuestionPreparationHandler.SELF_INTRODUCTION);
   }
 
   @Test
-  void repeatedStartReturnsThePersistedFirstTurn() {
+  void repeatedStartReturnsThePersistedFirstTurnWithoutCreatingAnotherSpeechRow() {
     var sessions = mock(InterviewSessionRepository.class);
     var turns = mock(InterviewTurnRepository.class);
+    var questionSpeeches = mock(QuestionSpeechTaskCreator.class);
     var service = new StartInterviewService(
-        sessions, mock(InterviewQuestionCardRepository.class), turns);
+        sessions, mock(InterviewQuestionCardRepository.class), turns, questionSpeeches);
     UUID sessionId = UUID.randomUUID();
     var session = mock(InterviewSessionEntity.class);
     var first = InterviewTurnEntity.asked(
@@ -71,5 +82,7 @@ class StartInterviewServiceTest {
 
     assertThat(response.idempotentReplay()).isTrue();
     assertThat(response.currentTurn().turnNo()).isEqualTo(1);
+    verify(questionSpeeches, org.mockito.Mockito.never())
+        .createForTurn(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
   }
 }

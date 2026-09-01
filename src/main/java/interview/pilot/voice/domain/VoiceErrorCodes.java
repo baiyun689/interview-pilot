@@ -19,6 +19,14 @@ public final class VoiceErrorCodes {
   public static final String VOICE_RECORDING_ALREADY_ATTACHED = "VOICE_RECORDING_ALREADY_ATTACHED";
 
   /**
+   * safe_error on FAILED question_speech rows: a deterministic synthesis failure (provider
+   * rejection, empty/unsupported audio, text drift) or retry exhaustion. Speech is a
+   * degradable playback capability — a FAILED speech never touches the turn or the session,
+   * and the question text remains fully answerable (plan §11).
+   */
+  public static final String VOICE_QUESTION_SPEECH_FAILED = "VOICE_QUESTION_SPEECH_FAILED";
+
+  /**
    * Voice and text submission fields mixed inconsistently (plan §8.4): a recordingId with
    * inputMode TEXT, inputMode VOICE without a recordingId, or a recordingId on a TEXT-mode
    * session. All are client bugs — the correct client never sends them — so the stable 409
