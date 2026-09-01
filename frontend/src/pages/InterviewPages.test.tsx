@@ -15,7 +15,8 @@ function json(body: unknown, status = 200) {
 
 const preset = {
   id: 'java-backend', displayName: 'Java 后端开发', description: 'Java 工程面试',
-  jobTitle: 'Java 后端开发工程师', jobDescription: '负责后端系统设计与开发',
+  jobTitle: 'Java 后端开发工程师',
+  jobDescription: '负责后端系统设计与开发\n熟悉 Java、JVM 与并发编程\n熟悉 Spring Boot 与事务边界\n熟悉 MySQL、Redis 与消息队列',
   presetVersion: 'sha256-version',
 }
 
@@ -70,6 +71,25 @@ describe('固定流程面试创建', () => {
       jobSource: { type: 'PRESET', presetId: 'java-backend' },
       difficulty: 'MEDIUM', interviewSize: 'DEEP', providerId: 'dashscope', knowledgeBaseIds: [],
     })
+  })
+
+  it('预设岗位以简洁的岗位需求卡片展示，不暴露服务端实现说明', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/api/resumes') || url.endsWith('/api/knowledge-bases')) return json([])
+      if (url.endsWith('/api/interview-presets')) return json([preset])
+      return json([{ id: 'dashscope', displayName: '通义千问', model: 'qwen-plus', enabled: true, defaultProvider: true }])
+    }))
+
+    renderRoute('/interviews/new', <InterviewCreatePage />, '/interviews/new')
+
+    expect(await screen.findByText('岗位概览')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Java 后端开发工程师' })).toBeInTheDocument()
+    expect(screen.getByText('岗位需求')).toBeInTheDocument()
+    expect(screen.getByText('熟悉 Java、JVM 与并发编程')).toBeInTheDocument()
+    expect(screen.getByText('熟悉 Spring Boot 与事务边界')).toBeInTheDocument()
+    expect(screen.getByText('熟悉 MySQL、Redis 与消息队列')).toBeInTheDocument()
+    expect(screen.queryByText(/服务端固化|不可修改/)).not.toBeInTheDocument()
   })
 
   it('自定义 JD 要求岗位名称和完整描述', async () => {

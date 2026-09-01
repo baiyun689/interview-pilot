@@ -83,6 +83,13 @@ export function InterviewCreatePage() {
   }
 
   const selectedPreset = presets.find((preset) => preset.id === values.presetId)
+  const presetRequirementLines = selectedPreset?.jobDescription
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean) ?? []
+  const presetRequirements = (presetRequirementLines.length > 1
+    ? presetRequirementLines.slice(1, 4)
+    : presetRequirementLines)
   return <section>
     <header className="page-header"><h1>创建 Java 后端面试</h1><p>先异步准备完整题库，准备完成后由你显式开始。面试过程中不进行即时评分。</p></header>
     <form className="interview-form" onSubmit={submit}>
@@ -93,7 +100,12 @@ export function InterviewCreatePage() {
       </div></fieldset>
       {values.sourceType === 'PRESET' ? <>
         <label>预设岗位<select value={values.presetId} onChange={(event) => setValues({ ...values, presetId: event.target.value })}>{presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.displayName}</option>)}</select></label>
-        {selectedPreset && <div className="state-card"><strong>{selectedPreset.jobTitle}</strong><p>{selectedPreset.description}</p><p className="empty-copy">岗位内容由服务端固化，创建页不可修改。</p></div>}
+        {selectedPreset && <section className="preset-job-card" aria-label="岗位概览">
+          <div className="preset-job-card-header"><span className="preset-job-card-eyebrow">岗位概览</span><span className="preset-job-card-badge">预设岗位</span></div>
+          <h2>{selectedPreset.jobTitle}</h2>
+          <p className="preset-job-card-summary">{selectedPreset.description}</p>
+          {presetRequirements.length > 0 && <div className="preset-job-card-requirement"><span>岗位需求</span><ul>{presetRequirements.map((requirement) => <li key={requirement}>{requirement}</li>)}</ul></div>}
+        </section>}
       </> : <>
         <label>岗位名称<input value={values.jobTitle} maxLength={200} onChange={(event) => setValues({ ...values, jobTitle: event.target.value })} required /></label>
         <label>完整 JD<textarea value={values.jobDescription} maxLength={20_000} rows={10} onChange={(event) => setValues({ ...values, jobDescription: event.target.value })} required /></label>

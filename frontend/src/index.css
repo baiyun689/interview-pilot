@@ -908,6 +908,89 @@ a:focus-visible {
 .kb-select-item { display: flex; align-items: center; gap: 8px; padding: 9px 13px; border: 1px solid var(--slate-300); border-radius: 10px; cursor: pointer; font-size: 13px; background: var(--white); transition: border-color 140ms ease, background 140ms ease; }
 .kb-select-item:hover { border-color: #c7d2fe; }
 .kb-select-item.kb-selected { border-color: var(--indigo-600); background: var(--indigo-100); }
+
+.preset-job-card {
+  padding: 24px 28px;
+  border: 1px solid #dbe3f4;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #f7f9ff 0%, #ffffff 62%);
+  box-shadow: 0 12px 30px rgb(36 59 115 / 7%);
+}
+
+.preset-job-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.preset-job-card-eyebrow {
+  color: var(--indigo-600);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: .08em;
+}
+
+.preset-job-card-badge {
+  padding: 4px 9px;
+  color: #4338ca;
+  background: #eef2ff;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.preset-job-card h2 {
+  margin: 12px 0 7px;
+  color: var(--slate-900);
+  font-size: 21px;
+  line-height: 1.35;
+}
+
+.preset-job-card-summary {
+  margin: 0;
+  color: var(--slate-600);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.preset-job-card-requirement {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 14px;
+  margin-top: 19px;
+  padding-top: 17px;
+  border-top: 1px solid #e4eaf5;
+}
+
+.preset-job-card-requirement > span {
+  color: var(--slate-800);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.preset-job-card-requirement ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--slate-600);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.preset-job-card-requirement li::before {
+  content: '·';
+  margin-right: 7px;
+  color: var(--indigo-600);
+  font-weight: 800;
+}
+
+@media (max-width: 640px) {
+  .preset-job-card { padding: 20px; }
+  .preset-job-card-requirement { grid-template-columns: 1fr; gap: 5px; }
+}
 .kb-select-name { color: var(--slate-700); font-weight: 650; }
 .kb-select-count { color: var(--slate-500); font-size: 12px; white-space: nowrap; }
 
