@@ -68,6 +68,8 @@ export interface VoiceRecorderOptions {
 export const DEFAULT_MAX_RECORDING_SECONDS = 300
 export const DEFAULT_WARNING_SECONDS = 10
 export const DEFAULT_TICK_MS = 200
+/** stop() 等待 onstop 的兜底超时；到期仍未触发则以已收 chunk 完成停止 */
+const STOP_TIMEOUT_MS = 3_000
 
 /** MediaRecorder 最小可用面（运行时只依赖这些成员，方便注入假实现）。 */
 interface RecorderLike {
@@ -82,6 +84,12 @@ interface RecorderLike {
 }
 
 type StopReason = 'manual' | 'auto' | 'discard' | 'error'
+
+interface StopPending {
+  promise: Promise<Blob>
+  resolve: (blob: Blob) => void
+  timer?: number
+}
 
 /** 时域采样 RMS 音量（0..1）；采样值为无符号 8 位 PCM。 */
 export function computeLevel(samples: Uint8Array): number {
@@ -167,7 +175,10 @@ export function useVoiceRecorder(options?: VoiceRecorderOptions): VoiceRecorderC
   const liveRef = useRef(true)
   /** 每次 reset/卸载自增；stop 的异步 onstop 若发现代数过期则丢弃状态写入 */
   const generationRef = useRef(0)
-  const stopResolveRef = useRef<((blob: Blob) => void) | null>(null)
+  /** 挂起的 stop 及其兜底定时器；onstop 到达或超时后清算 */
+  const stopPendingRef = useRef<StopPending | null>(null)
+  /** 本次录音的 stop 是否已清算（onstop/超时/丢弃只允许清算一次） */
+  const stopFinalizedRef = useRef(false)
   const tickRef = useRef<number | null>(null)
   const analyserRef = useRef<{
     ctx: AudioContext
@@ -228,39 +239,55 @@ export function useVoiceRecorder(options?: VoiceRecorderOptions): VoiceRecorderC
     transition('ERROR')
   }, [cleanupAnalyser, stopTick, transition])
 
-  /** 停止 MediaRecorder；onstop 到达时按 reason 决定是否产出 Blob（计划 §13.3）。 */
-  const stopRecorder = useCallback((reason: StopReason) => {
+  /**
+   * 清算一次停止：无论 onstop 正常到达、超时兜底还是 stop() 抛异常，都只会
+   * 执行一次（stopFinalizedRef 防重）。按 reason 决定是否产出 Blob 状态（计划 §13.3）：
+   * discard/error 不产出；manual/auto 在代数未过期且组件存活时产出。
+   */
+  const materializeStop = useCallback((reason: StopReason, generation: number) => {
+    if (stopFinalizedRef.current) return
+    stopFinalizedRef.current = true
+    stopTick()
+    cleanupAnalyser()
+    const mime = mimeRef.current ?? 'audio/webm'
+    const audio = new Blob(chunksRef.current, { type: mime })
+    const pending = stopPendingRef.current
+    stopPendingRef.current = null
+    if (pending?.timer !== undefined) window.clearTimeout(pending.timer)
+    const materialize = reason !== 'discard' && reason !== 'error'
+    const fresh = generationRef.current === generation
+    if (materialize && fresh && liveRef.current) {
+      blobRef.current = audio
+      setBlob(audio)
+      const url = URL.createObjectURL(audio)
+      blobUrlRef.current = url
+      setBlobUrl(url)
+      setElapsedMs(Math.min(elapsedNow(), maxMsRef.current))
+      setNearLimit(false)
+      if (reason === 'auto') {
+        autoStoppedRef.current = true
+        setAutoStopped(true)
+      }
+      transition('RECORDED')
+    }
+    pending?.resolve(audio)
+  }, [cleanupAnalyser, elapsedNow, stopTick, transition])
+
+  /**
+   * 停止 MediaRecorder。recorder.stop() 在 recorder 已失效（致命错误后）时抛
+   * InvalidStateError——此时同步执行清算，保证 cleanup 与状态迁移必然发生。
+   */
+  const stopRecorder = useCallback((reason: StopReason, generation = generationRef.current) => {
     const recorder = recorderRef.current
     if (!recorder) return
     recorderRef.current = null
-    const generation = generationRef.current
-    recorder.onstop = () => {
-      stopTick()
-      cleanupAnalyser()
-      const mime = mimeRef.current ?? 'audio/webm'
-      const audio = new Blob(chunksRef.current, { type: mime })
-      const resolve = stopResolveRef.current
-      stopResolveRef.current = null
-      const materialize = reason !== 'discard' && reason !== 'error'
-      const fresh = generationRef.current === generation
-      if (materialize && fresh && liveRef.current) {
-        blobRef.current = audio
-        setBlob(audio)
-        const url = URL.createObjectURL(audio)
-        blobUrlRef.current = url
-        setBlobUrl(url)
-        setElapsedMs(Math.min(elapsedNow(), maxMsRef.current))
-        setNearLimit(false)
-        if (reason === 'auto') {
-          autoStoppedRef.current = true
-          setAutoStopped(true)
-        }
-        transition('RECORDED')
-      }
-      resolve?.(audio)
+    recorder.onstop = () => materializeStop(reason, generation)
+    try {
+      recorder.stop()
+    } catch {
+      materializeStop(reason, generation)
     }
-    recorder.stop()
-  }, [cleanupAnalyser, elapsedNow, stopTick, transition])
+  }, [materializeStop])
 
   const setupAnalyser = useCallback((stream: MediaStream) => {
     cleanupAnalyser()
@@ -312,12 +339,15 @@ export function useVoiceRecorder(options?: VoiceRecorderOptions): VoiceRecorderC
       fail('UNAVAILABLE', ERROR_MESSAGES.UNAVAILABLE)
       return
     }
+    // 记录发起时的代数：请求权限期间若发生 reset/卸载，代数的变化会让本次
+    // start 在授权落地后放弃（评审 I2：start → reset → 授权 → 麦克风保持开启）
+    const generation = generationRef.current
     inFlightRef.current = true
     setError(null)
     transition('REQUESTING_PERMISSION')
     try {
       const stream = await env.getUserMedia({ audio: true })
-      if (!liveRef.current) {
+      if (!liveRef.current || generationRef.current !== generation) {
         stopAllTracks(stream)
         return
       }
@@ -331,8 +361,15 @@ export function useVoiceRecorder(options?: VoiceRecorderOptions): VoiceRecorderC
         fail('UNAVAILABLE', ERROR_MESSAGES.UNAVAILABLE)
         return
       }
+      if (!liveRef.current || generationRef.current !== generation) {
+        // 构造成功的极短窗口内仍可能被 reset/卸载追上：停止 tracks 并丢弃未启动的 recorder
+        stopAllTracks(stream)
+        streamRef.current = null
+        return
+      }
       mimeRef.current = capability.mimeType
       chunksRef.current = []
+      stopFinalizedRef.current = false
       recorderRef.current = recorder
       recorder.ondataavailable = (event) => {
         if (event.data?.size) chunksRef.current.push(event.data)
@@ -375,12 +412,20 @@ export function useVoiceRecorder(options?: VoiceRecorderOptions): VoiceRecorderC
     if (stateRef.current !== 'RECORDING' && stateRef.current !== 'PAUSED') {
       return Promise.reject(new Error('NOT_RECORDING'))
     }
-    const pending = new Promise<Blob>((resolve) => {
-      stopResolveRef.current = resolve
-    })
-    stopRecorder('manual')
-    return pending
-  }, [stopRecorder])
+    const existing = stopPendingRef.current
+    if (existing) return existing.promise // 评审 M1：重复 stop 返回同一挂起 Promise
+    const generation = generationRef.current
+    const entry = {} as StopPending
+    entry.promise = new Promise<Blob>((resolve) => { entry.resolve = resolve })
+    stopPendingRef.current = entry
+    // 评审 M2：onstop 丢失时超时兜底，用已收 chunk 完成停止
+    entry.timer = window.setTimeout(() => {
+      if (stopPendingRef.current !== entry) return
+      materializeStop('manual', generation)
+    }, STOP_TIMEOUT_MS)
+    stopRecorder('manual', generation)
+    return entry.promise
+  }, [materializeStop, stopRecorder])
 
   const reset = useCallback(() => {
     generationRef.current += 1
@@ -411,19 +456,25 @@ export function useVoiceRecorder(options?: VoiceRecorderOptions): VoiceRecorderC
   }, [cleanupAnalyser, stopRecorder, stopTick, transition])
 
   // 卸载清理：停止所有 tracks（不留麦克风指示灯）、撤销 Object URL、断开分析节点；
-  // 录音中卸载直接丢弃录音（见文件头设计决策 3）
-  useEffect(() => () => {
-    liveRef.current = false
-    generationRef.current += 1
-    if (recorderRef.current) stopRecorder('discard')
-    stopAllTracks(streamRef.current)
-    streamRef.current = null
-    if (blobUrlRef.current) {
-      URL.revokeObjectURL(blobUrlRef.current)
-      blobUrlRef.current = null
+  // 录音中卸载直接丢弃录音（见文件头设计决策 3）。
+  // StrictMode（开发模式）会执行 effect → cleanup → effect 且保留 refs，因此必须
+  // 在 effect 主体恢复 liveRef，否则 cleanup 置 false 后 start() 将永远卡在
+  // REQUESTING_PERMISSION（评审 C1）。
+  useEffect(() => {
+    liveRef.current = true
+    return () => {
+      liveRef.current = false
+      generationRef.current += 1
+      if (recorderRef.current) stopRecorder('discard')
+      stopAllTracks(streamRef.current)
+      streamRef.current = null
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current)
+        blobUrlRef.current = null
+      }
+      stopTick()
+      cleanupAnalyser()
     }
-    stopTick()
-    cleanupAnalyser()
   }, [cleanupAnalyser, stopRecorder, stopTick])
 
   return useMemo<VoiceRecorderController>(() => ({

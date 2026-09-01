@@ -20,6 +20,8 @@ export class FakeMediaRecorder {
   static instances: FakeMediaRecorder[] = []
   /** 非 0 时 stop() 延迟触发 onstop（模拟真实浏览器异步 onstop，用于竞态测试）。 */
   static deferStopMs = 0
+  /** 置位后 stop() 不触发 onstop（模拟 onstop 丢失，用于超时兜底测试）。 */
+  static suppressStop = false
   state: 'inactive' | 'recording' | 'paused' = 'inactive'
   ondataavailable: ((event: { data: Blob }) => void) | null = null
   onstop: (() => void) | null = null
@@ -33,10 +35,16 @@ export class FakeMediaRecorder {
   pause() { this.state = 'paused' }
   resume() { this.state = 'recording' }
   stop() {
+    // 与真实 MediaRecorder 对齐：inactive 状态下 stop() 抛 InvalidStateError
+    //（致命错误后的 recorder 已失效，对应评审 I1 场景）
+    if (this.state === 'inactive') {
+      throw new DOMException('InvalidStateError', 'InvalidStateError')
+    }
     this.state = 'inactive'
     this.ondataavailable?.({
       data: new Blob(['fake-audio'], { type: this.options?.mimeType ?? 'audio/webm' }),
     })
+    if (FakeMediaRecorder.suppressStop) return
     if (FakeMediaRecorder.deferStopMs > 0) {
       setTimeout(() => this.onstop?.(), FakeMediaRecorder.deferStopMs)
     } else {
