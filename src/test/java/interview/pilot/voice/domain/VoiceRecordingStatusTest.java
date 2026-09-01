@@ -12,6 +12,7 @@ class VoiceRecordingStatusTest {
   void allowsOnlyTheDocumentedLegalTransitions() {
     List<Step> legal = List.of(
         new Step(VoiceRecordingStatus.RECEIVING, VoiceRecordingStatus.UPLOADED),
+        new Step(VoiceRecordingStatus.RECEIVING, VoiceRecordingStatus.FAILED),
         new Step(VoiceRecordingStatus.RECEIVING, VoiceRecordingStatus.DISCARDED),
         new Step(VoiceRecordingStatus.UPLOADED, VoiceRecordingStatus.TRANSCRIBING),
         new Step(VoiceRecordingStatus.TRANSCRIBING, VoiceRecordingStatus.READY),

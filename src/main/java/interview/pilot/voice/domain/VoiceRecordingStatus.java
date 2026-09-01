@@ -11,7 +11,7 @@ public enum VoiceRecordingStatus {
 
   public boolean canTransitionTo(VoiceRecordingStatus target) {
     return switch (this) {
-      case RECEIVING -> target == UPLOADED || target == DISCARDED;
+      case RECEIVING -> target == UPLOADED || target == FAILED || target == DISCARDED;
       case UPLOADED -> target == TRANSCRIBING;
       case TRANSCRIBING -> target == READY || target == FAILED;
       case READY -> target == ATTACHED || target == DISCARDED;
