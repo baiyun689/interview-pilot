@@ -23,6 +23,7 @@ import interview.pilot.knowledge.infrastructure.KnowledgeDocumentJpaRepository;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 import interview.pilot.voice.config.VoiceProperties;
 import interview.pilot.voice.infrastructure.AudioProbe;
+import interview.pilot.voice.infrastructure.VoiceRecordingRepository;
 import interview.pilot.voice.storage.VoiceMediaStore;
 
 /** Pins nested app.voice.asr.* / app.voice.tts.* placeholder binding end to end. */
@@ -90,6 +91,9 @@ class VoiceEnabledBindingTest {
 
   @MockitoBean
   private KnowledgeDocumentJpaRepository knowledgeDocumentJpaRepository;
+
+  @MockitoBean
+  private VoiceRecordingRepository voiceRecordingRepository;
 
   @Autowired
   private VoiceProperties voiceProperties;

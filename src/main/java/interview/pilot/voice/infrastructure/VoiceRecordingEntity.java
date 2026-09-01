@@ -121,4 +121,40 @@ public class VoiceRecordingEntity {
     }
     status = target;
   }
+
+  /** RECEIVING → UPLOADED: the media is stored at the immutable key and its metadata is fixed. */
+  public void acceptUpload(
+      String storageKey, String contentType, long sizeBytes, long durationMillis, String sha256) {
+    moveTo(VoiceRecordingStatus.UPLOADED);
+    this.storageKey = storageKey;
+    this.contentType = contentType;
+    this.sizeBytes = sizeBytes;
+    this.durationMillis = durationMillis;
+    this.sha256 = sha256;
+  }
+
+  /**
+   * RECEIVING → FAILED: the upload was rejected after phase 1. {@code contentSha256} is the
+   * digest of the fully streamed content when it was computable (probe/duration rejections),
+   * which lets an identical-bytes replay of the requestId return this failure instead of
+   * REQUEST_ID_CONFLICT; a size rejection interrupts streaming so the digest stays null.
+   */
+  public void failUpload(String error, String contentSha256) {
+    moveTo(VoiceRecordingStatus.FAILED);
+    this.safeError = error;
+    if (contentSha256 != null) {
+      this.sha256 = contentSha256;
+    }
+  }
+
+  /** FAILED → TRANSCRIBING with a fenced execution epoch (V9 precedent): stale messages lose. */
+  public void beginTranscription() {
+    moveTo(VoiceRecordingStatus.TRANSCRIBING);
+    executionEpoch++;
+  }
+
+  /** RECEIVING/READY/FAILED → DISCARDED: the recording can never be bound to an answer. */
+  public void discard() {
+    moveTo(VoiceRecordingStatus.DISCARDED);
+  }
 }
