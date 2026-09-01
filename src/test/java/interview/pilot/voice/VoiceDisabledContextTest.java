@@ -43,6 +43,8 @@ import interview.pilot.knowledge.infrastructure.KnowledgeBaseJpaRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentJpaRepository;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 import interview.pilot.voice.config.VoiceProperties;
+import interview.pilot.voice.infrastructure.AudioProbe;
+import interview.pilot.voice.storage.VoiceMediaStore;
 
 @SpringBootTest(properties = {
     "VOICE_ENABLED=false",
@@ -122,6 +124,12 @@ class VoiceDisabledContextTest {
   @Autowired
   private MockMvc mockMvc;
 
+  @Autowired(required = false)
+  private VoiceMediaStore voiceMediaStore;
+
+  @Autowired(required = false)
+  private AudioProbe audioProbe;
+
   @BeforeEach
   void allowRateLimits() {
     when(rateLimiter.allowFixedWindow(any(), anyInt(), any(Duration.class))).thenReturn(true);
@@ -132,6 +140,12 @@ class VoiceDisabledContextTest {
     assertThat(voiceProperties.enabled()).isFalse();
     assertThat(voiceProperties.asrConfigured()).isFalse();
     assertThat(voiceProperties.ttsConfigured()).isFalse();
+  }
+
+  @Test
+  void doesNotCreateMediaBeansWhenVoiceIsDisabled() {
+    assertThat(voiceMediaStore).isNull();
+    assertThat(audioProbe).isNull();
   }
 
   @Test

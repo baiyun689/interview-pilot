@@ -22,11 +22,13 @@ import interview.pilot.knowledge.infrastructure.KnowledgeBaseJpaRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentJpaRepository;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 import interview.pilot.voice.config.VoiceProperties;
+import interview.pilot.voice.infrastructure.AudioProbe;
+import interview.pilot.voice.storage.VoiceMediaStore;
 
 /** Pins nested app.voice.asr.* / app.voice.tts.* placeholder binding end to end. */
 @SpringBootTest(properties = {
     "VOICE_ENABLED=true",
-    "VOICE_FILES_ROOT=./data/voice",
+    "VOICE_FILES_ROOT=build/voice-test-files",
     "VOICE_MAX_UPLOAD_BYTES=8388608",
     "VOICE_MAX_RECORDING_DURATION=5m",
     "VOICE_MEDIA_RETENTION=7d",
@@ -91,6 +93,18 @@ class VoiceEnabledBindingTest {
 
   @Autowired
   private VoiceProperties voiceProperties;
+
+  @Autowired
+  private VoiceMediaStore voiceMediaStore;
+
+  @Autowired
+  private AudioProbe audioProbe;
+
+  @Test
+  void exposesTheMediaStoreAndProbeWhenVoiceIsEnabled() {
+    assertThat(voiceMediaStore).isNotNull();
+    assertThat(audioProbe).isNotNull();
+  }
 
   @Test
   void bindsNestedVoiceConfigurationWhenEnabled() {
