@@ -74,6 +74,18 @@ class VoiceCapabilitiesControllerTest {
   }
 
   @Test
+  void clampsGarbageLimitsToZeroWhenVoiceIsDisabled() throws Exception {
+    mockMvc = MockMvcBuilders.standaloneSetup(new VoiceCapabilitiesController(
+        new VoiceProperties(
+            false, null, -5, Duration.ofMinutes(-5), Duration.ZERO, null, null))).build();
+
+    mockMvc.perform(get("/api/voice/capabilities"))
+        .andExpect(jsonPath("$.enabled").value(false))
+        .andExpect(jsonPath("$.maxRecordingSeconds").value(0))
+        .andExpect(jsonPath("$.maxUploadBytes").value(0));
+  }
+
+  @Test
   void neverExposesCredentialsOrProviderAddresses() throws Exception {
     mockMvc.perform(get("/api/voice/capabilities"))
         .andExpect(jsonPath("$.*").value(org.hamcrest.Matchers

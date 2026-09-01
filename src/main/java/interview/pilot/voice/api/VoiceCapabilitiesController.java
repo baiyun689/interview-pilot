@@ -27,7 +27,7 @@ public class VoiceCapabilitiesController {
         properties.enabled(),
         VoiceMimeTypes.SUPPORTED,
         properties.maxRecordingSeconds(),
-        properties.maxUploadBytes(),
+        Math.max(0, properties.maxUploadBytes()),
         properties.ttsConfigured());
   }
 }

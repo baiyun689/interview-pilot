@@ -52,17 +52,9 @@ public record VoiceProperties(
     if (asr == null) {
       throw new IllegalArgumentException("Voice ASR configuration is required");
     }
-    if (!hasText(asr.provider())) {
-      throw new IllegalArgumentException("Voice ASR provider is required");
-    }
-    if (!hasText(asr.model())) {
-      throw new IllegalArgumentException("Voice ASR model is required");
-    }
-    if (!hasText(asr.baseUrl())) {
-      throw new IllegalArgumentException("Voice ASR base URL is required");
-    }
-    if (!hasText(asr.apiKey()) && !hasText(asr.workspaceId())) {
-      throw new IllegalArgumentException("Voice ASR requires an API key or workspace ID");
+    if (!asrComplete(asr)) {
+      throw new IllegalArgumentException(
+          "Voice ASR requires a provider, model, base URL, and an API key or workspace ID");
     }
     if (asr.timeout() == null || asr.timeout().isZero() || asr.timeout().isNegative()) {
       throw new IllegalArgumentException("Voice ASR timeout must be positive");
@@ -74,7 +66,12 @@ public record VoiceProperties(
 
   /** ASR is required for voice input; TTS stays a degradable playback capability. */
   public boolean asrConfigured() {
-    return enabled && asr != null
+    return enabled && asrComplete(asr);
+  }
+
+  /** Canonical ASR readiness predicate shared by startup validation and runtime checks. */
+  private static boolean asrComplete(Asr asr) {
+    return asr != null
         && hasText(asr.provider())
         && hasText(asr.model())
         && hasText(asr.baseUrl())
@@ -90,11 +87,14 @@ public record VoiceProperties(
 
   public int maxRecordingSeconds() {
     long seconds = maxRecordingDuration == null ? 0 : maxRecordingDuration.toSeconds();
-    return (int) Math.min(seconds, Integer.MAX_VALUE);
+    return (int) Math.max(0, Math.min(seconds, Integer.MAX_VALUE));
   }
 
   /** Immutable creation-time snapshot of the voice configuration. */
   public VoiceSnapshot toSnapshot() {
+    if (!asrConfigured()) {
+      throw new IllegalStateException("Voice ASR is not configured");
+    }
     return new VoiceSnapshot(
         VoiceSnapshot.SCHEMA_VERSION,
         asr.provider(),

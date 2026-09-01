@@ -90,7 +90,7 @@ class VoicePropertiesTest {
             " ", "https://dashscope.aliyuncs.com/api/v1", "", "sk-test", "fun-asr-flash-2026-06-15",
             Duration.ofSeconds(60))))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("ASR provider");
+        .hasMessageContaining("Voice ASR requires");
   }
 
   @Test
@@ -100,7 +100,7 @@ class VoicePropertiesTest {
             "dashscope", "https://dashscope.aliyuncs.com/api/v1", "", "sk-test", "  ",
             Duration.ofSeconds(60))))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("ASR model");
+        .hasMessageContaining("Voice ASR requires");
   }
 
   @Test
@@ -110,7 +110,7 @@ class VoicePropertiesTest {
             "dashscope", "", "", "sk-test", "fun-asr-flash-2026-06-15",
             Duration.ofSeconds(60))))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("base URL");
+        .hasMessageContaining("Voice ASR requires");
   }
 
   @Test
@@ -119,7 +119,7 @@ class VoicePropertiesTest {
         true, Path.of("./data/voice"), 8_388_608, Duration.ofMinutes(5), Duration.ofDays(7),
         null, null))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("ASR");
+        .hasMessageContaining("ASR configuration is required");
   }
 
   @Test
@@ -205,6 +205,23 @@ class VoicePropertiesTest {
         asrComplete(), null).toSnapshot();
 
     assertThat(snapshot.maxRecordingSeconds()).isEqualTo(120);
+  }
+
+  @Test
+  void snapshotRefusesToBuildWhenAsrIsNotConfigured() {
+    assertThatThrownBy(() -> new VoiceProperties(
+        false, Path.of("./data/voice"), 8_388_608, Duration.ofMinutes(5), Duration.ofDays(7),
+        asrComplete(), null).toSnapshot())
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("not configured");
+  }
+
+  @Test
+  void disabledGarbageLimitsNeverAdvertiseNegativeValues() {
+    var properties = new VoiceProperties(
+        false, null, -5, Duration.ofMinutes(-5), Duration.ZERO, null, null);
+
+    assertThat(properties.maxRecordingSeconds()).isZero();
   }
 
   private static VoiceProperties withAsr(VoiceProperties.Asr asr) {
