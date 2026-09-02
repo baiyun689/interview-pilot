@@ -17,6 +17,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
@@ -141,6 +143,10 @@ class VoiceDisabledContextTest {
   @Autowired(required = false)
   private SpeechRecognizer speechRecognizer;
 
+  @Autowired(required = false)
+  @Qualifier("voiceMediaHealthIndicator")
+  private HealthIndicator voiceMediaHealthIndicator;
+
   @BeforeEach
   void allowRateLimits() {
     when(rateLimiter.allowFixedWindow(any(), anyInt(), any(Duration.class))).thenReturn(true);
@@ -158,6 +164,9 @@ class VoiceDisabledContextTest {
     assertThat(voiceMediaStore).isNull();
     assertThat(audioProbe).isNull();
     assertThat(speechRecognizer).isNull();
+    // The health indicator only exists when voice is enabled: a disabled voice must
+    // never degrade the health endpoint (plan §15).
+    assertThat(voiceMediaHealthIndicator).isNull();
   }
 
   @Test

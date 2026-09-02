@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -111,11 +113,20 @@ class VoiceEnabledBindingTest {
   @Autowired
   private SpeechRecognizer speechRecognizer;
 
+  @Autowired(required = false)
+  @Qualifier("voiceMediaHealthIndicator")
+  private HealthIndicator voiceMediaHealthIndicator;
+
   @Test
   void exposesTheMediaStoreAndProbeWhenVoiceIsEnabled() {
     assertThat(voiceMediaStore).isNotNull();
     assertThat(audioProbe).isNotNull();
     assertThat(speechRecognizer).isNotNull();
+  }
+
+  @Test
+  void exposesTheVoiceHealthIndicatorWhenVoiceIsEnabled() {
+    assertThat(voiceMediaHealthIndicator).isNotNull();
   }
 
   @Test
