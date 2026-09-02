@@ -1,5 +1,7 @@
 package interview.pilot.voice.config;
 
+import java.time.Clock;
+
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -9,6 +11,7 @@ import org.springframework.web.client.RestClient;
 
 import interview.pilot.voice.application.SpeechRecognizer;
 import interview.pilot.voice.application.SpeechSynthesizer;
+import interview.pilot.voice.cleanup.VoiceCleanupProperties;
 import interview.pilot.voice.infrastructure.AudioProbe;
 import interview.pilot.voice.infrastructure.DashScopeSpeechRecognizer;
 import interview.pilot.voice.infrastructure.DashScopeSpeechSynthesizer;
@@ -18,8 +21,19 @@ import interview.pilot.voice.storage.VoiceMediaStore;
 import tools.jackson.databind.ObjectMapper;
 
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(VoiceProperties.class)
+@EnableConfigurationProperties({VoiceProperties.class, VoiceCleanupProperties.class})
 public class VoiceConfiguration {
+
+  /**
+   * Clock seam for the cleanup sweeper (Task 11): the only consumer, so a test-provided
+   * {@code @Primary} mutable clock can drive expiry/grace without touching any other component
+   * (the upload/listener paths keep their own {@code Clock.systemUTC()}).
+   */
+  @Bean
+  @ConditionalOnProperty(prefix = "app.voice", name = "enabled", havingValue = "true")
+  Clock voiceCleanupClock() {
+    return Clock.systemUTC();
+  }
 
   /**
    * Media beans exist only when voice is enabled: {@code VoiceProperties} then guarantees a

@@ -38,4 +38,14 @@ public interface AsyncTaskRepository extends JpaRepository<AsyncTaskEntity, Long
       @Param("status") AsyncTaskStatus status,
       @Param("cutoff") Instant cutoff,
       Pageable pageable);
+
+  /**
+   * Stuck-task recovery (Task 11): bounded batch of voice tasks that were PUBLISHED but have
+   * seen no row activity since {@code before}. {@code updated_at} moves on every listener
+   * touch (claim, retryable failure evidence, terminal result), so a healthy pipeline is never
+   * older than the delayed-retry ladder — an old row means the message is gone and the
+   * recording/speech is stuck (pending dispatcher only rescans PENDING).
+   */
+  List<AsyncTaskEntity> findByTaskTypeAndStatusAndUpdatedAtBefore(
+      AsyncTaskType type, AsyncTaskStatus status, Instant before, Pageable pageable);
 }

@@ -102,6 +102,13 @@ app:
     max-upload-bytes: ${VOICE_MAX_UPLOAD_BYTES:8388608}
     max-recording-duration: ${VOICE_MAX_RECORDING_DURATION:5m}
     retention: ${VOICE_MEDIA_RETENTION:7d}
+    cleanup-interval: ${VOICE_CLEANUP_INTERVAL:PT10M}
+    cleanup-initial-delay: ${VOICE_CLEANUP_INITIAL_DELAY:PT2M}
+    cleanup:
+      batch-size: ${VOICE_CLEANUP_BATCH_SIZE:50}
+      stuck-task-threshold: ${VOICE_CLEANUP_STUCK_TASK_THRESHOLD:PT30M}
+      orphan-grace: ${VOICE_CLEANUP_ORPHAN_GRACE:PT24H}
+      claim-ttl: ${VOICE_CLEANUP_CLAIM_TTL:PT30M}
     asr:
       provider: dashscope
       base-url: ${DASHSCOPE_SPEECH_BASE_URL:https://dashscope.aliyuncs.com/api/v1}
