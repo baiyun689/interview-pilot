@@ -88,6 +88,11 @@ export const TRANSCRIPTION_POLL_MS = 1_000
 export const SPEECH_POLL_MS = 1_500
 /** 转写状态连续查询失败 N 次后视为不可达，停止轮询并报错 */
 const MAX_POLL_ERRORS = 5
+/** 本轮处理失败（turn FAILED）时需要清空的语音阶段（旧录音尝试的产物）。
+ *  IDLE/RECORDING/RECORDED 表示用户已重新开始新一轮尝试，不打断。 */
+const RESETTABLE_ON_FAILED: ReadonlySet<VoiceTurnPhase> = new Set([
+  'UPLOADING', 'TRANSCRIBING', 'TRANSCRIPT_READY', 'TRANSCRIPT_FAILED',
+])
 
 interface PersistedVoiceRecording {
   sessionId: string
@@ -147,6 +152,10 @@ export function useVoiceTurnFlow(options: VoiceTurnFlowOptions): VoiceTurnFlow {
   const transcriptionPollRef = useRef<number | null>(null)
   const speechTimerRef = useRef<number | null>(null)
   const pollErrorCountRef = useRef(0)
+  /** 进行中的上传；改用文字/换题/卸载时中止，避免放弃后仍落地录音 */
+  const uploadAbortRef = useRef<AbortController | null>(null)
+  /** 本轮 FAILED 是否已重置过：防止 2 秒会话轮询反复触发误杀新一轮录音 */
+  const failedResetRef = useRef(false)
 
   const transition = useCallback((next: VoiceTurnPhase) => {
     phaseRef.current = next
@@ -165,6 +174,11 @@ export function useVoiceTurnFlow(options: VoiceTurnFlowOptions): VoiceTurnFlow {
       window.clearTimeout(speechTimerRef.current)
       speechTimerRef.current = null
     }
+  }, [])
+
+  const abortUpload = useCallback(() => {
+    uploadAbortRef.current?.abort()
+    uploadAbortRef.current = null
   }, [])
 
   /** 每 1 秒查询录音视图，直到 READY/ATTACHED（→ 可编辑转写）或 FAILED。 */
@@ -186,6 +200,14 @@ export function useVoiceTurnFlow(options: VoiceTurnFlowOptions): VoiceTurnFlow {
               message: view.safeError ?? '录音转写失败，请重试',
             })
             transition('TRANSCRIPT_FAILED')
+          } else if (view.status === 'DISCARDED') {
+            // 防御（评审）：录音已被放弃（如刷新前已切换到文字），终止轮询回到 IDLE；
+            // 清除恢复条目与本地录音，重录时生成新的 uploadRequestId，不复用已放弃录音的幂等键
+            stopTranscriptionPoll()
+            removePersistedRecording(sessionId)
+            uploadRequestIdRef.current = null
+            recorder.reset()
+            transition('IDLE')
           }
           // RECEIVING / UPLOADED / TRANSCRIBING：继续轮询
         })
@@ -199,7 +221,7 @@ export function useVoiceTurnFlow(options: VoiceTurnFlowOptions): VoiceTurnFlow {
           }
         })
     }, TRANSCRIPTION_POLL_MS)
-  }, [sessionId, stopTranscriptionPoll, transition])
+  }, [recorder, sessionId, stopTranscriptionPoll, transition])
 
   /** 拉取题目语音：202（PENDING/SYNTHESIZING）时 1.5 秒后继续轮询。 */
   const pollSpeech = useCallback((turnNo: number, generation: number) => {
@@ -223,14 +245,15 @@ export function useVoiceTurnFlow(options: VoiceTurnFlowOptions): VoiceTurnFlow {
       })
   }, [clearSpeechTimer, sessionId])
 
-  /** 换题/卸载：作废全部异步流程。 */
+  /** 换题/卸载：作废全部异步流程并中止进行中的上传。 */
   useEffect(() => {
     return () => {
       generationRef.current += 1
       stopTranscriptionPoll()
       clearSpeechTimer()
+      abortUpload()
     }
-  }, [clearSpeechTimer, stopTranscriptionPoll])
+  }, [abortUpload, clearSpeechTimer, stopTranscriptionPoll])
 
   /** 新一轮语音流程：清理旧轮状态，按需恢复刷新中的录音并拉取题目语音。 */
   useEffect(() => {
@@ -240,6 +263,7 @@ export function useVoiceTurnFlow(options: VoiceTurnFlowOptions): VoiceTurnFlow {
     generationRef.current += 1
     clearSpeechTimer()
     stopTranscriptionPoll()
+    abortUpload()
     recorder.reset()
     transition('IDLE')
     setTranscript('')
@@ -267,7 +291,7 @@ export function useVoiceTurnFlow(options: VoiceTurnFlowOptions): VoiceTurnFlow {
     }
     // 题目语音与录音流程独立：始终拉取
     void pollSpeech(turnNo, generationRef.current)
-  }, [clearSpeechTimer, isVoice, pollSpeech, recorder, session, sessionId, startTranscriptionPoll, stopTranscriptionPoll, transition])
+  }, [abortUpload, clearSpeechTimer, isVoice, pollSpeech, recorder, session, sessionId, startTranscriptionPoll, stopTranscriptionPoll, transition])
 
   /** recorder 状态 → 页面阶段（RECORDING/PAUSED → RECORDING，停止 → RECORDED）。 */
   useEffect(() => {
@@ -287,6 +311,34 @@ export function useVoiceTurnFlow(options: VoiceTurnFlowOptions): VoiceTurnFlow {
     void discardVoiceRecording(sessionId, recId).catch(() => { /* 释放失败不影响本地状态 */ })
   }, [sessionId])
 
+  /** 本轮处理失败（后端处理异常后 turn 变 FAILED，评审 Critical）：放弃旧录音尝试，
+   *  回到可重录/文字回退的 IDLE。只在失败首次出现时重置一次（failedResetRef），
+   *  避免 2 秒会话轮询反复触发误杀新一轮录音。 */
+  useEffect(() => {
+    const currentTurn = session?.turns.find((turn) => turn.turnNo === turnRef.current)
+    if (currentTurn?.status === 'FAILED' && !failedResetRef.current) {
+      failedResetRef.current = true
+      if (isVoice && RESETTABLE_ON_FAILED.has(phaseRef.current)) {
+        stopTranscriptionPoll()
+        clearSpeechTimer()
+        abortUpload()
+        discardBestEffort()
+        removePersistedRecording(sessionId)
+        recordingIdRef.current = null
+        setRecordingId(null)
+        uploadRequestIdRef.current = null
+        setTranscript('')
+        setTranscribeError(null)
+        setUploadError(undefined)
+        setUploadProgress(null)
+        recorder.reset()
+        transition('IDLE')
+      }
+    } else if (currentTurn?.status !== 'FAILED') {
+      failedResetRef.current = false
+    }
+  }, [abortUpload, clearSpeechTimer, discardBestEffort, isVoice, recorder, session, sessionId, stopTranscriptionPoll, transition])
+
   const upload = useCallback((blob: Blob) => {
     const turnNo = turnRef.current
     if (phaseRef.current === 'UPLOADING' || turnNo === 0 || !blob) return
@@ -294,6 +346,9 @@ export function useVoiceTurnFlow(options: VoiceTurnFlowOptions): VoiceTurnFlow {
     uploadRequestIdRef.current ??= createRequestId()
     const uploadRequestId = uploadRequestIdRef.current
     const generation = generationRef.current
+    // 上传可被「改用文字回答」/换题/卸载中止（评审）
+    const controller = new AbortController()
+    uploadAbortRef.current = controller
     transition('UPLOADING')
     setUploadProgress(null)
     setUploadError(undefined)
@@ -302,9 +357,9 @@ export function useVoiceTurnFlow(options: VoiceTurnFlowOptions): VoiceTurnFlow {
       if (generationRef.current === generation) {
         setUploadProgress(progress.total > 0 ? Math.round((progress.loaded / progress.total) * 100) : null)
       }
-    })
+    }, controller.signal)
       .then((response) => {
-        if (generationRef.current !== generation) return
+        if (generationRef.current !== generation || phaseRef.current !== 'UPLOADING') return
         const nextRecordingId = response.data.recordingId
         recordingIdRef.current = nextRecordingId
         setRecordingId(nextRecordingId)
@@ -314,6 +369,7 @@ export function useVoiceTurnFlow(options: VoiceTurnFlowOptions): VoiceTurnFlow {
       })
       .catch((error) => {
         if (generationRef.current !== generation) return
+        if (error instanceof DOMException && error.name === 'AbortError') return // 用户主动放弃上传
         // 上传失败回到 RECORDED：可重试（同一 uploadRequestId）或重录
         setUploadError(error)
         transition('RECORDED')
@@ -354,7 +410,10 @@ export function useVoiceTurnFlow(options: VoiceTurnFlowOptions): VoiceTurnFlow {
 
   const resetRecording = useCallback(() => {
     stopTranscriptionPoll()
+    abortUpload()
     discardBestEffort()
+    // 清除恢复条目（评审）：否则刷新后会把已放弃的录音重新恢复出来轮询
+    removePersistedRecording(sessionId)
     recordingIdRef.current = null
     setRecordingId(null)
     uploadRequestIdRef.current = null
@@ -364,20 +423,23 @@ export function useVoiceTurnFlow(options: VoiceTurnFlowOptions): VoiceTurnFlow {
     setUploadProgress(null)
     recorder.reset()
     transition('IDLE')
-  }, [discardBestEffort, recorder, stopTranscriptionPoll, transition])
+  }, [abortUpload, discardBestEffort, recorder, sessionId, stopTranscriptionPoll, transition])
 
   const fallbackToText = useCallback(() => {
     // 显式改用文字回答：放弃当前录音（best-effort 通知后端），释放麦克风并隐藏语音面板。
     // 放弃的是"尚未绑定答案"的录音，后端允许 discard；失败也不影响本地切换。
+    // 同步清除恢复条目并中止进行中的上传（评审）：刷新后不得复活已放弃的录音。
     stopTranscriptionPoll()
     clearSpeechTimer()
+    abortUpload()
     discardBestEffort()
+    removePersistedRecording(sessionId)
     recorder.reset()
     setTranscribeError(null)
     setUploadError(undefined)
     setUploadProgress(null)
     transition('TEXT_FALLBACK')
-  }, [clearSpeechTimer, discardBestEffort, recorder, stopTranscriptionPoll, transition])
+  }, [abortUpload, clearSpeechTimer, discardBestEffort, recorder, sessionId, stopTranscriptionPoll, transition])
 
   const setTranscript = useCallback((text: string) => setTranscriptState(text), [])
 

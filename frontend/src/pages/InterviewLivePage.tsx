@@ -103,15 +103,6 @@ export function InterviewLivePage({ env }: InterviewLivePageProps) {
     }
   }
 
-  function handleStreamEvent(_name: string, event: InterviewStreamEvent) {
-    receive(event)
-    // 任务 6 语义：ANSWER_FAILED 表示本次尝试处理失败，重新提交必须使用新的 requestId；
-    // 页面文案给出重录或用文字重新提交的指引（requestId 的新生由下方刷新恢复保证）
-    if (event.type === 'ERROR' && event.payload.code === 'ANSWER_FAILED') {
-      setError(new ApiClientError(0, 'ANSWER_FAILED', '本次回答处理失败，请重录或用文字重新提交', null))
-    }
-  }
-
   async function submitAnswer(input: Omit<AnswerStreamInput, 'requestId'>) {
     const normalized = input.answer.trim()
     if (!session || submitting || !normalized) return
@@ -121,7 +112,7 @@ export function InterviewLivePage({ env }: InterviewLivePageProps) {
     try {
       await postInterviewAnswerStream(sessionId, { requestId, answer: normalized, inputMode: input.inputMode, recordingId: input.recordingId }, {
         signal: controller.signal,
-        onEvent: handleStreamEvent,
+        onEvent: (_name, event) => receive(event),
       })
       const recovered = await refresh()
       if (recovered.currentTurnNo > session.currentTurnNo || recovered.status !== 'INTERVIEWING') {
@@ -145,7 +136,7 @@ export function InterviewLivePage({ env }: InterviewLivePageProps) {
             }
           }
         } catch { /* keep the original transport error */ }
-        setError(reason)
+        setError(answerFailureGuidance(reason))
       }
     } finally { setSubmitting(false); setProcessing('') }
   }
@@ -171,10 +162,11 @@ export function InterviewLivePage({ env }: InterviewLivePageProps) {
     </>
   }
 
-  /** 语音答题面板（计划 §13.2）：题目语音 + 录音/上传/转写/确认提交。 */
+  /** 语音答题面板（计划 §13.2）：题目语音 + 录音/上传/转写/确认提交。
+   *  本轮处理失败（FAILED）时仍保留面板：语音流程已重置为 IDLE，可重录或改用文字。 */
   function voiceAnswerPanel(currentSession: InterviewSession) {
     const currentTurn = currentSession.turns.find((turn) => turn.turnNo === currentSession.currentTurnNo)
-    if (!currentTurn || currentTurn.status !== 'ASKED') return null
+    if (!currentTurn || (currentTurn.status !== 'ASKED' && currentTurn.status !== 'FAILED')) return null
     if (voice.phase === 'TEXT_FALLBACK') return textAnswerPanel()
     const speechBlock = voice.speech.status !== 'NOT_AVAILABLE' && <div className="question-speech-area">
       {voice.speech.status === 'LOADING' && <p className="voice-note" role="status">正在准备题目语音…</p>}
@@ -189,9 +181,12 @@ export function InterviewLivePage({ env }: InterviewLivePageProps) {
       {speechBlock}
       {(voice.phase === 'IDLE' || voice.phase === 'RECORDING' || voice.phase === 'RECORDED') && <>
         <VoiceRecorder recorder={voice.recorder} maxRecordingSeconds={voiceCapabilities?.maxRecordingSeconds} uploadError={voice.uploadError} onUpload={voice.upload} onTextFallback={voice.fallbackToText} />
-        {voice.phase === 'RECORDED' && <div className="voice-actions"><button type="button" className="button button-secondary" onClick={voice.fallbackToText}>改用文字回答</button></div>}
+        {(voice.phase === 'RECORDED' || (voice.phase === 'IDLE' && currentTurn.status === 'FAILED')) && <div className="voice-actions"><button type="button" className="button button-secondary" onClick={voice.fallbackToText}>改用文字回答</button></div>}
       </>}
-      {voice.phase === 'UPLOADING' && <p className="page-status" role="status">{voice.uploadProgress != null ? `正在上传录音… ${voice.uploadProgress}%` : '正在上传录音…'}</p>}
+      {voice.phase === 'UPLOADING' && <>
+        <p className="page-status" role="status">{voice.uploadProgress != null ? `正在上传录音… ${voice.uploadProgress}%` : '正在上传录音…'}</p>
+        <div className="voice-actions"><button type="button" className="button button-secondary" onClick={voice.fallbackToText}>改用文字回答</button></div>
+      </>}
       {voice.phase === 'TRANSCRIBING' && <>
         <p className="page-status" role="status">正在转写录音，请稍候…</p>
         <div className="voice-actions"><button type="button" className="button button-secondary" onClick={voice.fallbackToText}>改用文字回答</button></div>
@@ -237,6 +232,16 @@ export function InterviewLivePage({ env }: InterviewLivePageProps) {
 
 function currentTurnIsProcessing(session: InterviewSession | undefined) {
   return session?.turns.find((turn) => turn.turnNo === session.currentTurnNo)?.status === 'PROCESSING'
+}
+
+/** 回答处理失败（任务 6）用固定指引文案替换后端原始错误：重录或用文字重新提交
+ *  必须使用新的 requestId（刷新恢复清除旧 requestId 后自动新生）。
+ *  ANSWER_FAILED 来自 HTTP 409（claim 同步重放校验）；ANSWER_STREAM_FAILED 防御性覆盖。 */
+function answerFailureGuidance(reason: unknown): unknown {
+  if (reason instanceof ApiClientError && (reason.code === 'ANSWER_FAILED' || reason.code === 'ANSWER_STREAM_FAILED')) {
+    return new ApiClientError(reason.status, reason.code, '本次回答处理失败，请重录或用文字重新提交', reason.traceId)
+  }
+  return reason
 }
 
 function readPendingRequest(key: string): { turnNo: number; requestId: string } | null {

@@ -166,6 +166,24 @@ describe('useVoiceRecorder', () => {
     expect(result.current.elapsedMs).toBeLessThanOrEqual(5_000)
   })
 
+  it('maxRecordingSeconds 中途更新立即生效（评审：能力探测异步到达）', async () => {
+    const fake = recorderTestEnv()
+    const { result, rerender } = renderHook(
+      ({ max }: { max?: number }) => useVoiceRecorder({ env: fake.env, maxRecordingSeconds: max }),
+      { initialProps: { max: undefined } as { max?: number } },
+    )
+    await act(async () => { await result.current.start() })
+    // 默认 300 秒上限：12 秒后仍在录音
+    act(() => { vi.advanceTimersByTime(12_000) })
+    expect(result.current.state).toBe('RECORDING')
+
+    rerender({ max: 12 })
+    // 上限收紧到 12 秒：跨过上限即自动停止
+    act(() => { vi.advanceTimersByTime(300) })
+    expect(result.current.state).toBe('RECORDED')
+    expect(result.current.autoStopped).toBe(true)
+  })
+
   it('4:50（剩余 10 秒）触发 nearLimit 警告，5:00 自动停止', async () => {
     const { result } = renderHook(() => useVoiceRecorder({ env: recorderTestEnv().env }))
     await act(async () => { await result.current.start() })

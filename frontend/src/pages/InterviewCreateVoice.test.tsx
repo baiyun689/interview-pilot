@@ -115,7 +115,10 @@ describe('面试创建：语音模式（Task 10）', () => {
 
     const voiceRadio = screen.getByLabelText('语音面试')
     expect(voiceRadio).toBeDisabled()
+    // 能力检测中给出提示（评审 #8）
+    expect(screen.getByText('正在检测语音能力…')).toBeInTheDocument()
     resolveCapabilities(json(capabilities))
     await waitFor(() => expect(voiceRadio).toBeEnabled())
+    expect(screen.queryByText('正在检测语音能力…')).not.toBeInTheDocument()
   })
 })

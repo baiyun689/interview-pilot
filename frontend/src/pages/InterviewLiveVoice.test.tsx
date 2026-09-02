@@ -335,6 +335,29 @@ describe('面试页语音交互：录音与上传（Task 10）', () => {
     await flush()
     expect(screen.getByText(/正在转写录音/)).toBeInTheDocument()
   })
+
+  it('上传中可改用文字回答：中止上传并切换到文字输入（评审 #6）', async () => {
+    vi.stubGlobal('XMLHttpRequest', FakeXHR)
+    const fake = recorderTestEnv()
+    renderLive(fake.env, { recordingView: () => readyRecording('x') })
+    await flush()
+
+    fireEvent.click(screen.getByRole('button', { name: '开始录音' }))
+    await advance(50)
+    fireEvent.click(screen.getByRole('button', { name: '停止录音' }))
+    fireEvent.click(screen.getByRole('button', { name: '上传录音' }))
+    await flush()
+    expect(screen.getByText(/正在上传录音/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '改用文字回答' }))
+    await flush()
+    expect(screen.getByLabelText('你的回答')).toBeInTheDocument()
+    expect(FakeXHR.instances[0].abort).toHaveBeenCalled()
+    // 被中止的上传不再产生转写状态
+    await advance(2000)
+    expect(screen.queryByText(/正在转写录音/)).not.toBeInTheDocument()
+    expect(fake).toBeTruthy()
+  })
 })
 
 describe('面试页语音交互：转写轮询（Task 10）', () => {
@@ -408,31 +431,70 @@ describe('面试页语音交互：确认提交（Task 10）', () => {
     expect(fake).toBeTruthy()
   })
 
-  it('ANSWER_FAILED：展示重录或用文字重新提交指引，重试使用新的 requestId', async () => {
-    const failedStream = () => streamResponse([
-      { name: 'ERROR', data: { type: 'ERROR', sessionId: 'session-1', turnNo: 1, payload: { code: 'ANSWER_FAILED', message: '回答处理失败', retryable: true } } },
-    ])
+  it('ANSWER_FAILED（HTTP 409）：展示重录或用文字重新提交指引，重试使用新的 requestId', async () => {
+    // 评审 #4：ANSWER_FAILED 由 claim 同步校验抛出（HTTP 409），不是 SSE 事件
     const requestIds: string[] = []
+    let turnFailed = false
+    const failedTurn = { ...askedTurn, status: 'FAILED' }
     const streamRoute = (url: string, init?: RequestInit) => {
       requestIds.push((JSON.parse(String(init?.body)) as { requestId: string }).requestId)
-      return failedStream()
+      return json({ code: 'ANSWER_FAILED', message: 'The answer attempt failed; submit with a new requestId' }, 409)
     }
+    const sessionRoute = () => json(turnFailed
+      ? { ...baseSession, status: 'INTERVIEWING', turns: [failedTurn] }
+      : voiceSession())
     vi.stubGlobal('XMLHttpRequest', FakeXHR)
     const fake = recorderTestEnv()
-    renderLive(fake.env, { recordingView: () => readyRecording('我负责订单系统的重构'), stream: streamRoute })
+    renderLive(fake.env, { recordingView: () => readyRecording('我负责订单系统的重构'), stream: streamRoute, session: sessionRoute })
     await flush()
     await recordAndUpload()
     await advance(1000)
 
+    turnFailed = true
     fireEvent.click(screen.getByRole('button', { name: '确认并提交' }))
     await flush()
     expect(screen.getByRole('alert')).toHaveTextContent('本次回答处理失败，请重录或用文字重新提交')
 
-    // 重新提交：既有刷新恢复已清除旧 requestId，新请求使用新 id
-    fireEvent.click(screen.getByRole('button', { name: '确认并提交' }))
+    // 评审 Critical：turn FAILED 后语音面板保留，重置为可重录/文字回退的 IDLE
+    expect(screen.getByRole('button', { name: '开始录音' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '改用文字回答' })).toBeInTheDocument()
+    expect(screen.queryByText('语音转写结果，请确认')).not.toBeInTheDocument()
+
+    // 文字回退重新提交：刷新恢复已清除旧 requestId，新请求使用新 id
+    fireEvent.click(screen.getByRole('button', { name: '改用文字回答' }))
+    await flush()
+    fireEvent.change(screen.getByLabelText('你的回答'), { target: { value: '失败后的文字回答' } })
+    fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
     await flush()
     expect(requestIds).toHaveLength(2)
     expect(requestIds[1]).not.toBe(requestIds[0])
+    expect(fake).toBeTruthy()
+  })
+
+  it('本轮处理失败（会话轮询刷新 turn FAILED）：面板保留并可重录/改用文字，旧录音被放弃', async () => {
+    // 评审 Critical：ANSWER_STREAM_FAILED 后 turn 变 FAILED，语音面板不得消失
+    let turnFailed = false
+    const failedTurn = { ...askedTurn, status: 'FAILED' }
+    const sessionRoute = () => json(turnFailed
+      ? { ...baseSession, status: 'INTERVIEWING', turns: [failedTurn] }
+      : voiceSession())
+    vi.stubGlobal('XMLHttpRequest', FakeXHR)
+    const fake = recorderTestEnv()
+    renderLive(fake.env, { session: sessionRoute, recordingView: () => readyRecording('我负责订单系统的重构') })
+    await flush()
+    await recordAndUpload()
+    await advance(1000)
+    expect(screen.getByText('语音转写结果，请确认')).toBeInTheDocument()
+
+    // 会话轮询刷新后 turn 变 FAILED：旧转写状态清空，回到可重录的 IDLE
+    turnFailed = true
+    await advance(2000)
+    expect(screen.getByRole('button', { name: '开始录音' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '改用文字回答' })).toBeInTheDocument()
+    expect(screen.queryByText('语音转写结果，请确认')).not.toBeInTheDocument()
+    // 旧录音已 best-effort 放弃
+    const discardCall = vi.mocked(fetch).mock.calls.find(([url, init]) => String(url).includes('/discard') && init?.method === 'POST')
+    expect(discardCall).toBeTruthy()
     expect(fake).toBeTruthy()
   })
 
@@ -540,5 +602,28 @@ describe('面试页语音交互：文字回退与恢复（Task 10）', () => {
     // 恢复路径不再重新上传
     const uploadCalls = vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url).includes('/voice-recordings') && init?.method === 'POST')
     expect(uploadCalls).toHaveLength(0)
+  })
+
+  it('刷新恢复遇 DISCARDED：终止轮询回到 IDLE、清除恢复条目，不无限轮询（评审）', async () => {
+    sessionStorage.setItem('interview-voice-recording:session-1', JSON.stringify({ sessionId: 'session-1', turnNo: 1, recordingId: 'rec-9', uploadRequestId: 'req-9' }))
+    let viewCalls = 0
+    const fake = recorderTestEnv()
+    renderLive(fake.env, {
+      recordingView: () => {
+        viewCalls += 1
+        return json({ recordingId: 'rec-9', turnNo: 1, status: 'DISCARDED', rawTranscript: null, durationMillis: null, retryable: false, safeError: null })
+      },
+    })
+    await flush()
+    expect(screen.getByText(/正在转写录音/)).toBeInTheDocument()
+
+    await advance(1000)
+    expect(viewCalls).toBe(1)
+    expect(screen.getByRole('button', { name: '开始录音' })).toBeInTheDocument()
+    expect(sessionStorage.getItem('interview-voice-recording:session-1')).toBeNull()
+    // 不再继续轮询
+    await advance(5000)
+    expect(viewCalls).toBe(1)
+    expect(fake).toBeTruthy()
   })
 })

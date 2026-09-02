@@ -33,13 +33,12 @@ export function InterviewCreatePage() {
   const [voiceCapabilities, setVoiceCapabilities] = useState<VoiceCapabilities | null>(null)
   const [voiceCapabilitiesError, setVoiceCapabilitiesError] = useState<unknown>()
 
-  // 语音能力探测（计划 §13.1）：失败只影响语音选项的可用性，不阻断表单其余部分
+  // 语音能力探测（计划 §13.1）：失败只影响语音选项的可用性，不阻断表单其余部分。
+  // 未返回时禁用并提示检测中；失败时禁用并给出通用原因；返回后按 enabled 开关。
   const voiceDisabled = !voiceCapabilities || !voiceCapabilities.enabled
-  const voiceReason = voiceDisabled
-    ? voiceCapabilities
-      ? '语音面试未启用：未配置语音识别 Provider'
-      : voiceCapabilitiesError ? '语音面试未启用：语音服务暂时不可用' : ''
-    : ''
+  const voiceReason = voiceCapabilities
+    ? voiceCapabilities.enabled ? '' : '语音面试未启用：未配置语音识别 Provider'
+    : voiceCapabilitiesError ? '语音面试未启用：语音服务暂时不可用' : '正在检测语音能力…'
 
   useEffect(() => {
     const id = ++owner.current
@@ -78,13 +77,6 @@ export function InterviewCreatePage() {
       })
     return () => { voiceOwner.current++; controller.abort() }
   }, [])
-
-  // 语音不可用时强制回到文字模式（防御：UI 禁用时不应能保持 VOICE 选中）
-  useEffect(() => {
-    if (voiceDisabled && values.interviewMode === 'VOICE') {
-      setValues((old) => ({ ...old, interviewMode: 'TEXT' }))
-    }
-  })
 
   function toggleKb(id: string) {
     setSelectedKbIds((current) => current.includes(id)

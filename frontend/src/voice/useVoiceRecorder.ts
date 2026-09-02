@@ -142,13 +142,19 @@ const ERROR_MESSAGES: Record<RecorderErrorKind, string> = {
 }
 
 export function useVoiceRecorder(options?: VoiceRecorderOptions): VoiceRecorderController {
-  // 环境与配置只读取一次（页面挂载时固定），注入的测试环境同理
+  // 环境与 warn/tick 配置只读取一次（页面挂载时固定），注入的测试环境同理
   const envRef = useRef<VoiceRecorderEnvironment | null>(null)
   if (envRef.current === null) envRef.current = { ...defaultEnvironment(), ...options?.env }
   const env = envRef.current
   const maxMsRef = useRef((options?.maxRecordingSeconds ?? DEFAULT_MAX_RECORDING_SECONDS) * 1000)
   const warnMsRef = useRef((options?.warnSeconds ?? DEFAULT_WARNING_SECONDS) * 1000)
   const tickMsRef = useRef(options?.tickMs ?? DEFAULT_TICK_MS)
+  // 评审：maxRecordingSeconds 可能异步到达（能力探测返回后），上限必须随 props 更新，
+  // 否则计时展示的服务端上限与自动停止实际生效的默认值不一致；tick 已按 ref 强制执行
+  const maxRecordingSeconds = options?.maxRecordingSeconds ?? DEFAULT_MAX_RECORDING_SECONDS
+  useEffect(() => {
+    maxMsRef.current = maxRecordingSeconds * 1000
+  }, [maxRecordingSeconds])
 
   const [state, setState] = useState<RecorderState>('IDLE')
   const stateRef = useRef<RecorderState>('IDLE')
