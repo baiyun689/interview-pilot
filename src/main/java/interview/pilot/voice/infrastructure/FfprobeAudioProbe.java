@@ -6,6 +6,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 
 import interview.pilot.voice.domain.ProbedAudio;
@@ -17,7 +18,7 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * {@link AudioProbe} backed by the fixed {@code ffprobe} executable (installed in the
- * production image) with a fixed argument array, no shell and a 3-second timeout (plan §14).
+ * production image) with a fixed argument array, no shell and a bounded timeout.
  * The probed file is passed as a single argument — it is an internal staged file, never a
  * user-controlled string.
  *
@@ -29,7 +30,7 @@ import tools.jackson.databind.ObjectMapper;
  */
 public final class FfprobeAudioProbe implements AudioProbe {
 
-  static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(3);
+  static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(10);
   private static final String EXECUTABLE = "ffprobe";
   private static final List<String> BASE_ARGS = List.of(
       EXECUTABLE, "-v", "error", "-print_format", "json", "-show_format", "-show_streams");
@@ -59,21 +60,27 @@ public final class FfprobeAudioProbe implements AudioProbe {
     }
     try {
       closeStdin(process);
+      // Drain stdout while the process runs. Waiting before reading can deadlock when a
+      // malformed media file makes ffprobe emit more data than the OS pipe can hold.
+      FutureTask<byte[]> output = new FutureTask<>(() -> process.getInputStream().readAllBytes());
+      Thread.ofVirtual().name("ffprobe-output-reader").start(output);
       boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
       if (!finished) {
         terminate(process);
+        output.cancel(true);
         throw new VoiceMediaProbeException(
             "ffprobe did not finish within " + timeout.toSeconds() + "s", null);
       }
       if (process.exitValue() != 0) {
         throw new VoiceMediaUnsupportedException();
       }
-      return parse(process.getInputStream().readAllBytes());
+      return parse(output.get(timeout.toMillis(), TimeUnit.MILLISECONDS));
     } catch (InterruptedException exception) {
       Thread.currentThread().interrupt();
       terminate(process);
       throw new VoiceMediaProbeException("ffprobe was interrupted", exception);
-    } catch (IOException exception) {
+    } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException exception) {
+      terminate(process);
       throw new VoiceMediaProbeException("Unable to read ffprobe output", exception);
     }
   }

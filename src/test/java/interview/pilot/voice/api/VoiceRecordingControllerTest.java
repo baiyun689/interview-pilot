@@ -101,7 +101,7 @@ class VoiceRecordingControllerTest {
   }
 
   @Test
-  void operationalFailuresReachTheClientAsGeneric500WithoutTheDiagnosticCodes()
+  void operationalFailuresReachTheClientAsSafeRetryableErrors()
       throws Exception {
     var probeFailure = new interview.pilot.voice.domain.VoiceMediaProbeException(
         "ffprobe timed out", null);
@@ -110,8 +110,8 @@ class VoiceRecordingControllerTest {
         org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
         .thenThrow(probeFailure);
     var probeBody = mvc.perform(upload())
-        .andExpect(status().isInternalServerError())
-        .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.code").value("VOICE_MEDIA_PROBE_UNAVAILABLE"))
         .andReturn().getResponse().getContentAsString();
     assertThat(probeBody)
         .doesNotContain(VoiceErrorCodes.VOICE_MEDIA_PROBE_FAILED)
@@ -124,8 +124,8 @@ class VoiceRecordingControllerTest {
         org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
         .thenThrow(storageFailure);
     var storageBody = mvc.perform(upload())
-        .andExpect(status().isInternalServerError())
-        .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.code").value("VOICE_MEDIA_STORAGE_UNAVAILABLE"))
         .andReturn().getResponse().getContentAsString();
     assertThat(storageBody)
         .doesNotContain(VoiceErrorCodes.VOICE_MEDIA_STORAGE_FAILED)

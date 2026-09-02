@@ -58,6 +58,9 @@ public class DashScopeSpeechSynthesizer implements SpeechSynthesizer {
   static final String ENDPOINT_PATH = "/services/audio/tts/SpeechSynthesizer";
   /** The synthesis response envelope is tiny; anything larger is not the documented JSON shape. */
   private static final long JSON_ENVELOPE_MAX_BYTES = 64 * 1024;
+  // cosyvoice-v3-flash voices such as longanyang accept 16 kHz or 48 kHz output. Supplying
+  // this explicitly avoids the provider's unsupported 22.05 kHz default for those voices.
+  private static final int COSYVOICE_SAMPLE_RATE = 16_000;
   private static final ObjectMapper JSON = new ObjectMapper();
 
   private final Asr asr;
@@ -210,7 +213,8 @@ public class DashScopeSpeechSynthesizer implements SpeechSynthesizer {
         "input", Map.of(
             "text", text,
             "voice", profile.voice(),
-            "format", "mp3"));
+            "format", "mp3",
+            "sample_rate", COSYVOICE_SAMPLE_RATE));
   }
 
   private record Download(byte[] audio, String mediaType) {}

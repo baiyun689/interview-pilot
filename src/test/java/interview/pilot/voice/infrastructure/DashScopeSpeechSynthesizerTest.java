@@ -77,7 +77,8 @@ class DashScopeSpeechSynthesizerTest {
           "input": {
             "text": "请自我介绍",
             "voice": "longanyang",
-            "format": "mp3"
+            "format": "mp3",
+            "sample_rate": 16000
           }
         }
         """;

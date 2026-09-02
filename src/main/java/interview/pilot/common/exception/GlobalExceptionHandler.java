@@ -17,6 +17,8 @@ import interview.pilot.common.result.ApiError;
 import interview.pilot.ai.AiGatewayException;
 import interview.pilot.ai.AiStructuredOutputException;
 import interview.pilot.ai.provider.AiProviderException;
+import interview.pilot.voice.domain.VoiceMediaProbeException;
+import interview.pilot.voice.domain.VoiceMediaStorageException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 
@@ -60,6 +62,24 @@ public class GlobalExceptionHandler {
     // cap; the knowledge/resume modules keep their own higher application-level limits.
     return ResponseEntity.status(HttpStatus.CONTENT_TOO_LARGE)
         .body(error("FILE_TOO_LARGE", "The uploaded file exceeds 8 MiB", request));
+  }
+
+  @ExceptionHandler(VoiceMediaProbeException.class)
+  public ResponseEntity<ApiError> handleVoiceMediaProbe(
+      VoiceMediaProbeException exception, HttpServletRequest request) {
+    log.warn("voice_media_probe_unavailable traceId={}", traceId(request), exception);
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+        .body(error("VOICE_MEDIA_PROBE_UNAVAILABLE",
+            "Audio validation is temporarily unavailable. Please retry.", request));
+  }
+
+  @ExceptionHandler(VoiceMediaStorageException.class)
+  public ResponseEntity<ApiError> handleVoiceMediaStorage(
+      VoiceMediaStorageException exception, HttpServletRequest request) {
+    log.warn("voice_media_storage_unavailable traceId={}", traceId(request), exception);
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+        .body(error("VOICE_MEDIA_STORAGE_UNAVAILABLE",
+            "Audio storage is temporarily unavailable. Please retry.", request));
   }
 
   @ExceptionHandler({

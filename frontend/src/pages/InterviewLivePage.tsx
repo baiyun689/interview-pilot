@@ -18,6 +18,18 @@ const phaseLabels: Record<InterviewPhase, string> = {
   PROJECT_EXPERIENCE: '项目经历', SCENARIO_TRADEOFF: '场景取舍',
 }
 
+const THINKING_SECONDS = 10
+const VOICE_ANSWER_SECONDS = 120
+
+function remainingSeconds(deadline: number, now: number) {
+  return Math.max(0, Math.ceil((deadline - now) / 1000))
+}
+
+function clockLabel(seconds: number) {
+  const minute = Math.floor(seconds / 60)
+  return `${String(minute).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+}
+
 export interface InterviewLivePageProps {
   /** 录音环境的测试注入；生产环境无需传入 */
   env?: Partial<VoiceRecorderEnvironment>
@@ -38,6 +50,32 @@ export function InterviewLivePage({ env }: InterviewLivePageProps) {
   const [voiceCapabilities, setVoiceCapabilities] = useState<VoiceCapabilities | null>(null)
   const voice = useVoiceTurnFlow({ sessionId, session, maxRecordingSeconds: voiceCapabilities?.maxRecordingSeconds, env })
   const isVoiceSession = session?.interviewMode === 'VOICE'
+  const currentTurn = session?.turns.find((turn) => turn.turnNo === session.currentTurnNo)
+  const [voiceAnswerStartedAt, setVoiceAnswerStartedAt] = useState<number | null>(null)
+  const [voiceClock, setVoiceClock] = useState(() => Date.now())
+
+  // 语音面试的节奏由题目被问出后开始：先给 10 秒思考，也允许候选人提前主动开始。
+  // 倒计时只控制浏览器录音，不干扰异步转写、上传和既有的 SSE 回答提交流程。
+  useEffect(() => {
+    setVoiceAnswerStartedAt(null)
+    setVoiceClock(Date.now())
+  }, [session?.currentTurnNo, session?.interviewMode])
+
+  useEffect(() => {
+    if (!isVoiceSession || !currentTurn || currentTurn.status !== 'ASKED') return
+    const timer = window.setInterval(() => setVoiceClock(Date.now()), 250)
+    return () => window.clearInterval(timer)
+  }, [currentTurn, isVoiceSession])
+
+  const thinkingEndsAt = currentTurn ? Date.parse(currentTurn.askedAt) + THINKING_SECONDS * 1_000 : 0
+  const thinkingLeft = remainingSeconds(thinkingEndsAt, voiceClock)
+  const answerEndsAt = voiceAnswerStartedAt == null ? 0 : voiceAnswerStartedAt + VOICE_ANSWER_SECONDS * 1_000
+  const answerLeft = voiceAnswerStartedAt == null ? VOICE_ANSWER_SECONDS : remainingSeconds(answerEndsAt, voiceClock)
+
+  useEffect(() => {
+    if (voiceAnswerStartedAt == null || answerLeft > 0) return
+    if (voice.recorder.state === 'RECORDING' || voice.recorder.state === 'PAUSED') void voice.recorder.stop()
+  }, [answerLeft, voice.recorder, voiceAnswerStartedAt])
 
   // 语音会话才拉取能力：只为录音时长上限；失败不影响面试（录音按默认上限）
   useEffect(() => {
@@ -165,9 +203,15 @@ export function InterviewLivePage({ env }: InterviewLivePageProps) {
   /** 语音答题面板（计划 §13.2）：题目语音 + 录音/上传/转写/确认提交。
    *  本轮处理失败（FAILED）时仍保留面板：语音流程已重置为 IDLE，可重录或改用文字。 */
   function voiceAnswerPanel(currentSession: InterviewSession) {
-    const currentTurn = currentSession.turns.find((turn) => turn.turnNo === currentSession.currentTurnNo)
-    if (!currentTurn || (currentTurn.status !== 'ASKED' && currentTurn.status !== 'FAILED')) return null
+    const activeTurn = currentSession.turns.find((turn) => turn.turnNo === currentSession.currentTurnNo)
+    if (!activeTurn || (activeTurn.status !== 'ASKED' && activeTurn.status !== 'FAILED')) return null
     if (voice.phase === 'TEXT_FALLBACK') return textAnswerPanel()
+    const continuingVoiceWorkflow = voiceAnswerStartedAt != null
+      || activeTurn.status === 'FAILED'
+      || voice.phase === 'UPLOADING'
+      || voice.phase === 'TRANSCRIBING'
+      || voice.phase === 'TRANSCRIPT_READY'
+      || voice.phase === 'TRANSCRIPT_FAILED'
     const speechBlock = voice.speech.status !== 'NOT_AVAILABLE' && <div className="question-speech-area">
       {voice.speech.status === 'LOADING' && <p className="voice-note" role="status">正在准备题目语音…</p>}
       {voice.speech.status === 'READY' && <QuestionSpeechPlayer mediaUrl={voice.speech.view?.mediaUrl ?? undefined} />}
@@ -179,19 +223,29 @@ export function InterviewLivePage({ env }: InterviewLivePageProps) {
     return <>
       <ErrorNotice error={error} />
       {speechBlock}
-      {(voice.phase === 'IDLE' || voice.phase === 'RECORDING' || voice.phase === 'RECORDED') && <>
-        <VoiceRecorder recorder={voice.recorder} maxRecordingSeconds={voiceCapabilities?.maxRecordingSeconds} uploadError={voice.uploadError} onUpload={voice.upload} onTextFallback={voice.fallbackToText} />
-        {(voice.phase === 'RECORDED' || (voice.phase === 'IDLE' && currentTurn.status === 'FAILED')) && <div className="voice-actions"><button type="button" className="button button-secondary" onClick={voice.fallbackToText}>改用文字回答</button></div>}
+      {voiceAnswerStartedAt == null && activeTurn.status === 'ASKED' && <section className="voice-stage voice-thinking-stage">
+        <span className="voice-stage-kicker">准备作答</span>
+        <strong className="voice-stage-timer" role="timer">{clockLabel(thinkingLeft)}</strong>
+        <p>{thinkingLeft > 0 ? `请利用这 ${thinkingLeft} 秒整理思路；准备好后可立即开始。` : '思考时间结束。请主动开始作答，录音最长 2 分钟。'}</p>
+        <button type="button" className="button button-primary voice-start-answer" onClick={() => setVoiceAnswerStartedAt(Date.now())}>开始回答</button>
+      </section>}
+      {voiceAnswerStartedAt != null && <section className="voice-stage">
+        <div className="voice-stage-header"><span>回答计时</span><strong className={answerLeft <= 15 ? 'voice-stage-timer voice-stage-timer-warning' : 'voice-stage-timer'} role="timer">{clockLabel(answerLeft)}</strong></div>
+        <p>{answerLeft > 0 ? '录音将在倒计时结束时自动停止，请围绕题目清晰作答。' : '本题作答时间已到，请上传当前录音或改用文字。'}</p>
+      </section>}
+      {continuingVoiceWorkflow && (voice.phase === 'IDLE' || voice.phase === 'RECORDING' || voice.phase === 'RECORDED') && <>
+        <VoiceRecorder recorder={voice.recorder} maxRecordingSeconds={VOICE_ANSWER_SECONDS} uploadError={voice.uploadError} onUpload={voice.upload} onTextFallback={voice.fallbackToText} />
+        {(voice.phase === 'RECORDED' || (voice.phase === 'IDLE' && activeTurn.status === 'FAILED')) && <div className="voice-actions"><button type="button" className="button button-secondary" onClick={voice.fallbackToText}>改用文字回答</button></div>}
       </>}
-      {voice.phase === 'UPLOADING' && <>
+      {continuingVoiceWorkflow && voice.phase === 'UPLOADING' && <>
         <p className="page-status" role="status">{voice.uploadProgress != null ? `正在上传录音… ${voice.uploadProgress}%` : '正在上传录音…'}</p>
         <div className="voice-actions"><button type="button" className="button button-secondary" onClick={voice.fallbackToText}>改用文字回答</button></div>
       </>}
-      {voice.phase === 'TRANSCRIBING' && <>
+      {continuingVoiceWorkflow && voice.phase === 'TRANSCRIBING' && <>
         <p className="page-status" role="status">正在转写录音，请稍候…</p>
         <div className="voice-actions"><button type="button" className="button button-secondary" onClick={voice.fallbackToText}>改用文字回答</button></div>
       </>}
-      {voice.phase === 'TRANSCRIPT_READY' && <>
+      {continuingVoiceWorkflow && voice.phase === 'TRANSCRIPT_READY' && <>
         <p className="voice-note" role="status">语音转写结果，请确认</p>
         <label>转写内容<textarea rows={7} maxLength={20_000} value={voice.transcript} onChange={(event) => voice.setTranscript(event.target.value)} /></label>
         {processing && <p role="status">{processing}</p>}
@@ -201,7 +255,7 @@ export function InterviewLivePage({ env }: InterviewLivePageProps) {
           <button type="button" className="button button-secondary" disabled={submitting} onClick={voice.fallbackToText}>改用文字回答</button>
         </div>
       </>}
-      {voice.phase === 'TRANSCRIPT_FAILED' && <>
+      {continuingVoiceWorkflow && voice.phase === 'TRANSCRIPT_FAILED' && <>
         <div className="error-notice" role="alert"><p>{voice.transcribeError?.message ?? '录音转写失败，请重试'}</p></div>
         <div className="voice-actions">
           {voice.transcribeError?.retryable && <button type="button" className="button button-secondary" onClick={voice.retryTranscription}>重试转写</button>}

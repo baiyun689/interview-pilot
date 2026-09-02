@@ -114,8 +114,14 @@ async function advance(ms: number) {
 
 const flush = () => advance(1)
 
+async function beginVoiceAnswer() {
+  fireEvent.click(screen.getByRole('button', { name: '开始回答' }))
+  await flush()
+}
+
 /** 走完「开始录音 → 停止 → 上传成功」进入转写中。 */
 async function recordAndUpload() {
+  await beginVoiceAnswer()
   fireEvent.click(screen.getByRole('button', { name: '开始录音' }))
   await advance(50)
   fireEvent.click(screen.getByRole('button', { name: '停止录音' }))
@@ -199,8 +205,8 @@ describe('面试页语音交互：题目语音（Task 10 §13.2）', () => {
 
     expect(screen.getByText(/题目语音生成失败/)).toBeInTheDocument()
     expect(screen.queryByLabelText('题目语音')).not.toBeInTheDocument()
-    // 录音按钮可用：TTS 失败绝不阻塞答题
-    expect(screen.getByRole('button', { name: '开始录音' })).toBeInTheDocument()
+    // TTS 失败绝不阻塞答题：候选人仍可主动进入作答阶段。
+    expect(screen.getByRole('button', { name: '开始回答' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '重新生成语音' }))
     await flush()
@@ -215,7 +221,7 @@ describe('面试页语音交互：题目语音（Task 10 §13.2）', () => {
     expect(screen.queryByLabelText('题目语音')).not.toBeInTheDocument()
     expect(screen.queryByText(/正在准备题目语音/)).not.toBeInTheDocument()
     expect(screen.queryByText(/题目语音生成失败/)).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '开始录音' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '开始回答' })).toBeInTheDocument()
   })
 
   it('文字模式会话：不请求题目语音、不显示录音面板，走既有文字输入', async () => {
@@ -239,6 +245,7 @@ describe('面试页语音交互：录音与上传（Task 10）', () => {
     renderLive(fake.env)
     await flush()
 
+    await beginVoiceAnswer()
     fireEvent.click(screen.getByRole('button', { name: '开始录音' }))
     await advance(50)
     expect(fake.getUserMedia).toHaveBeenCalledWith({ audio: true })
@@ -271,6 +278,7 @@ describe('面试页语音交互：录音与上传（Task 10）', () => {
     })
     await flush()
 
+    await beginVoiceAnswer()
     fireEvent.click(screen.getByRole('button', { name: '开始录音' }))
     await advance(50)
     fireEvent.click(screen.getByRole('button', { name: '停止录音' }))
@@ -307,6 +315,7 @@ describe('面试页语音交互：录音与上传（Task 10）', () => {
     renderLive(fake.env, { recordingView: () => readyRecording('转写') })
     await flush()
 
+    await beginVoiceAnswer()
     fireEvent.click(screen.getByRole('button', { name: '开始录音' }))
     await advance(50)
     fireEvent.click(screen.getByRole('button', { name: '停止录音' }))
@@ -342,6 +351,7 @@ describe('面试页语音交互：录音与上传（Task 10）', () => {
     renderLive(fake.env, { recordingView: () => readyRecording('x') })
     await flush()
 
+    await beginVoiceAnswer()
     fireEvent.click(screen.getByRole('button', { name: '开始录音' }))
     await advance(50)
     fireEvent.click(screen.getByRole('button', { name: '停止录音' }))
@@ -522,7 +532,7 @@ describe('面试页语音交互：确认提交（Task 10）', () => {
 
     expect(screen.getByText(/请解释 JVM 内存模型/)).toBeInTheDocument()
     expect(screen.queryByText('语音转写结果，请确认')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '开始录音' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '开始回答' })).toBeInTheDocument()
     expect(sessionStorage.getItem('interview-voice-recording:session-1')).toBeNull()
     expect(fake).toBeTruthy()
   })
@@ -566,6 +576,7 @@ describe('面试页语音交互：文字回退与恢复（Task 10）', () => {
     renderLive(fake.env, { stream: streamRoute })
     await flush()
 
+    await beginVoiceAnswer()
     fireEvent.click(screen.getByRole('button', { name: '开始录音' }))
     await advance(50)
     expect(screen.getByRole('alert')).toHaveTextContent(/麦克风权限/)
@@ -619,7 +630,7 @@ describe('面试页语音交互：文字回退与恢复（Task 10）', () => {
 
     await advance(1000)
     expect(viewCalls).toBe(1)
-    expect(screen.getByRole('button', { name: '开始录音' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '开始回答' })).toBeInTheDocument()
     expect(sessionStorage.getItem('interview-voice-recording:session-1')).toBeNull()
     // 不再继续轮询
     await advance(5000)

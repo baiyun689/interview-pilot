@@ -1143,3 +1143,45 @@ a:focus-visible {
   display: grid;
   gap: 8px;
 }
+
+/* 语音面试：把“听题—思考—作答”呈现为单一清晰的舞台，避免录音控件散落在页面中。 */
+.live-page {
+  max-width: 960px;
+}
+.live-page .interview-session-header {
+  padding: 28px 30px;
+  border: 1px solid #dbe3f4;
+  border-radius: 22px;
+  background: linear-gradient(135deg, #ffffff, #f3f6ff);
+  box-shadow: 0 18px 45px rgb(15 23 42 / 7%);
+}
+.live-page .conversation { margin: 22px 0; }
+.live-page .turn-card { padding: 28px 30px; border-radius: 22px; }
+.live-page .message { max-width: 100%; padding: 18px 20px; border-radius: 16px; }
+.live-page .message.interviewer { background: linear-gradient(135deg, #eef3ff, #f8faff); }
+.live-page .answer-panel { max-width: none; padding: 28px 30px; border-radius: 22px; }
+.voice-stage {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 20px 22px;
+  border: 1px solid #dbe3f4;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #f7f9ff, #ffffff);
+}
+.voice-stage p { margin: 0; color: var(--slate-600); font-size: 14px; line-height: 1.65; }
+.voice-thinking-stage { text-align: center; justify-items: center; padding: 26px; }
+.voice-stage-kicker { color: var(--indigo-600); font-size: 12px; font-weight: 800; letter-spacing: .1em; }
+.voice-stage-header { display: flex; align-items: baseline; justify-content: space-between; color: var(--slate-700); font-size: 13px; font-weight: 750; }
+.voice-stage-timer { color: var(--slate-950); font-size: 34px; font-weight: 850; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+.voice-stage-timer-warning { color: #dc2626; }
+.voice-start-answer { min-width: 150px; margin-top: 6px; }
+.answer-panel .voice-panel { max-width: none; padding: 20px 22px; border: 1px solid var(--slate-200); border-radius: 16px; background: var(--white); }
+.answer-panel .voice-timer { font-size: 28px; }
+
+@media (max-width: 640px) {
+  .live-page .interview-session-header,
+  .live-page .turn-card,
+  .live-page .answer-panel { padding: 20px; border-radius: 18px; }
+  .voice-stage { padding: 18px; }
+}
