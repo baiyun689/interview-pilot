@@ -31,12 +31,15 @@ class InfrastructureConfigurationTest {
   }
 
   @Test
-  @DisplayName("Servlet multipart 边界允许 10MB 简历并为请求封装预留空间")
-  void multipartBoundaryMatchesResumeUploadLimit() throws IOException {
+  @DisplayName("Servlet multipart 边界与语音上传上限对齐并为请求封装预留空间")
+  void multipartBoundaryMatchesVoiceUploadLimit() throws IOException {
     var application = read("src/main/resources/application.yml");
 
-    assertTrue(application.contains("max-file-size: 10MB"));
-    assertTrue(application.contains("max-request-size: 11MB"));
+    // Spring Framework 7 的 MB 后缀是二进制（1 MB = 1,048,576 B）：8MB == 8388608，与
+    // app.voice.max-upload-bytes 完全一致（Task 4 评审 M1 修复：servlet 边界不再是 10MB
+    // 的独立值，避免与语音模块 8 MiB 流式上限脱节）。
+    assertTrue(application.contains("max-file-size: 8MB"));
+    assertTrue(application.contains("max-request-size: 9MB"));
   }
 
   @Test

@@ -56,8 +56,10 @@ public class GlobalExceptionHandler {
   public ResponseEntity<ApiError> handleMaxUploadSizeExceeded(
       MaxUploadSizeExceededException exception,
       HttpServletRequest request) {
+    // The servlet multipart guard is 8 MiB (application.yml), aligned with the voice upload
+    // cap; the knowledge/resume modules keep their own higher application-level limits.
     return ResponseEntity.status(HttpStatus.CONTENT_TOO_LARGE)
-        .body(error("FILE_TOO_LARGE", "The uploaded document exceeds 10 MB", request));
+        .body(error("FILE_TOO_LARGE", "The uploaded file exceeds 8 MiB", request));
   }
 
   @ExceptionHandler({

@@ -106,6 +106,24 @@ services:
       DASHSCOPE_EMBEDDING_BASE_URL: ${DASHSCOPE_EMBEDDING_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode}
       DASHSCOPE_EMBEDDING_API_KEY: ${DASHSCOPE_EMBEDDING_API_KEY:-}
       DASHSCOPE_EMBEDDING_MODEL: ${DASHSCOPE_EMBEDDING_MODEL:-text-embedding-v3}
+      VOICE_ENABLED: ${VOICE_ENABLED:-false}
+      VOICE_FILES_ROOT: /app/data/voice
+      VOICE_MAX_UPLOAD_BYTES: ${VOICE_MAX_UPLOAD_BYTES:-8388608}
+      VOICE_MAX_RECORDING_DURATION: ${VOICE_MAX_RECORDING_DURATION:-5m}
+      VOICE_MEDIA_RETENTION: ${VOICE_MEDIA_RETENTION:-7d}
+      VOICE_CLEANUP_INTERVAL: ${VOICE_CLEANUP_INTERVAL:-PT10M}
+      VOICE_CLEANUP_INITIAL_DELAY: ${VOICE_CLEANUP_INITIAL_DELAY:-PT2M}
+      VOICE_CLEANUP_BATCH_SIZE: ${VOICE_CLEANUP_BATCH_SIZE:-50}
+      VOICE_CLEANUP_STUCK_TASK_THRESHOLD: ${VOICE_CLEANUP_STUCK_TASK_THRESHOLD:-PT30M}
+      VOICE_CLEANUP_ORPHAN_GRACE: ${VOICE_CLEANUP_ORPHAN_GRACE:-PT24H}
+      VOICE_CLEANUP_CLAIM_TTL: ${VOICE_CLEANUP_CLAIM_TTL:-PT30M}
+      DASHSCOPE_SPEECH_BASE_URL: ${DASHSCOPE_SPEECH_BASE_URL:-https://dashscope.aliyuncs.com/api/v1}
+      DASHSCOPE_SPEECH_API_KEY: ${DASHSCOPE_SPEECH_API_KEY:-}
+      DASHSCOPE_ASR_MODEL: ${DASHSCOPE_ASR_MODEL:-fun-asr-flash-2026-06-15}
+      DASHSCOPE_ASR_TIMEOUT: ${DASHSCOPE_ASR_TIMEOUT:-60s}
+      DASHSCOPE_TTS_MODEL: ${DASHSCOPE_TTS_MODEL:-cosyvoice-v3-flash}
+      DASHSCOPE_TTS_VOICE: ${DASHSCOPE_TTS_VOICE:-longanyang}
+      DASHSCOPE_TTS_TIMEOUT: ${DASHSCOPE_TTS_TIMEOUT:-30s}
     expose:
       - "8080"
     depends_on:
@@ -119,6 +137,7 @@ services:
         condition: service_healthy
     volumes:
       - knowledge_files:/app/data/knowledge
+      - voice_files:/app/data/voice
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/actuator/health"]
       interval: 10s
@@ -148,3 +167,4 @@ volumes:
   rabbitmq_data:
   qdrant_data:
   knowledge_files:
+  voice_files:

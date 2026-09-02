@@ -2,9 +2,14 @@ spring:
   config:
     import: optional:file:.env[.properties]
   servlet:
+    # Aligned with the voice upload cap (app.voice.max-upload-bytes = 8388608) plus multipart
+    # boundary overhead (plan §15, Task 4 review M1): the module's own streaming bound is the
+    # authoritative limit, the servlet limit only guards against oversized requests arriving
+    # at all. Note: in Spring Framework 7 the MB/GB suffixes are BINARY (1 MB = 1,048,576 B),
+    # so 8MB == 8388608 exactly — the same number as the voice module cap.
     multipart:
-      max-file-size: 10MB
-      max-request-size: 11MB
+      max-file-size: 8MB
+      max-request-size: 9MB
   datasource:
     url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:interview_pilot}
     username: ${MYSQL_USER:interview_pilot}

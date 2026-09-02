@@ -11,8 +11,16 @@ RUN ./gradlew --no-daemon clean bootJar
 
 FROM eclipse-temurin:21-jre-jammy AS runtime
 
+# ffmpeg/ffprobe power the voice media probe (Task 3). The version is PINNED (plan §15) for
+# reproducible probe behavior: 7:4.4.2-0ubuntu0.22.04.1 is the jammy-updates candidate in
+# this base image (ffprobe ships in the same package). When Ubuntu supersedes the point
+# release the archive drops the old one and the build fails loudly — bump the pin then.
+# Pinning the whole base image digest instead would freeze JRE security updates too, a worse
+# trade for a single binary we already version-fix explicitly.
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y curl \
+    && apt-get install --no-install-recommends -y \
+        curl \
+        ffmpeg=7:4.4.2-0ubuntu0.22.04.1 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system interviewpilot \
     && useradd --system --gid interviewpilot --home-dir /app --shell /usr/sbin/nologin interviewpilot \
