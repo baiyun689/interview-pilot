@@ -258,6 +258,136 @@ Compose 使用非 `guest` RabbitMQ 用户 `interview_pilot`。RabbitMQ 默认限
 - `DASHSCOPE_EMBEDDING_API_KEY=你的 DashScope Key`
 - Qdrant 连接配置，Docker Compose 默认使用内置 `qdrant` 服务
 
+## 语音面试（Voice Interview）
+
+语音面试是可选的增强输入方式，默认关闭。打开后，面试官提问会先由 TTS 异步合成语音
+（可降级），考生用浏览器 `MediaRecorder` 按题录音上传，后端调用 DashScope 非实时 ASR
+异步转写，考生确认（可修改错别字和技术词）转写文本后提交答案。
+
+这是**半双工、文件式**的语音链路，不是实时通话：一轮只处理一段完整录音，转写任务在
+RabbitMQ worker 内执行；确认后的文本才是领域事实，报告只使用确认文本。链路设计为
+可恢复——上传幂等（`uploadRequestId`）、任务 epoch fencing、乐观锁、延迟重试与 DLQ、
+私有媒体存储，断线或重复消息都不会破坏状态机。
+
+### 配置
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `VOICE_ENABLED` | `false` | 总开关；关闭时文字面试完全不受影响，健康检查也不会降级 |
+| `DASHSCOPE_SPEECH_API_KEY` | （空） | DashScope 语音 API Key，ASR 必需 |
+| `DASHSCOPE_SPEECH_BASE_URL` | `https://dashscope.aliyuncs.com/api/v1` | ASR/TTS 共用端点（TTS 复用 ASR 凭据） |
+| `DASHSCOPE_ASR_MODEL` | `fun-asr-flash-2026-06-15` | ASR 模型 |
+| `DASHSCOPE_ASR_TIMEOUT` | `60s` | ASR 调用超时 |
+| `DASHSCOPE_TTS_MODEL` | `cosyvoice-v3-flash` | TTS 模型 |
+| `DASHSCOPE_TTS_VOICE` | `longanyang` | TTS 音色 |
+| `DASHSCOPE_TTS_TIMEOUT` | `30s` | TTS 调用超时 |
+| `VOICE_FILES_ROOT` | `./data/voice` | 媒体根目录（Compose 中是 `voice_files` 卷） |
+| `VOICE_MAX_UPLOAD_BYTES` | `8388608` | 单次上传上限 8 MiB（模块内流式强制） |
+| `VOICE_MAX_RECORDING_DURATION` | `5m` | 最长录音时长 |
+| `VOICE_MEDIA_RETENTION` | `7d` | 媒体保留期 |
+| `VOICE_CLEANUP_INTERVAL` | `PT10M` | 清理调度周期 |
+| `VOICE_CLEANUP_INITIAL_DELAY` | `PT2M` | 清理首次延迟 |
+| `VOICE_CLEANUP_BATCH_SIZE` | `50` | 每个清扫阶段每轮最多处理行数 |
+| `VOICE_CLEANUP_STUCK_TASK_THRESHOLD` | `PT30M` | 卡住任务判定阈值 |
+| `VOICE_CLEANUP_ORPHAN_GRACE` | `PT24H` | 孤儿文件最短存活时间 |
+| `VOICE_CLEANUP_CLAIM_TTL` | `PT30M` | 清理运行 Redis claim 时长 |
+
+启用语音：在 `.env` 中设置 `VOICE_ENABLED=true` 并填写 `DASHSCOPE_SPEECH_API_KEY`（ASR
+必需；TTS 未配置时录音转写仍可用，问题无语音直接显示文本）。Compose 显式枚举全部变量，
+无需 `env_file`。上传限流链路为「Nginx 9m → Spring multipart 8 MiB 文件 / 9 MiB 请求 →
+模块 8 MiB 流式上限」，模块内的上限才是权威限制。
+
+### API 流程
+
+1. `GET /api/voice/capabilities` → `{enabled, supportedMimeTypes, maxRecordingSeconds, maxUploadBytes, ttsEnabled}`，前端据此决定是否展示录音入口。
+2. `GET /api/interviews/{sessionId}/turns/{turnNo}/speech`：`PENDING/SYNTHESIZING` 返回 202 需轮询；`READY` 返回 200 与 `mediaUrl`；`NOT_AVAILABLE` 表示无语音（TEXT 会话或 TTS 未配置）。
+3. `POST /api/interviews/{sessionId}/turns/{turnNo}/voice-recordings`（multipart：`uploadRequestId` 参数 + `audio` 文件）→ 202 返回 `{recordingId, status, transcriptionTaskId}`。同一 `uploadRequestId` 同内容重放返回原状态（幂等）；不同内容返回 409 `REQUEST_ID_CONFLICT`。
+4. `GET /api/interviews/{sessionId}/voice-recordings/{recordingId}` 轮询：`READY` 后返回 `rawTranscript`（可编辑）与 `retryable` 标志。
+5. `POST /api/interviews/{sessionId}/answers/stream` 提交 `{requestId, answer, inputMode: "VOICE", recordingId}`，SSE 流程与文字一致；转写确认/修改后的文本就是答案正文。
+6. `GET /api/interviews/{sessionId}/speech/{speechId}/media` 支持 HTTP Range（206/416），供浏览器音频播放；`POST .../speech/retry` 手动重试合成。
+
+### 失败与降级
+
+- **ASR 失败**：录音进入 `FAILED`（带 `safe_error`）。前端可重录（新 `uploadRequestId`）
+  或重试（原录音，仅当媒体仍在时）；重试耗尽后任务进入 `DEAD`，仍可手动重试。旧 epoch
+  的迟到消息不能覆盖新结果。
+- **TTS 失败**：该题无语音，直接显示问题文本，答题不受影响；可手动重试合成。
+- **文字回退**：任何时刻都可放弃录音改用文字回答；前端对已上传录音做 best-effort
+  discard，避免悬挂到保留期清理。
+- **降级语义**：ASR 是语音输入的必要能力，TTS 是可降级的播放能力；语音故障只影响语音
+  路径，不触碰面试状态机与报告事实。
+
+### 媒体保留与清理
+
+语音媒体（录音与合成语音）在 `VOICE_FILES_ROOT` 下按不可变键存储（`{userId}/{sessionId}/...`），
+默认保留 7 天。清理扫描器每 10 分钟运行一次，采用「先标记状态、再删除文件、最后保存完成
+事实」的 mark-before-delete 流程：过期录音/语音行先置为已清理状态，随后删除文件；孤儿文件
+（崩溃残留、事务回滚残留）在满足 24 小时宽限期后回收，卡住的任务（转写中/合成中无进展）
+超时后恢复为失败；文件已不存在、进程中断或重复消息都幂等，不会误删仍被引用且未过期的媒体。
+
+### 非目标
+
+- 无 WebSocket 实时语音：首版是按题半双工、文件式 ASR；未来实时化只替换采集与识别 Adapter，状态机与报告模型不变。
+- 不根据声音特征评分：无声纹、情绪或作弊判断，语音只负责输入，不参与评分。
+- 不支持 MaaS workspace 模式：仅支持标准 DashScope 域名 + API Key 认证。
+
+### 验收命令
+
+```text
+.\gradlew.bat test
+cd frontend
+pnpm exec vitest run
+pnpm build
+cd ..
+docker compose config
+docker compose up -d --build
+docker compose ps --all
+git diff --check
+```
+
+### 手工验收清单
+
+1. 创建 VOICE 标准面试。
+2. 听到自我介绍问题；禁用自动播放后可手动播放。
+3. 录制包含 JVM、Spring 事务、MySQL 等术语的回答。
+4. 刷新页面，转写任务仍能恢复。
+5. 修改一处转写文字并提交，数据库答案与修改后文本一致。
+6. 完成追问，验证追问也有 TTS，且追问不计主问题数。
+7. 模拟 ASR 失败，验证重录、重试和文字回退。
+8. 模拟 TTS 失败，验证文字答题不受影响。
+9. 完成面试并生成报告，报告只使用确认后的文字。
+
+### 真实 Provider 冒烟测试
+
+适配器的请求/响应结构由 WireMock 测试固定，但**尚未用真实 Key 在线验证**。上线前请用
+真实 `DASHSCOPE_SPEECH_API_KEY` 跑以下命令（注意：DashScope 文档可能更新字段名，
+以 <https://help.aliyun.com> 当前文档为准，必要时按返回结构调整）：
+
+ASR（非实时文件识别，同步结果）：
+
+```bash
+curl -sS -X POST https://dashscope.aliyuncs.com/api/v1/services/audio/asr/recognition \
+  -H "Authorization: Bearer $DASHSCOPE_SPEECH_API_KEY" \
+  -F "model=fun-asr-flash-2026-06-15" \
+  -F "file=@sample.mp3;type=audio/mpeg" \
+  -F 'format=mp3'
+# 预期: {"output":{"text":"...识别文本..."},"request_id":"...","usage":{...}}
+```
+
+TTS（CosyVoice 非实时，JSON 信封或裸音频两种形态之一）：
+
+```bash
+curl -sS -X POST https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation \
+  -H "Authorization: Bearer $DASHSCOPE_SPEECH_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"cosyvoice-v3-flash","voice":"longanyang","input":{"text":"请用一分钟介绍自己。"}}'
+# 预期: 202 + task_id（异步）或 200 音频流/{"output":{"audio":{"url":"临时URL"}}}
+```
+
+后端适配器已兼容「返回 `output.audio.url` 临时 URL（自动限流下载）」与「直接返回音频流」
+两种形态；字段名如与返回不符，`safe_error` 会保留诊断信息（不会把 Provider 原文返回给
+前端）。
+
 ## 使用与 API 流程
 
 1. 调用 `POST /api/resumes` 上传 TXT、PDF 或 DOCX 简历。响应包含持久化分析任务 ID；标准化内容相同的重复简历会返回已有简历和任务。
