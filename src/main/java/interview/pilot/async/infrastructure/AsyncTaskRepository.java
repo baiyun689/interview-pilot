@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -46,6 +47,6 @@ public interface AsyncTaskRepository extends JpaRepository<AsyncTaskEntity, Long
    * older than the delayed-retry ladder — an old row means the message is gone and the
    * recording/speech is stuck (pending dispatcher only rescans PENDING).
    */
-  List<AsyncTaskEntity> findByTaskTypeAndStatusAndUpdatedAtBefore(
+  Page<AsyncTaskEntity> findByTaskTypeAndStatusAndUpdatedAtBefore(
       AsyncTaskType type, AsyncTaskStatus status, Instant before, Pageable pageable);
 }

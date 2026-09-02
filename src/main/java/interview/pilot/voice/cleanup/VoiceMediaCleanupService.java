@@ -14,12 +14,16 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -121,11 +125,20 @@ import interview.pilot.voice.storage.VoiceStorageKeys;
  * residue a hard kill can produce is an unreferenced file, which is exactly what the orphan
  * sweep reclaims.
  *
+ * <p>Head-of-line protection: every batch phase walks successive candidate pages (stable
+ * {@code ORDER BY id}) within one run, skipping rows that deferred earlier in the same run —
+ * a poisoned row therefore cannot starve the rows behind it during the tick. The walk is
+ * bounded: it stops once {@code batchSize} rows were finished or {@code MAX_SCAN_FACTOR *
+ * batchSize} candidates were seen, and each tick restarts at page 0, so the residual is
+ * documented and deliberate: a permanently-poisoned row (tampered key, eternally locked file)
+ * re-heads every tick, defers again, and the walk passes it. The {@code deferred} metric on
+ * {@link VoiceCleanupMetrics} is the alert signal for that condition (Task 12 dashboarding).
+ *
  * <p>Concurrency: one Redis processing claim ({@value #RUN_CLAIM_KEY}, TTL
  * {@code claimTtl}) gates the whole run so two instances (or two overlapping ticks) never walk
  * the same candidates; every step is additionally idempotent and row-locked, so even a claim
- * loss degrades to harmless double-processing. Each phase claims at most {@code batchSize}
- * candidates (no loops over pages — the next tick continues where this one stopped).
+ * loss degrades to harmless double-processing. The claim is always released in a
+ * {@code finally}, so an aborted run never wedges the next tick.
  */
 @Service
 @ConditionalOnProperty(prefix = "app.voice", name = "enabled", havingValue = "true")
@@ -136,6 +149,8 @@ public class VoiceMediaCleanupService {
   private static final Logger log = LoggerFactory.getLogger(VoiceMediaCleanupService.class);
   private static final String STAGING_TEMP_PREFIX = ".media-";
   private static final String STAGING_TEMP_SUFFIX = ".tmp";
+  /** Scan cap per batch phase per run: {@code MAX_SCAN_FACTOR * batchSize} candidates. */
+  private static final int MAX_SCAN_FACTOR = 10;
 
   private final VoiceRecordingRepository recordings;
   private final QuestionSpeechRepository speeches;
@@ -209,30 +224,74 @@ public class VoiceMediaCleanupService {
     }
   }
 
+  // ------------------------------------------------------------ batch walk
+
+  /**
+   * Walks bounded candidate pages past rows that defer within this run (head-of-line
+   * protection): a deferred row enters the skip set and is not retried during the tick, so
+   * later rows are reached even when page 0 is full of poison rows. {@code ORDER BY id} keeps
+   * the page iteration stable while rows disappear mid-walk. The walk stops once
+   * {@code batchSize} rows were finished or {@code MAX_SCAN_FACTOR * batchSize} candidates
+   * were seen — the next tick restarts at page 0.
+   */
+  private <T> void walkBatches(
+      Function<Pageable, Page<T>> fetch, Function<T, Long> idOf, Function<T, RowOutcome> process) {
+    Set<Long> deferredIds = new HashSet<>();
+    int finished = 0;
+    int scanned = 0;
+    int scanCap = cleanup.batchSize() * MAX_SCAN_FACTOR;
+    for (int page = 0; scanned < scanCap && finished < cleanup.batchSize(); page++) {
+      Page<T> batch = fetch.apply(PageRequest.of(page, cleanup.batchSize(), Sort.by("id")));
+      if (batch.isEmpty()) {
+        return;
+      }
+      for (T candidate : batch) {
+        scanned++;
+        if (deferredIds.contains(idOf.apply(candidate))) {
+          continue; // deferred earlier in this run — walk past it
+        }
+        if (process.apply(candidate) == RowOutcome.DEFERRED) {
+          deferredIds.add(idOf.apply(candidate));
+        } else {
+          finished++;
+        }
+      }
+    }
+  }
+
+  /** Per-candidate outcome of a sweep phase. */
+  private enum RowOutcome {
+    /** The row (and its file) was deleted, or the terminalization was persisted. */
+    DELETED,
+    /** The row is no longer a candidate (a concurrent operation resolved it) — done with it. */
+    RESOLVED,
+    /** The row could not be finished this run — skip it and walk past; retry next tick. */
+    DEFERRED
+  }
+
   // ------------------------------------------------------------ RECEIVING residue
 
   private void sweepReceivingResidue() {
-    PageRequest batch = PageRequest.of(0, cleanup.batchSize());
-    for (VoiceRecordingEntity candidate : recordings.findAllByStatusInAndExpiresAtBefore(
-        List.of(VoiceRecordingStatus.RECEIVING), clock.instant(), batch)) {
-      deleteRecording(candidate, row -> row.getStatus() == VoiceRecordingStatus.RECEIVING
-          && row.getExpiresAt().isBefore(clock.instant()), "receiving");
-    }
+    walkBatches(
+        page -> recordings.findAllByStatusInAndExpiresAtBefore(
+            List.of(VoiceRecordingStatus.RECEIVING), clock.instant(), page),
+        VoiceRecordingEntity::getId,
+        row -> deleteRecording(row, current -> current.getStatus() == VoiceRecordingStatus.RECEIVING
+            && current.getExpiresAt().isBefore(clock.instant()), "receiving"));
   }
 
   // ------------------------------------------------------------ DISCARDED recordings
 
   private void sweepDiscarded() {
-    PageRequest batch = PageRequest.of(0, cleanup.batchSize());
-    for (VoiceRecordingEntity candidate : recordings.findAllByStatusIn(
-        List.of(VoiceRecordingStatus.DISCARDED), batch)) {
-      deleteRecording(candidate,
-          row -> row.getStatus() == VoiceRecordingStatus.DISCARDED, "discarded");
-    }
+    walkBatches(
+        page -> recordings.findAllByStatusIn(List.of(VoiceRecordingStatus.DISCARDED), page),
+        VoiceRecordingEntity::getId,
+        row -> deleteRecording(row,
+            current -> current.getStatus() == VoiceRecordingStatus.DISCARDED, "discarded"));
   }
 
   /** One recording through the mark → file → completion-fact state machine. */
-  private void deleteRecording(VoiceRecordingEntity candidate,
+  private RowOutcome deleteRecording(VoiceRecordingEntity candidate,
       Predicate<VoiceRecordingEntity> deletable, String kind) {
     Long id = candidate.getId();
     DeletionMark mark = transactions.execute(status -> {
@@ -243,22 +302,27 @@ public class VoiceMediaCleanupService {
       return new DeletionMark(row.getStorageKey());
     });
     if (mark == null) {
-      return;
+      return RowOutcome.RESOLVED;
     }
     if (!deleteFile(mark.storageKey(), kind)) {
-      return; // deferred: the row keeps its file and is retried by a later run
+      return RowOutcome.DEFERRED; // the row keeps its file and is retried by a later run
     }
-    transactions.executeWithoutResult(status ->
-        recordings.findByIdForUpdate(id).filter(deletable).ifPresent(row -> {
+    boolean deleted = Boolean.TRUE.equals(transactions.execute(status ->
+        recordings.findByIdForUpdate(id).filter(deletable).map(row -> {
           recordings.delete(row);
           metrics.deleted(kind);
-        }));
+          return true;
+        }).orElse(false)));
+    return deleted ? RowOutcome.DELETED : RowOutcome.RESOLVED;
   }
 
   /**
    * Deletes one immutable media file. {@code null} key (no media ever stored) is success;
    * absent file is success (idempotent cleanup); any storage failure — including the
    * {@link VoiceMediaStorageException} that wraps a Windows sharing violation — defers the row.
+   * Security rejections (symlink, non-regular file, hard link, unsafe permissions) surface as
+   * {@link IllegalArgumentException} per the store contract and also defer the row: they must
+   * never abort the whole run and wedge every later tick at the same poison row.
    */
   private boolean deleteFile(String storageKey, String kind) {
     if (storageKey == null) {
@@ -274,6 +338,11 @@ public class VoiceMediaCleanupService {
           storageKey, exception.getMessage());
       metrics.deferred(kind);
       return false;
+    } catch (IllegalArgumentException exception) {
+      log.warn("voice cleanup file deletion rejected key={} reason={}",
+          storageKey, exception.getMessage());
+      metrics.deferred(kind);
+      return false;
     }
   }
 
@@ -281,59 +350,74 @@ public class VoiceMediaCleanupService {
 
   private void recoverStuckTranscriptions() {
     Instant stale = clock.instant().minus(cleanup.stuckTaskThreshold());
-    PageRequest batch = PageRequest.of(0, cleanup.batchSize());
-    for (AsyncTaskEntity task : tasks.findByTaskTypeAndStatusAndUpdatedAtBefore(
-        AsyncTaskType.VOICE_TRANSCRIPTION, AsyncTaskStatus.PUBLISHED, stale, batch)) {
-      UUID recordingId = bizKeyResourceId(task,
-          VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX);
-      if (recordingId == null) {
-        continue;
+    walkBatches(
+        page -> tasks.findByTaskTypeAndStatusAndUpdatedAtBefore(
+            AsyncTaskType.VOICE_TRANSCRIPTION, AsyncTaskStatus.PUBLISHED, stale, page),
+        AsyncTaskEntity::getId,
+        this::recoverStuckTranscription);
+  }
+
+  private RowOutcome recoverStuckTranscription(AsyncTaskEntity task) {
+    UUID recordingId = bizKeyResourceId(task, VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX);
+    if (recordingId == null) {
+      return RowOutcome.RESOLVED;
+    }
+    VoiceRecordingEntity recording = recordings.findByRecordingId(recordingId).orElse(null);
+    if (recording == null
+        || recording.getStatus() != VoiceRecordingStatus.TRANSCRIBING) {
+      return RowOutcome.RESOLVED; // the coarse task query needs the recording-side confirmation
+    }
+    try {
+      boolean terminalized = transcriptionHandler.markDeadCurrent(
+          new TaskMessage(task.getTaskId(), AsyncTaskType.VOICE_TRANSCRIPTION,
+              task.getBizKey(), task.getExecutionEpoch()));
+      if (terminalized) {
+        metrics.deleted("stuck_transcription");
+        return RowOutcome.DELETED;
       }
-      VoiceRecordingEntity recording = recordings.findByRecordingId(recordingId).orElse(null);
-      if (recording == null
-          || recording.getStatus() != VoiceRecordingStatus.TRANSCRIBING) {
-        continue; // the coarse task query needs the recording-side confirmation
-      }
-      try {
-        boolean terminalized = transcriptionHandler.markDeadCurrent(
-            new TaskMessage(task.getTaskId(), AsyncTaskType.VOICE_TRANSCRIPTION,
-                task.getBizKey(), task.getExecutionEpoch()));
-        if (terminalized) {
-          metrics.deleted("stuck_transcription");
-        }
-      } catch (RuntimeException exception) {
-        log.warn("voice cleanup stuck transcription deferred taskId={} reason={}",
-            task.getTaskId(), exception.getMessage());
-        metrics.deferred("stuck_transcription");
-      }
+      metrics.deferred("stuck_transcription");
+      return RowOutcome.DEFERRED;
+    } catch (RuntimeException exception) {
+      log.warn("voice cleanup stuck transcription deferred taskId={} reason={}",
+          task.getTaskId(), exception.getMessage());
+      metrics.deferred("stuck_transcription");
+      return RowOutcome.DEFERRED;
     }
   }
 
   private void recoverStuckSyntheses() {
     Instant stale = clock.instant().minus(cleanup.stuckTaskThreshold());
-    PageRequest batch = PageRequest.of(0, cleanup.batchSize());
-    for (AsyncTaskEntity task : tasks.findByTaskTypeAndStatusAndUpdatedAtBefore(
-        AsyncTaskType.QUESTION_SPEECH_SYNTHESIS, AsyncTaskStatus.PUBLISHED, stale, batch)) {
-      UUID speechId = bizKeyResourceId(task, QuestionSpeechSynthesisRetryPolicy.BIZ_KEY_PREFIX);
-      if (speechId == null) {
-        continue;
+    walkBatches(
+        page -> tasks.findByTaskTypeAndStatusAndUpdatedAtBefore(
+            AsyncTaskType.QUESTION_SPEECH_SYNTHESIS, AsyncTaskStatus.PUBLISHED, stale, page),
+        AsyncTaskEntity::getId,
+        this::recoverStuckSynthesis);
+  }
+
+  private RowOutcome recoverStuckSynthesis(AsyncTaskEntity task) {
+    UUID speechId = bizKeyResourceId(task, QuestionSpeechSynthesisRetryPolicy.BIZ_KEY_PREFIX);
+    if (speechId == null) {
+      return RowOutcome.RESOLVED;
+    }
+    QuestionSpeechEntity speech = speeches.findBySpeechId(speechId).orElse(null);
+    if (speech == null || speech.getStatus() != QuestionSpeechStatus.SYNTHESIZING) {
+      return RowOutcome.RESOLVED;
+    }
+    try {
+      boolean terminalized = synthesisHandler.markDeadCurrent(
+          new TaskMessage(task.getTaskId(), AsyncTaskType.QUESTION_SPEECH_SYNTHESIS,
+              task.getBizKey(), task.getExecutionEpoch()));
+      if (terminalized) {
+        metrics.deleted("stuck_synthesis");
+        return RowOutcome.DELETED;
       }
-      QuestionSpeechEntity speech = speeches.findBySpeechId(speechId).orElse(null);
-      if (speech == null || speech.getStatus() != QuestionSpeechStatus.SYNTHESIZING) {
-        continue;
-      }
-      try {
-        boolean terminalized = synthesisHandler.markDeadCurrent(
-            new TaskMessage(task.getTaskId(), AsyncTaskType.QUESTION_SPEECH_SYNTHESIS,
-                task.getBizKey(), task.getExecutionEpoch()));
-        if (terminalized) {
-          metrics.deleted("stuck_synthesis");
-        }
-      } catch (RuntimeException exception) {
-        log.warn("voice cleanup stuck synthesis deferred taskId={} reason={}",
-            task.getTaskId(), exception.getMessage());
-        metrics.deferred("stuck_synthesis");
-      }
+      metrics.deferred("stuck_synthesis");
+      return RowOutcome.DEFERRED;
+    } catch (RuntimeException exception) {
+      log.warn("voice cleanup stuck synthesis deferred taskId={} reason={}",
+          task.getTaskId(), exception.getMessage());
+      metrics.deferred("stuck_synthesis");
+      return RowOutcome.DEFERRED;
     }
   }
 
@@ -355,20 +439,20 @@ public class VoiceMediaCleanupService {
 
   private void sweepExpiredSessions() {
     Instant cutoff = clock.instant().minus(voice.retention());
-    PageRequest batch = PageRequest.of(0, cleanup.batchSize());
-    for (InterviewSessionEntity candidate : sessions.findAllByStatusAndCompletedAtBefore(
-        SessionStatus.COMPLETED, cutoff, batch)) {
-      sweepExpiredSession(candidate);
-    }
+    walkBatches(
+        page -> sessions.findAllByStatusAndCompletedAtBefore(
+            SessionStatus.COMPLETED, cutoff, page),
+        InterviewSessionEntity::getId,
+        this::sweepExpiredSession);
   }
 
   /**
    * One expired COMPLETED session through the mark → files → completion-fact state machine:
    * every recording (any status, including ATTACHED) and every question_speech row is removed
-   * together with its media file. A row whose file deletion failed is deferred — file and row
-   * stay for a later run.
+   * together with its media file. A row whose file deletion failed defers the whole session —
+   * files and rows stay for a later run and the walk moves on to the next session.
    */
-  private void sweepExpiredSession(InterviewSessionEntity candidate) {
+  private RowOutcome sweepExpiredSession(InterviewSessionEntity candidate) {
     Long sessionId = candidate.getId();
     ExpiredSessionRows rows = transactions.execute(status -> {
       InterviewSessionEntity session = sessions.findByIdForUpdate(sessionId).orElse(null);
@@ -380,19 +464,27 @@ public class VoiceMediaCleanupService {
           speeches.findAllBySessionId(session.getId()));
     });
     if (rows == null) {
-      return;
+      return RowOutcome.RESOLVED;
     }
+    boolean deferred = false;
     Set<Long> deletableRecordings = new HashSet<>();
     Set<Long> deletableSpeeches = new HashSet<>();
     for (VoiceRecordingEntity row : rows.recordings()) {
       if (deleteFile(row.getStorageKey(), "retention_recording")) {
         deletableRecordings.add(row.getId());
+      } else {
+        deferred = true;
       }
     }
     for (QuestionSpeechEntity row : rows.speeches()) {
       if (deleteFile(row.getStorageKey(), "retention_speech")) {
         deletableSpeeches.add(row.getId());
+      } else {
+        deferred = true;
       }
+    }
+    if (deferred) {
+      return RowOutcome.DEFERRED; // no row is deleted: the session retries as a whole next tick
     }
     transactions.executeWithoutResult(status -> {
       InterviewSessionEntity session = sessions.findByIdForUpdate(sessionId).orElse(null);
@@ -416,6 +508,7 @@ public class VoiceMediaCleanupService {
         });
       }
     });
+    return RowOutcome.DELETED;
   }
 
   private boolean expired(InterviewSessionEntity session) {
