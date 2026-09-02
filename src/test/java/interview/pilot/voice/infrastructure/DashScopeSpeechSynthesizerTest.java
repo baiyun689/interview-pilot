@@ -42,6 +42,7 @@ import interview.pilot.voice.config.VoiceProperties.Asr;
  * a real key (Task 12).
  */
 class DashScopeSpeechSynthesizerTest {
+  private static final String COSYVOICE_ENDPOINT = "/services/audio/tts/SpeechSynthesizer";
   private static final String TEXT = "请自我介绍";
   private static final byte[] AUDIO = "fake-mp3-bytes".getBytes(StandardCharsets.UTF_8);
   private static final long MAX_AUDIO_BYTES = 4096;
@@ -75,12 +76,12 @@ class DashScopeSpeechSynthesizerTest {
           "model": "cosyvoice-v3-flash",
           "input": {
             "text": "请自我介绍",
-            "voice": "longanyang"
-          },
-          "parameters": {"format": "mp3"}
+            "voice": "longanyang",
+            "format": "mp3"
+          }
         }
         """;
-    wireMock.stubFor(post(urlEqualTo(DashScopeSpeechSynthesizer.ENDPOINT_PATH))
+    wireMock.stubFor(post(urlEqualTo(COSYVOICE_ENDPOINT))
         .withRequestBody(equalToJson(body))
         .willReturn(aResponse().withStatus(200)
             .withHeader("Content-Type", "audio/mpeg")
@@ -91,7 +92,7 @@ class DashScopeSpeechSynthesizerTest {
     assertThat(speech.audio()).isEqualTo(AUDIO);
     assertThat(speech.mediaType()).isEqualTo("audio/mpeg");
     assertThat(speech.providerRequestId()).isNull();
-    wireMock.verify(postRequestedFor(urlEqualTo(DashScopeSpeechSynthesizer.ENDPOINT_PATH))
+    wireMock.verify(postRequestedFor(urlEqualTo(COSYVOICE_ENDPOINT))
         .withHeader("Authorization", containing("Bearer sk-test")));
   }
 

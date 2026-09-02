@@ -53,7 +53,8 @@ import tools.jackson.databind.ObjectMapper;
  */
 public class DashScopeSpeechSynthesizer implements SpeechSynthesizer {
 
-  static final String ENDPOINT_PATH = "/services/aigc/multimodal-generation/generation";
+  /** DashScope's non-streaming CosyVoice HTTP endpoint. */
+  static final String ENDPOINT_PATH = "/services/audio/tts/SpeechSynthesizer";
   /** The synthesis response envelope is tiny; anything larger is not the documented JSON shape. */
   private static final long JSON_ENVELOPE_MAX_BYTES = 64 * 1024;
   private static final ObjectMapper JSON = new ObjectMapper();
@@ -205,8 +206,8 @@ public class DashScopeSpeechSynthesizer implements SpeechSynthesizer {
         "model", profile.model(),
         "input", Map.of(
             "text", text,
-            "voice", profile.voice()),
-        "parameters", Map.of("format", "mp3"));
+            "voice", profile.voice(),
+            "format", "mp3"));
   }
 
   private record Download(byte[] audio, String mediaType) {}
