@@ -1,6 +1,7 @@
 package interview.pilot.voice.cleanup;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.clearInvocations;
@@ -192,6 +193,9 @@ class VoiceMediaCleanupIT {
 
   @Autowired
   private VoiceProperties voice;
+
+  @Autowired
+  private VoiceCleanupProperties cleanup;
 
   @Autowired
   private JdbcTemplate jdbc;
@@ -542,6 +546,73 @@ class VoiceMediaCleanupIT {
       assertThat(recordings.findById(row.getId())).isEmpty();
     }
     verify(mediaStore, times(rows.size())).delete(anyString()); // each file deleted exactly once
+  }
+
+  // ---------------------------------------------------------------- deferral and abort
+
+  @Test
+  void securityRejectionDefersTheRowAndTheBatchContinues() {
+    var poison = seedRecording(session, VoiceRecordingStatus.DISCARDED, expiresFuture());
+    String poisonKey = keyOf(session, VoiceMediaKind.RECORDING, poison.getRecordingId());
+    storeFile(session, VoiceMediaKind.RECORDING, poison.getRecordingId(), "poison");
+    var healthy = seedRecording(session, VoiceRecordingStatus.DISCARDED, expiresFuture());
+    storeFile(session, VoiceMediaKind.RECORDING, healthy.getRecordingId(), "healthy");
+    // a store security rejection (symlink/non-regular/hard-link/perms) surfaces as
+    // IllegalArgumentException — it must defer only this row, never abort the whole run
+    doThrow(new IllegalArgumentException("Voice media storage key is invalid"))
+        .when(mediaStore).delete(poisonKey);
+
+    cleanupService.runCleanup();
+
+    assertThat(recordings.findById(poison.getId())).isPresent();
+    assertThat(Files.exists(mediaRoot().resolve(poisonKey))).isTrue();
+    assertThat(recordings.findById(healthy.getId())).isEmpty();
+    assertThat(Files.exists(mediaRoot().resolve(
+        keyOf(session, VoiceMediaKind.RECORDING, healthy.getRecordingId())))).isFalse();
+  }
+
+  @Test
+  void deferredRowsDoNotBlockLaterRowsWithinARun() throws Exception {
+    // fill page 0 entirely with poison rows: a directory at the key path is a genuine
+    // security rejection (non-regular file), so every tick defers these rows forever —
+    // the walk must pass them and still sweep the healthy row on the next page
+    int poisonCount = cleanup.batchSize();
+    List<VoiceRecordingEntity> poison = new ArrayList<>();
+    for (int i = 0; i < poisonCount; i++) {
+      var row = seedRecording(session, VoiceRecordingStatus.DISCARDED, expiresFuture());
+      Files.createDirectories(mediaRoot().resolve(
+          keyOf(session, VoiceMediaKind.RECORDING, row.getRecordingId())));
+      poison.add(row);
+    }
+    var healthy = seedRecording(session, VoiceRecordingStatus.DISCARDED, expiresFuture());
+    storeFile(session, VoiceMediaKind.RECORDING, healthy.getRecordingId(), "healthy");
+
+    cleanupService.runCleanup();
+
+    for (VoiceRecordingEntity row : poison) {
+      assertThat(recordings.findById(row.getId())).isPresent();
+    }
+    assertThat(recordings.findById(healthy.getId())).isEmpty();
+    assertThat(Files.exists(mediaRoot().resolve(
+        keyOf(session, VoiceMediaKind.RECORDING, healthy.getRecordingId())))).isFalse();
+  }
+
+  @Test
+  void claimIsReleasedWhenARunAbortsMidSweep() {
+    var row = seedRecording(session, VoiceRecordingStatus.DISCARDED, expiresFuture());
+    storeFile(session, VoiceMediaKind.RECORDING, row.getRecordingId(), "audio");
+    // an unexpected failure aborts the run; the finally must release the run claim
+    doThrow(new RuntimeException("simulated crash")).doCallRealMethod()
+        .when(mediaStore).delete(anyString());
+
+    assertThatThrownBy(() -> cleanupService.runCleanup())
+        .isInstanceOf(RuntimeException.class);
+
+    // the released claim lets the next run acquire and converge on the same row
+    cleanupService.runCleanup();
+    assertThat(recordings.findById(row.getId())).isEmpty();
+    assertThat(Files.exists(mediaRoot().resolve(
+        keyOf(session, VoiceMediaKind.RECORDING, row.getRecordingId())))).isFalse();
   }
 
   // ---------------------------------------------------------------- Windows sharing violation
