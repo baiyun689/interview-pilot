@@ -4,6 +4,8 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -54,6 +56,8 @@ import interview.pilot.voice.infrastructure.VoiceRecordingRepository;
 @ConditionalOnProperty(prefix = "app.voice", name = "enabled", havingValue = "true")
 public class VoiceTranscriptionHandler {
 
+  private static final Logger log = LoggerFactory.getLogger(VoiceTranscriptionHandler.class);
+
   public static final int MAX_TRANSCRIPT_CHARS = 20_000;
 
   static final String EMPTY_TRANSCRIPT_ERROR = "The ASR provider returned no transcript";
@@ -69,6 +73,7 @@ public class VoiceTranscriptionHandler {
   private final RecognitionContextAssembler contextAssembler;
   private final VoiceProperties properties;
   private final AiMetrics metrics;
+  private final VoiceMetrics voiceMetrics;
   private final TransactionTemplate transactions;
 
   public VoiceTranscriptionHandler(
@@ -79,6 +84,7 @@ public class VoiceTranscriptionHandler {
       RecognitionContextAssembler contextAssembler,
       VoiceProperties properties,
       AiMetrics metrics,
+      VoiceMetrics voiceMetrics,
       PlatformTransactionManager transactionManager) {
     this.recordings = recordings;
     this.sessions = sessions;
@@ -87,6 +93,7 @@ public class VoiceTranscriptionHandler {
     this.contextAssembler = contextAssembler;
     this.properties = properties;
     this.metrics = metrics;
+    this.voiceMetrics = voiceMetrics;
     this.transactions = new TransactionTemplate(transactionManager);
   }
 
@@ -170,8 +177,9 @@ public class VoiceTranscriptionHandler {
         .orElseThrow(() -> new IllegalStateException("Voice recording session is missing"));
     RecognitionContext context = contextAssembler.assemble(session);
     return new BeginResult(new Work(
-        task.getTaskId(), recording.getRecordingId(), recording.getStorageKey(),
-        recording.getContentType(), recording.getExecutionEpoch(), attemptGeneration, context),
+        task.getTaskId(), recording.getRecordingId(), recording.getSessionId(),
+        recording.getStorageKey(), recording.getContentType(),
+        recording.getExecutionEpoch(), attemptGeneration, context),
         false);
   }
 
@@ -226,6 +234,15 @@ public class VoiceTranscriptionHandler {
     });
     if (outcome == Outcome.TERMINAL) {
       metrics.aiCall(provider, "success", latency);
+      // The transcript text itself is never logged (privacy rule, plan §16).
+      voiceMetrics.asr(provider, transcript.model(), "success", latency,
+          transcript.text().length());
+      log.info("voice_asr_success taskId={} recordingId={} sessionId={} executionEpoch={} "
+              + "provider={} model={} providerRequestId={} asrDurationMillis={} "
+              + "transcriptChars={}",
+          work.taskId(), work.recordingId(), work.sessionId(), work.epoch(),
+          provider, transcript.model(), transcript.providerRequestId(),
+          latency.toMillis(), transcript.text().length());
     }
     return outcome;
   }
@@ -246,6 +263,10 @@ public class VoiceTranscriptionHandler {
     });
     if (outcome == Outcome.TERMINAL) {
       metrics.aiCall(provider, "failure", latency);
+      voiceMetrics.asr(provider, "unknown", "failure", latency, null);
+      log.warn("voice_asr_failed taskId={} recordingId={} sessionId={} executionEpoch={} "
+              + "code={} safeError={}",
+          work.taskId(), work.recordingId(), work.sessionId(), work.epoch(), code, detail);
     }
     return outcome;
   }
@@ -265,6 +286,8 @@ public class VoiceTranscriptionHandler {
     if (!current) {
       return Outcome.STALE;
     }
+    log.warn("voice_asr_retryable taskId={} recordingId={} sessionId={} executionEpoch={}",
+        work.taskId(), work.recordingId(), work.sessionId(), work.epoch());
     throw new VoiceTranscriptionRetryableException(RETRYABLE_ERROR, work.attemptGeneration());
   }
 
@@ -300,6 +323,10 @@ public class VoiceTranscriptionHandler {
     task.setStatus(AsyncTaskStatus.DEAD);
     task.setLastError("Voice transcription retries exhausted");
     metrics.afterCommit(() -> metrics.taskFailed(AsyncTaskType.VOICE_TRANSCRIPTION, "dead"));
+    voiceMetrics.retry("voice_transcription", "exhausted");
+    log.warn("voice_asr_exhausted taskId={} recordingId={} sessionId={} executionEpoch={}",
+        task.getTaskId(), recording.getRecordingId(), recording.getSessionId(),
+        recording.getExecutionEpoch());
     return true;
   }
 
@@ -365,7 +392,7 @@ public class VoiceTranscriptionHandler {
       UUID recordingId, boolean terminal, int attemptGeneration, int executionEpoch) {}
 
   private record Work(
-      UUID taskId, UUID recordingId, String storageKey, String contentType,
+      UUID taskId, UUID recordingId, Long sessionId, String storageKey, String contentType,
       long epoch, int attemptGeneration, RecognitionContext context) {}
 
   private record BeginResult(Work work, boolean stale) {}

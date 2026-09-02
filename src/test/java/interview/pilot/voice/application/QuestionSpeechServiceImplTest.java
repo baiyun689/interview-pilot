@@ -88,7 +88,7 @@ class QuestionSpeechServiceImplTest {
     when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
     module = new QuestionSpeechServiceImpl(
         speeches, sessions, turns, tasks, claims, mediaStore,
-        questionSpeechTaskCreator, transactionManager);
+        questionSpeechTaskCreator, mock(VoiceMetrics.class), transactionManager);
     when(claims.clearTerminal(anyString())).thenReturn(ProcessingClaim.ClearResult.CLEARED);
     when(sessions.findBySessionIdAndUserAccountId(session.getSessionId(), 1L))
         .thenReturn(Optional.of(session));

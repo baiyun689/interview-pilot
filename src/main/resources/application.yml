@@ -25,6 +25,14 @@ spring:
     publisher-returns: true
     template:
       mandatory: true
+logging:
+  pattern:
+    # traceId is set globally by TraceIdFilter (common.observability) for HTTP paths; the
+    # console pattern prints it on every line so voice/async event logs are correlated without
+    # a separate traceId= field (RabbitMQ listener threads have no HTTP traceId — correlate
+    # those via taskId + executionEpoch, plan §16).
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %5p [%t] [%X{traceId:-}] %c{1.} - %m%n"
+
 management:
   endpoints:
     web:

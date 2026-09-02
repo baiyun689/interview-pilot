@@ -5,6 +5,8 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -71,6 +73,8 @@ import interview.pilot.voice.storage.VoiceMediaStore;
 @ConditionalOnProperty(prefix = "app.voice", name = "enabled", havingValue = "true")
 public class VoiceSynthesisHandler {
 
+  private static final Logger log = LoggerFactory.getLogger(VoiceSynthesisHandler.class);
+
   static final String EMPTY_AUDIO_ERROR = "The TTS provider returned no audio";
   static final String UNSUPPORTED_AUDIO_ERROR = "The TTS provider returned unsupported audio";
   static final String TEXT_MISMATCH_ERROR = "The question speech text no longer matches the turn question";
@@ -85,6 +89,7 @@ public class VoiceSynthesisHandler {
   private final VoiceMediaStore mediaStore;
   private final VoiceProperties properties;
   private final AiMetrics metrics;
+  private final VoiceMetrics voiceMetrics;
   private final TransactionTemplate transactions;
 
   public VoiceSynthesisHandler(
@@ -96,6 +101,7 @@ public class VoiceSynthesisHandler {
       VoiceMediaStore mediaStore,
       VoiceProperties properties,
       AiMetrics metrics,
+      VoiceMetrics voiceMetrics,
       PlatformTransactionManager transactionManager) {
     this.speeches = speeches;
     this.turns = turns;
@@ -105,6 +111,7 @@ public class VoiceSynthesisHandler {
     this.mediaStore = mediaStore;
     this.properties = properties;
     this.metrics = metrics;
+    this.voiceMetrics = voiceMetrics;
     this.transactions = new TransactionTemplate(transactionManager);
   }
 
@@ -289,6 +296,13 @@ public class VoiceSynthesisHandler {
     });
     if (outcome == Outcome.TERMINAL) {
       metrics.aiCall(work.provider(), "success", latency);
+      // The question text itself is never logged (privacy rule, plan §16).
+      voiceMetrics.tts(work.provider(), work.model(), "success", latency, stored.sizeBytes());
+      log.info("voice_tts_success taskId={} speechId={} sessionId={} executionEpoch={} "
+              + "provider={} model={} voice={} providerRequestId={} bytes={}",
+          work.taskId(), work.speechId(), work.sessionId(), work.epoch(),
+          work.provider(), work.model(), work.voice(), synthesized.providerRequestId(),
+          stored.sizeBytes());
     }
     return outcome;
   }
@@ -309,6 +323,10 @@ public class VoiceSynthesisHandler {
     });
     if (outcome == Outcome.TERMINAL) {
       metrics.aiCall(work.provider(), "failure", latency);
+      voiceMetrics.tts(work.provider(), work.model(), "failure", latency, null);
+      log.warn("voice_tts_failed taskId={} speechId={} sessionId={} executionEpoch={} "
+              + "code={} safeError={}",
+          work.taskId(), work.speechId(), work.sessionId(), work.epoch(), code, detail);
     }
     return outcome;
   }
@@ -328,6 +346,8 @@ public class VoiceSynthesisHandler {
     if (!current) {
       return Outcome.STALE;
     }
+    log.warn("voice_tts_retryable taskId={} speechId={} sessionId={} executionEpoch={}",
+        work.taskId(), work.speechId(), work.sessionId(), work.epoch());
     throw new SpeechSynthesisRetryableException(RETRYABLE_ERROR, work.attemptGeneration());
   }
 
@@ -365,6 +385,10 @@ public class VoiceSynthesisHandler {
     task.setLastError("Voice synthesis retries exhausted");
     metrics.afterCommit(() -> metrics.taskFailed(
         AsyncTaskType.QUESTION_SPEECH_SYNTHESIS, "dead"));
+    voiceMetrics.retry("question_speech_synthesis", "exhausted");
+    log.warn("voice_tts_exhausted taskId={} speechId={} sessionId={} executionEpoch={}",
+        task.getTaskId(), speech.getSpeechId(), speech.getSessionId(),
+        speech.getExecutionEpoch());
     return true;
   }
 

@@ -10,6 +10,8 @@ import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -74,6 +76,8 @@ import interview.pilot.voice.storage.VoiceMediaStore;
 @ConditionalOnProperty(prefix = "app.voice", name = "enabled", havingValue = "true")
 public class QuestionSpeechServiceImpl implements QuestionSpeechModule {
 
+  private static final Logger log = LoggerFactory.getLogger(QuestionSpeechServiceImpl.class);
+
   private final QuestionSpeechRepository speeches;
   private final InterviewSessionRepository sessions;
   private final InterviewTurnRepository turns;
@@ -81,6 +85,7 @@ public class QuestionSpeechServiceImpl implements QuestionSpeechModule {
   private final ProcessingClaim claims;
   private final VoiceMediaStore mediaStore;
   private final QuestionSpeechTaskCreator questionSpeechTaskCreator;
+  private final VoiceMetrics metrics;
   private final TransactionTemplate transactions;
 
   public QuestionSpeechServiceImpl(
@@ -91,6 +96,7 @@ public class QuestionSpeechServiceImpl implements QuestionSpeechModule {
       ProcessingClaim claims,
       VoiceMediaStore mediaStore,
       QuestionSpeechTaskCreator questionSpeechTaskCreator,
+      VoiceMetrics metrics,
       PlatformTransactionManager transactionManager) {
     this.speeches = speeches;
     this.sessions = sessions;
@@ -99,6 +105,7 @@ public class QuestionSpeechServiceImpl implements QuestionSpeechModule {
     this.claims = claims;
     this.mediaStore = mediaStore;
     this.questionSpeechTaskCreator = questionSpeechTaskCreator;
+    this.metrics = metrics;
     this.transactions = new TransactionTemplate(transactionManager);
   }
 
@@ -157,6 +164,16 @@ public class QuestionSpeechServiceImpl implements QuestionSpeechModule {
         .orElseThrow(this::notFound);
     var speech = requireSpeech(session, speechId);
     retrySynthesis(speech.getId());
+    metrics.retry("question_speech_synthesis", "manual");
+    log.info("voice_retry_manual userId={} sessionId={} turnNo={} speechId={} "
+            + "taskType=question_speech_synthesis",
+        user.userId(), sessionId, turnNoOf(speech), speechId);
+  }
+
+  private int turnNoOf(QuestionSpeechEntity speech) {
+    return turns.findById(speech.getTurnId())
+        .map(InterviewTurnEntity::getTurnNo)
+        .orElse(-1);
   }
 
   /** Creates the missing speech row + task; a lost insert race retries the transaction once. */

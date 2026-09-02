@@ -115,6 +115,7 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
   private final VoiceMediaStore mediaStore;
   private final AudioProbe probe;
   private final VoiceProperties properties;
+  private final VoiceMetrics metrics;
   private final TransactionTemplate transactions;
   private final Clock clock;
 
@@ -127,6 +128,7 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
       VoiceMediaStore mediaStore,
       AudioProbe probe,
       VoiceProperties properties,
+      VoiceMetrics metrics,
       PlatformTransactionManager transactionManager) {
     this.recordings = recordings;
     this.sessions = sessions;
@@ -136,6 +138,7 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
     this.mediaStore = mediaStore;
     this.probe = probe;
     this.properties = properties;
+    this.metrics = metrics;
     this.transactions = new TransactionTemplate(transactionManager);
     this.clock = Clock.systemUTC();
   }
@@ -145,52 +148,80 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
       CurrentUser user, UUID sessionId, int turnNo, UUID uploadRequestId, MultipartFile audio) {
     Phase1 outcome = phase1(user, sessionId, turnNo, uploadRequestId);
     if (outcome.existing() != null) {
-      return replay(user, outcome.existing(), audio);
+      return replay(user, sessionId, turnNo, outcome.existing(), audio);
     }
     long recordingId = outcome.recordingId();
     String mediaKey = new VoiceMediaKey(
         user.userId(), outcome.sessionDatabaseId(), VoiceMediaKind.RECORDING,
         outcome.recordingUuid()).storageKey();
     TempWrite staged = null;
+    ProbedAudio probed = null;
     try {
       staged = writeTempBounded(audio);
-      ProbedAudio probed = probe.probe(staged.path());
+      probed = probe.probe(staged.path());
       rejectUnsupported(probed.mediaType());
       rejectDuration(probed.duration());
-      return phase3(user, sessionId, outcome.sessionDatabaseId(),
+      VoiceRecordingReceipt receipt = phase3(user, sessionId, outcome.sessionDatabaseId(),
           outcome.recordingUuid(), recordingId, staged, probed);
+      metrics.upload("accepted", probed.mediaType(), staged.sizeBytes(),
+          probed.duration() == null ? null : probed.duration().toMillis());
+      log.info("voice_upload_accepted userId={} sessionId={} turnNo={} recordingId={} "
+              + "taskId={} mime={} bytes={} durationMillis={}",
+          user.userId(), sessionId, turnNo, receipt.recordingId(), receipt.transcriptionTaskId(),
+          probed.mediaType(), staged.sizeBytes(),
+          probed.duration() == null ? null : probed.duration().toMillis());
+      return receipt;
     } catch (VoiceMediaTooLargeException exception) {
-      failUpload(recordingId, VoiceErrorCodes.VOICE_UPLOAD_TOO_LARGE, null);
+      rejectUpload(user, sessionId, turnNo, recordingId,
+          VoiceErrorCodes.VOICE_UPLOAD_TOO_LARGE, staged, probed, null);
       throw new BusinessException(
           VoiceErrorCodes.VOICE_UPLOAD_TOO_LARGE,
           "Voice upload exceeds the configured limit", HttpStatus.CONTENT_TOO_LARGE);
     } catch (VoiceMediaUnsupportedException exception) {
-      failUpload(recordingId, VoiceErrorCodes.VOICE_MEDIA_UNSUPPORTED,
+      rejectUpload(user, sessionId, turnNo, recordingId,
+          VoiceErrorCodes.VOICE_MEDIA_UNSUPPORTED, staged, probed,
           staged == null ? null : staged.sha256());
       throw new BusinessException(
           VoiceErrorCodes.VOICE_MEDIA_UNSUPPORTED,
           "Voice media format is not supported", HttpStatus.UNSUPPORTED_MEDIA_TYPE);
     } catch (VoiceMediaProbeException exception) {
       // Operational failure (ffprobe start/timeout/IO): recorded for diagnosis, kept off the wire.
-      failUpload(recordingId, VoiceErrorCodes.VOICE_MEDIA_PROBE_FAILED,
+      rejectUpload(user, sessionId, turnNo, recordingId,
+          VoiceErrorCodes.VOICE_MEDIA_PROBE_FAILED, staged, probed,
           staged == null ? null : staged.sha256());
       throw exception;
     } catch (VoiceMediaStorageException exception) {
       // A phase-3 move may have installed the file before failing — keep the key clean,
       // then mark the row FAILED so the requestId never looks like a 10-minute RECEIVING.
       deleteMediaQuietly(mediaKey);
-      failUpload(recordingId, VoiceErrorCodes.VOICE_MEDIA_STORAGE_FAILED,
+      rejectUpload(user, sessionId, turnNo, recordingId,
+          VoiceErrorCodes.VOICE_MEDIA_STORAGE_FAILED, staged, probed,
           staged == null ? null : staged.sha256());
       throw exception;
     } catch (BusinessException exception) {
       if (VoiceErrorCodes.VOICE_DURATION_EXCEEDED.equals(exception.code())
           || VoiceErrorCodes.VOICE_TURN_NOT_CURRENT.equals(exception.code())) {
-        failUpload(recordingId, exception.code(), staged == null ? null : staged.sha256());
+        rejectUpload(user, sessionId, turnNo, recordingId,
+            exception.code(), staged, probed, staged == null ? null : staged.sha256());
       }
       throw exception;
     } finally {
       deleteQuietly(staged);
     }
+  }
+
+  /** Marks the row FAILED and emits the upload-rejection metric/log (never masks the error). */
+  private void rejectUpload(
+      CurrentUser user, UUID sessionId, int turnNo, long recordingId, String code,
+      TempWrite staged, ProbedAudio probed, String sha256) {
+    String mime = probed == null ? null : probed.mediaType();
+    failUpload(user, sessionId, turnNo, recordingId, code, sha256);
+    // Rejected bytes never count into upload.bytes (that meter = bytes accepted for storage).
+    metrics.upload("rejected", mime, null, null);
+    log.warn("voice_upload_rejected userId={} sessionId={} turnNo={} recordingId={} "
+            + "code={} mime={} bytes={}",
+        user.userId(), sessionId, turnNo, recordingId, code, mime,
+        staged == null ? null : staged.sizeBytes());
   }
 
   @Override
@@ -212,6 +243,10 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
         .orElseThrow(this::notFound);
     var recording = requireRecording(session, recordingId);
     retryTranscription(recording.getId());
+    metrics.retry("voice_transcription", "manual");
+    log.info("voice_retry_manual userId={} sessionId={} turnNo={} recordingId={} "
+            + "taskType=voice_transcription",
+        user.userId(), sessionId, turnNoOf(recording), recordingId);
   }
 
   @Override
@@ -230,6 +265,18 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
         // already gone — idempotent cleanup
       }
     }
+    // Fallback/abandonment proxy (see VoiceMetrics Javadoc): the discard endpoint cannot
+    // distinguish a re-record from an explicit switch to text, so every discard of an
+    // unbound recording counts as a user-initiated abandonment.
+    metrics.fallback("user_discard");
+    log.info("voice_discarded userId={} sessionId={} turnNo={} recordingId={} status={}",
+        user.userId(), sessionId, turnNoOf(recording), recordingId, recording.getStatus());
+  }
+
+  private int turnNoOf(VoiceRecordingEntity recording) {
+    return turns.findById(recording.getTurnId())
+        .map(InterviewTurnEntity::getTurnNo)
+        .orElse(-1);
   }
 
   /** Phase 1, retried once when the unique upload_request_id loses an insert race. */
@@ -307,8 +354,8 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
    * stable 409 with the original media untouched. The replay consumes the requestId forever:
    * every later attempt yields exactly the same outcome.
    */
-  private VoiceRecordingReceipt replay(CurrentUser user, VoiceRecordingEntity existing,
-      MultipartFile audio) {
+  private VoiceRecordingReceipt replay(CurrentUser user, UUID sessionId, int turnNo,
+      VoiceRecordingEntity existing, MultipartFile audio) {
     String expected = existing.getSha256();
     if (expected == null) {
       // The original upload was rejected before a full copy (size limit): no digest was
@@ -323,7 +370,14 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
       }
       // Equal content: the original upload already installed the media (or recorded the
       // failure) — answer with the recording's current status, never touching the store.
-      return receipt(user, existing.getRecordingId());
+      VoiceRecordingReceipt replayed = receipt(user, existing.getRecordingId());
+      metrics.upload("replayed", existing.getContentType(),
+          existing.getSizeBytes(), existing.getDurationMillis());
+      log.info("voice_upload_replayed userId={} sessionId={} turnNo={} recordingId={} "
+              + "status={} mime={}",
+          user.userId(), sessionId, turnNo, existing.getRecordingId(),
+          existing.getStatus(), existing.getContentType());
+      return replayed;
     } catch (VoiceMediaTooLargeException exception) {
       throw new BusinessException(
           VoiceErrorCodes.VOICE_UPLOAD_TOO_LARGE,
@@ -524,7 +578,9 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
   }
 
   /** Best-effort RECEIVING → FAILED marking; never masks the original upload error. */
-  private void failUpload(long recordingId, String error, String sha256) {
+  private void failUpload(
+      CurrentUser user, UUID sessionId, int turnNo, long recordingId, String error,
+      String sha256) {
     try {
       transactions.executeWithoutResult(status ->
           recordings.findById(recordingId).ifPresent(recording -> {
@@ -534,8 +590,9 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
             // A concurrent discard/retry already resolved the row; keep its outcome.
           }));
     } catch (RuntimeException exception) {
-      log.warn("voice_upload_failure_marking recordingId={} code={}",
-          recordingId, error, exception);
+      log.warn("voice_upload_failure_marking userId={} sessionId={} turnNo={} "
+              + "recordingId={} code={}",
+          user.userId(), sessionId, turnNo, recordingId, error, exception);
     }
   }
 
