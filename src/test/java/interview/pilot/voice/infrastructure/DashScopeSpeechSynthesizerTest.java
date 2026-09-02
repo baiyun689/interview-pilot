@@ -100,13 +100,18 @@ class DashScopeSpeechSynthesizerTest {
 
   @Test
   void jsonEnvelopeWithAudioUrlDownloadsTheAudioBounded() {
+    String signedAudioUrl = "http://localhost:%d/audio.mp3?Expires=1772697707&"
+        + "Signature=abc%2Bdef%2Fghi%3D&SecurityToken=token%2Fvalue";
+    String signedAudioPath = "/audio.mp3?Expires=1772697707&"
+        + "Signature=abc%2Bdef%2Fghi%3D&SecurityToken=token%2Fvalue";
+    String responseBody = """
+        {"output": {"audio": {"url": "%s"}}}
+        """.formatted(signedAudioUrl.replace("%d", Integer.toString(wireMock.port())));
     wireMock.stubFor(post(urlEqualTo(DashScopeSpeechSynthesizer.ENDPOINT_PATH))
         .willReturn(aResponse().withStatus(200)
             .withHeader("Content-Type", "application/json")
-            .withBody("""
-                {"output": {"audio": {"url": "http://localhost:%d/audio.mp3"}}}
-                """.formatted(wireMock.port()))));
-    wireMock.stubFor(get(urlEqualTo("/audio.mp3"))
+            .withBody(responseBody)));
+    wireMock.stubFor(get(urlEqualTo(signedAudioPath))
         .willReturn(aResponse().withStatus(200)
             .withHeader("Content-Type", "audio/mpeg")
             .withBody(AUDIO)));
@@ -115,7 +120,7 @@ class DashScopeSpeechSynthesizerTest {
 
     assertThat(speech.audio()).isEqualTo(AUDIO);
     assertThat(speech.mediaType()).isEqualTo("audio/mpeg");
-    wireMock.verify(getRequestedFor(urlEqualTo("/audio.mp3")));
+    wireMock.verify(getRequestedFor(urlEqualTo(signedAudioPath)));
   }
 
   @Test

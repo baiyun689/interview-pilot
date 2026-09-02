@@ -3,6 +3,7 @@ package interview.pilot.voice.infrastructure;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
 import java.util.Map;
 import java.util.Objects;
 
@@ -131,7 +132,9 @@ public class DashScopeSpeechSynthesizer implements SpeechSynthesizer {
   private Download downloadAudio(String url) {
     try {
       return rest.get()
-          .uri(url)
+          // DashScope returns a pre-signed OSS URL. Passing a String makes RestClient treat
+          // it as a URI template, which can alter percent-encoded signature parameters.
+          .uri(URI.create(url))
           .exchange((request, response) -> {
             HttpStatusCode status = response.getStatusCode();
             if (status.is5xxServerError() || status.value() == 429) {
