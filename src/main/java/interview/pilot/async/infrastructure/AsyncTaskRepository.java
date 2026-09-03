@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
 
 import interview.pilot.async.domain.AsyncTaskStatus;
@@ -39,6 +40,47 @@ public interface AsyncTaskRepository extends JpaRepository<AsyncTaskEntity, Long
       @Param("status") AsyncTaskStatus status,
       @Param("cutoff") Instant cutoff,
       Pageable pageable);
+
+  /**
+   * Atomically records a pending task as published before its RabbitMQ message is sent.
+   * A dispatcher that loses this compare-and-set must not publish a duplicate message.
+   */
+  @Modifying(flushAutomatically = true, clearAutomatically = true)
+  @Query("""
+      update AsyncTaskEntity task
+         set task.publishAttempts = task.publishAttempts + 1,
+             task.lastPublishedAt = :publishedAt,
+             task.lastError = null,
+             task.version = task.version + 1
+       where task.id = :databaseId
+         and task.status = :expectedStatus
+         and task.executionEpoch = :executionEpoch
+         and (task.lastPublishedAt is null or task.lastPublishedAt < :cutoff)
+      """)
+  int claimForPublishing(
+      @Param("databaseId") Long databaseId,
+      @Param("executionEpoch") int executionEpoch,
+      @Param("publishedAt") Instant publishedAt,
+      @Param("cutoff") Instant cutoff,
+      @Param("expectedStatus") AsyncTaskStatus expectedStatus);
+
+  /** Releases a claim after a synchronous broker publication failure. */
+  @Modifying(flushAutomatically = true, clearAutomatically = true)
+  @Query("""
+      update AsyncTaskEntity task
+         set task.publishAttempts = task.publishAttempts - 1,
+             task.lastPublishedAt = null,
+             task.lastError = :safeError,
+             task.version = task.version + 1
+       where task.id = :databaseId
+         and task.status = :expectedStatus
+         and task.executionEpoch = :executionEpoch
+      """)
+  int releasePublishingClaim(
+      @Param("databaseId") Long databaseId,
+      @Param("executionEpoch") int executionEpoch,
+      @Param("safeError") String safeError,
+      @Param("expectedStatus") AsyncTaskStatus expectedStatus);
 
   /**
    * Stuck-task recovery (Task 11): bounded batch of voice tasks that were PUBLISHED but have

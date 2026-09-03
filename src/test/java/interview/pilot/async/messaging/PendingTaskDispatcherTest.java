@@ -3,6 +3,10 @@ package interview.pilot.async.messaging;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
@@ -11,6 +15,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -22,6 +28,7 @@ import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import interview.pilot.async.domain.AsyncTaskType;
+import interview.pilot.async.domain.AsyncTaskStatus;
 import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
@@ -73,6 +80,9 @@ class PendingTaskDispatcherTest {
 
   @Autowired
   private ProcessingClaim processingClaim;
+
+  @Autowired
+  private PlatformTransactionManager transactionManager;
 
   @BeforeEach
   void clearTasksAndMessages() {
@@ -157,6 +167,47 @@ class PendingTaskDispatcherTest {
     assertThat(failed.getPublishAttempts()).isZero();
     assertThat(failed.getLastPublishedAt()).isNull();
     assertThat(failed.getLastError()).isNotBlank();
+  }
+
+  @Test
+  void atomicPublicationClaimLetsOnlyOneConcurrentDispatcherWin() throws Exception {
+    AsyncTaskEntity task = savePending("resume:concurrent-claim");
+    Instant now = Instant.now();
+    Instant cutoff = now.minusSeconds(30);
+    CountDownLatch ready = new CountDownLatch(2);
+    CountDownLatch start = new CountDownLatch(1);
+
+    try (var executor = Executors.newFixedThreadPool(2)) {
+      var first = executor.submit(() -> claimAtTheSameTime(task, now, cutoff, ready, start));
+      var second = executor.submit(() -> claimAtTheSameTime(task, now, cutoff, ready, start));
+      assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+      start.countDown();
+
+      assertThat(first.get(5, TimeUnit.SECONDS) + second.get(5, TimeUnit.SECONDS)).isEqualTo(1);
+    }
+
+    AsyncTaskEntity claimed = taskRepository.findById(task.getId()).orElseThrow();
+    assertThat(claimed.getPublishAttempts()).isEqualTo(1);
+    assertThat(claimed.getLastPublishedAt()).isEqualTo(now.truncatedTo(ChronoUnit.MICROS));
+  }
+
+  private int claimAtTheSameTime(
+      AsyncTaskEntity task,
+      Instant now,
+      Instant cutoff,
+      CountDownLatch ready,
+      CountDownLatch start) throws Exception {
+    return new TransactionTemplate(transactionManager).execute(status -> {
+      ready.countDown();
+      try {
+        if (!start.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("claim start timed out");
+      } catch (InterruptedException exception) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException("claim interrupted", exception);
+      }
+      return taskRepository.claimForPublishing(
+          task.getId(), task.getExecutionEpoch(), now, cutoff, AsyncTaskStatus.PENDING);
+    });
   }
 
   private AsyncTaskEntity savePending(String bizKey) {
