@@ -79,6 +79,7 @@ public interface AsyncTaskRepository extends JpaRepository<AsyncTaskEntity, Long
          and task.status = :expectedStatus
          and task.executionEpoch = :executionEpoch
          and task.lastPublishedAt = :claimedAt
+         and task.attemptCount = 0
       """)
   int releasePublishingClaim(
       @Param("databaseId") Long databaseId,
@@ -87,6 +88,30 @@ public interface AsyncTaskRepository extends JpaRepository<AsyncTaskEntity, Long
       @Param("claimedAt") Instant claimedAt,
       @Param("expectedStatus") AsyncTaskStatus expectedStatus,
       @Param("restoredStatus") AsyncTaskStatus restoredStatus);
+
+  /**
+   * Recovers a question-preparation claim when the process stopped after committing the claim
+   * but before RabbitMQ accepted the message. An execution that a listener has already taken
+   * owns a positive attempt count and is deliberately excluded.
+   */
+  @Modifying(flushAutomatically = true, clearAutomatically = true)
+  @Query("""
+      update AsyncTaskEntity task
+         set task.status = :pendingStatus,
+             task.lastPublishedAt = null,
+             task.lastError = :safeError,
+             task.version = task.version + 1
+       where task.taskType = :taskType
+         and task.status = :publishedStatus
+         and task.attemptCount = 0
+         and task.lastPublishedAt < :cutoff
+      """)
+  int recoverUnconsumedQuestionPreparationClaims(
+      @Param("taskType") AsyncTaskType taskType,
+      @Param("pendingStatus") AsyncTaskStatus pendingStatus,
+      @Param("publishedStatus") AsyncTaskStatus publishedStatus,
+      @Param("cutoff") Instant cutoff,
+      @Param("safeError") String safeError);
 
   /**
    * Stuck-task recovery (Task 11): bounded batch of voice tasks that were PUBLISHED but have

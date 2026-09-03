@@ -118,7 +118,7 @@ class PendingTaskDispatcherTest {
   }
 
   @Test
-  void doesNotRepublishQuestionPreparationAlreadyClaimedForExecution() {
+  void recoversAndRepublishesAStaleUnconsumedQuestionPreparationClaim() {
     AsyncTaskEntity task = savePendingQuestionPreparation("interview:" + UUID.randomUUID());
     dispatcher.dispatchPendingTasks();
     AsyncTaskEntity claimed = taskRepository.findById(task.getId()).orElseThrow();
@@ -127,9 +127,9 @@ class PendingTaskDispatcherTest {
 
     dispatcher.dispatchPendingTasks();
 
-    AsyncTaskEntity stillClaimed = taskRepository.findById(task.getId()).orElseThrow();
-    assertThat(stillClaimed.getStatus()).isEqualTo(AsyncTaskStatus.PUBLISHED);
-    assertThat(stillClaimed.getPublishAttempts()).isEqualTo(1);
+    AsyncTaskEntity republished = taskRepository.findById(task.getId()).orElseThrow();
+    assertThat(republished.getStatus()).isEqualTo(AsyncTaskStatus.PUBLISHED);
+    assertThat(republished.getPublishAttempts()).isEqualTo(2);
   }
 
   @Test
@@ -183,6 +183,34 @@ class PendingTaskDispatcherTest {
     assertThat(claimed.getStatus()).isEqualTo(AsyncTaskStatus.PUBLISHED);
     assertThat(claimed.getPublishAttempts()).isEqualTo(1);
     assertThat(claimed.getLastPublishedAt()).isEqualTo(now.truncatedTo(ChronoUnit.MICROS));
+  }
+
+  @Test
+  void recoveryReturnsOnlyUnconsumedQuestionPreparationClaimsToPending() {
+    AsyncTaskEntity unconsumed = savePendingQuestionPreparation("interview:" + UUID.randomUUID());
+    unconsumed.setStatus(AsyncTaskStatus.PUBLISHED);
+    unconsumed.setLastPublishedAt(Instant.now().minusSeconds(31));
+    taskRepository.saveAndFlush(unconsumed);
+
+    AsyncTaskEntity consumed = savePendingQuestionPreparation("interview:" + UUID.randomUUID());
+    consumed.setStatus(AsyncTaskStatus.PUBLISHED);
+    consumed.setAttemptCount(1);
+    consumed.setLastPublishedAt(Instant.now().minusSeconds(31));
+    taskRepository.saveAndFlush(consumed);
+
+    int recovered = new TransactionTemplate(transactionManager).execute(status ->
+        taskRepository.recoverUnconsumedQuestionPreparationClaims(
+            AsyncTaskType.INTERVIEW_QUESTION_PREPARATION,
+            AsyncTaskStatus.PENDING,
+            AsyncTaskStatus.PUBLISHED,
+            Instant.now().minusSeconds(30),
+            "Question preparation publication lease expired"));
+
+    assertThat(recovered).isEqualTo(1);
+    assertThat(taskRepository.findById(unconsumed.getId()).orElseThrow().getStatus())
+        .isEqualTo(AsyncTaskStatus.PENDING);
+    assertThat(taskRepository.findById(consumed.getId()).orElseThrow().getStatus())
+        .isEqualTo(AsyncTaskStatus.PUBLISHED);
   }
 
   private int claimAtTheSameTime(

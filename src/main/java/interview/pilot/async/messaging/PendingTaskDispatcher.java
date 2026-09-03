@@ -46,6 +46,7 @@ public class PendingTaskDispatcher {
   public void dispatchPendingTasks() {
     Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
     Instant cutoff = now.minus(properties.getRepublishAfter());
+    recoverUnconsumedQuestionPreparationClaims(cutoff);
     var tasks = taskRepository.findDispatchable(
         AsyncTaskStatus.PENDING,
         cutoff,
@@ -93,6 +94,15 @@ public class PendingTaskDispatcher {
     return task.getTaskType() == AsyncTaskType.INTERVIEW_QUESTION_PREPARATION
         ? AsyncTaskStatus.PUBLISHED
         : AsyncTaskStatus.PENDING;
+  }
+
+  private void recoverUnconsumedQuestionPreparationClaims(Instant cutoff) {
+    transactions.executeWithoutResult(status -> taskRepository.recoverUnconsumedQuestionPreparationClaims(
+        AsyncTaskType.INTERVIEW_QUESTION_PREPARATION,
+        AsyncTaskStatus.PENDING,
+        AsyncTaskStatus.PUBLISHED,
+        cutoff,
+        "Question preparation publication lease expired"));
   }
 
   private String describe(RuntimeException exception) {
