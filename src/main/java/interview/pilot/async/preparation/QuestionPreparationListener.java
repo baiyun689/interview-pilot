@@ -4,6 +4,7 @@ import java.time.Duration;
 
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Component;
 
 import interview.pilot.ai.AiStructuredOutputException;
@@ -37,7 +38,14 @@ public class QuestionPreparationListener {
       queues = RabbitTopologyConfig.INTERVIEW_PREPARATION_MAIN_QUEUE,
       autoStartup = "${app.async.interview-preparation-listener.auto-startup:true}")
   public void receive(TaskMessage message, Message source) {
-    QuestionPreparationHandler.Target target = handler.inspect(message);
+    QuestionPreparationHandler.Target target;
+    try {
+      target = handler.inspect(message);
+    } catch (OptimisticLockingFailureException exception) {
+      // A concurrent owner already moved this task forward. This stale delivery is not a
+      // provider failure and must not burn the RabbitMQ retry budget.
+      return;
+    }
     if (target.terminal()) return;
     String key = InterviewPreparationRetryPolicy.CLAIM_KEY_PREFIX + target.sessionId();
     String token;
@@ -60,6 +68,10 @@ public class QuestionPreparationListener {
     } catch (InvalidQuestionDeckException | AiStructuredOutputException exception) {
       releaseBestEffort(key, token);
       handler.markInvalid(message);
+    } catch (OptimisticLockingFailureException exception) {
+      releaseBestEffort(key, token);
+      // Persisting a stale execution lost the database ownership race; leave retry ownership
+      // with the winner instead of turning a benign conflict into a dead-letter failure.
     } catch (RuntimeException exception) {
       releaseBestEffort(key, token);
       routeRetry(message, source);

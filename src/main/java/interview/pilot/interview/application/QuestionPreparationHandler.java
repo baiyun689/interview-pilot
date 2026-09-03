@@ -108,9 +108,15 @@ public class QuestionPreparationHandler {
         || task.getStatus() == AsyncTaskStatus.DEAD
         || session.getStatus() != SessionStatus.PREPARING;
     if (terminal) return new Target(sessionId, session.getId(), null, true);
-    if (task.getStatus() != AsyncTaskStatus.PUBLISHED) {
+    if (task.getStatus() == AsyncTaskStatus.PENDING) {
       task.setStatus(AsyncTaskStatus.PUBLISHED);
       task.setAttemptCount(task.getAttemptCount() + 1);
+    } else if (task.getStatus() == AsyncTaskStatus.PUBLISHED && task.getAttemptCount() == 0) {
+      // The outbox dispatcher atomically claimed PENDING -> PUBLISHED before broker publish.
+      // This is still the first preparation execution, not a duplicate delivery.
+      task.setAttemptCount(1);
+    } else if (task.getStatus() != AsyncTaskStatus.PUBLISHED) {
+      throw new IllegalStateException("Question preparation task state is inconsistent");
     }
     return new Target(
         sessionId, session.getId(), decode(session.getBriefSnapshot(), InterviewBriefSnapshot.class),

@@ -48,7 +48,8 @@ public interface AsyncTaskRepository extends JpaRepository<AsyncTaskEntity, Long
   @Modifying(flushAutomatically = true, clearAutomatically = true)
   @Query("""
       update AsyncTaskEntity task
-         set task.publishAttempts = task.publishAttempts + 1,
+         set task.status = :claimedStatus,
+             task.publishAttempts = task.publishAttempts + 1,
              task.lastPublishedAt = :publishedAt,
              task.lastError = null,
              task.version = task.version + 1
@@ -62,25 +63,30 @@ public interface AsyncTaskRepository extends JpaRepository<AsyncTaskEntity, Long
       @Param("executionEpoch") int executionEpoch,
       @Param("publishedAt") Instant publishedAt,
       @Param("cutoff") Instant cutoff,
-      @Param("expectedStatus") AsyncTaskStatus expectedStatus);
+      @Param("expectedStatus") AsyncTaskStatus expectedStatus,
+      @Param("claimedStatus") AsyncTaskStatus claimedStatus);
 
   /** Releases a claim after a synchronous broker publication failure. */
   @Modifying(flushAutomatically = true, clearAutomatically = true)
   @Query("""
       update AsyncTaskEntity task
-         set task.publishAttempts = task.publishAttempts - 1,
+         set task.status = :restoredStatus,
+             task.publishAttempts = task.publishAttempts - 1,
              task.lastPublishedAt = null,
              task.lastError = :safeError,
              task.version = task.version + 1
        where task.id = :databaseId
          and task.status = :expectedStatus
          and task.executionEpoch = :executionEpoch
+         and task.lastPublishedAt = :claimedAt
       """)
   int releasePublishingClaim(
       @Param("databaseId") Long databaseId,
       @Param("executionEpoch") int executionEpoch,
       @Param("safeError") String safeError,
-      @Param("expectedStatus") AsyncTaskStatus expectedStatus);
+      @Param("claimedAt") Instant claimedAt,
+      @Param("expectedStatus") AsyncTaskStatus expectedStatus,
+      @Param("restoredStatus") AsyncTaskStatus restoredStatus);
 
   /**
    * Stuck-task recovery (Task 11): bounded batch of voice tasks that were PUBLISHED but have

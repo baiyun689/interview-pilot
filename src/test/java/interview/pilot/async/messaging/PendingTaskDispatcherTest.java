@@ -118,26 +118,18 @@ class PendingTaskDispatcherTest {
   }
 
   @Test
-  void republishesOnlyAfterTheConfiguredCutoff() {
-    AsyncTaskEntity task = savePending("resume:stale");
+  void doesNotRepublishQuestionPreparationAlreadyClaimedForExecution() {
+    AsyncTaskEntity task = savePendingQuestionPreparation("interview:" + UUID.randomUUID());
     dispatcher.dispatchPendingTasks();
-    drain(RabbitTopologyConfig.RESUME_ANALYSIS_MAIN_QUEUE);
-
-    dispatcher.dispatchPendingTasks();
-    assertThat(rabbitTemplate.receive(
-        RabbitTopologyConfig.RESUME_ANALYSIS_MAIN_QUEUE, 250)).isNull();
-
-    AsyncTaskEntity stale = taskRepository.findById(task.getId()).orElseThrow();
-    stale.setLastPublishedAt(Instant.now().minusSeconds(31));
-    taskRepository.saveAndFlush(stale);
+    AsyncTaskEntity claimed = taskRepository.findById(task.getId()).orElseThrow();
+    claimed.setLastPublishedAt(Instant.now().minusSeconds(31));
+    taskRepository.saveAndFlush(claimed);
 
     dispatcher.dispatchPendingTasks();
 
-    assertThat(rabbitTemplate.receiveAndConvert(
-        RabbitTopologyConfig.RESUME_ANALYSIS_MAIN_QUEUE, 5_000))
-        .isInstanceOf(TaskMessage.class);
-    AsyncTaskEntity republished = taskRepository.findById(task.getId()).orElseThrow();
-    assertThat(republished.getPublishAttempts()).isEqualTo(2);
+    AsyncTaskEntity stillClaimed = taskRepository.findById(task.getId()).orElseThrow();
+    assertThat(stillClaimed.getStatus()).isEqualTo(AsyncTaskStatus.PUBLISHED);
+    assertThat(stillClaimed.getPublishAttempts()).isEqualTo(1);
   }
 
   @Test
@@ -164,6 +156,7 @@ class PendingTaskDispatcherTest {
     dispatcher.dispatchPendingTasks();
 
     AsyncTaskEntity failed = taskRepository.findById(task.getId()).orElseThrow();
+    assertThat(failed.getStatus()).isEqualTo(AsyncTaskStatus.PENDING);
     assertThat(failed.getPublishAttempts()).isZero();
     assertThat(failed.getLastPublishedAt()).isNull();
     assertThat(failed.getLastError()).isNotBlank();
@@ -171,8 +164,8 @@ class PendingTaskDispatcherTest {
 
   @Test
   void atomicPublicationClaimLetsOnlyOneConcurrentDispatcherWin() throws Exception {
-    AsyncTaskEntity task = savePending("resume:concurrent-claim");
-    Instant now = Instant.now();
+    AsyncTaskEntity task = savePendingQuestionPreparation("interview:" + UUID.randomUUID());
+    Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
     Instant cutoff = now.minusSeconds(30);
     CountDownLatch ready = new CountDownLatch(2);
     CountDownLatch start = new CountDownLatch(1);
@@ -187,6 +180,7 @@ class PendingTaskDispatcherTest {
     }
 
     AsyncTaskEntity claimed = taskRepository.findById(task.getId()).orElseThrow();
+    assertThat(claimed.getStatus()).isEqualTo(AsyncTaskStatus.PUBLISHED);
     assertThat(claimed.getPublishAttempts()).isEqualTo(1);
     assertThat(claimed.getLastPublishedAt()).isEqualTo(now.truncatedTo(ChronoUnit.MICROS));
   }
@@ -206,13 +200,23 @@ class PendingTaskDispatcherTest {
         throw new IllegalStateException("claim interrupted", exception);
       }
       return taskRepository.claimForPublishing(
-          task.getId(), task.getExecutionEpoch(), now, cutoff, AsyncTaskStatus.PENDING);
+          task.getId(), task.getExecutionEpoch(), now, cutoff,
+          AsyncTaskStatus.PENDING, AsyncTaskStatus.PUBLISHED);
     });
   }
 
   private AsyncTaskEntity savePending(String bizKey) {
     AsyncTaskEntity task = AsyncTaskEntity.pending(
         1L, AsyncTaskType.RESUME_ANALYSIS,
+        bizKey,
+        "{\"large\":\"payload that must remain in MySQL\"}");
+    task.setTaskId(UUID.randomUUID());
+    return taskRepository.saveAndFlush(task);
+  }
+
+  private AsyncTaskEntity savePendingQuestionPreparation(String bizKey) {
+    AsyncTaskEntity task = AsyncTaskEntity.pending(
+        1L, AsyncTaskType.INTERVIEW_QUESTION_PREPARATION,
         bizKey,
         "{\"large\":\"payload that must remain in MySQL\"}");
     task.setTaskId(UUID.randomUUID());

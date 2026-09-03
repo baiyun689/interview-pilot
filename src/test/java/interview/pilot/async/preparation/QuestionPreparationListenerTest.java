@@ -12,6 +12,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
+import org.springframework.dao.OptimisticLockingFailureException;
 
 import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.idempotency.ProcessingClaim;
@@ -37,6 +38,24 @@ class QuestionPreparationListenerTest {
     listener.receive(task, source);
 
     verify(handler, never()).prepare(any());
+    verify(retries, never()).routeFailure(any(), any());
+  }
+
+  @Test
+  void optimisticLockConflictDuringInspectionDoesNotConsumeRetryBudget() {
+    var handler = mock(QuestionPreparationHandler.class);
+    var claims = mock(ProcessingClaim.class);
+    var retries = mock(TaskRetryPolicy.class);
+    var listener = new QuestionPreparationListener(handler, claims, retries);
+    var task = new TaskMessage(
+        UUID.randomUUID(), AsyncTaskType.INTERVIEW_QUESTION_PREPARATION,
+        "interview:" + UUID.randomUUID());
+    var source = new Message(new byte[0], new MessageProperties());
+    when(handler.inspect(task)).thenThrow(new OptimisticLockingFailureException("row changed"));
+
+    listener.receive(task, source);
+
+    verify(claims, never()).acquire(anyString(), any());
     verify(retries, never()).routeFailure(any(), any());
   }
 }

@@ -2,6 +2,7 @@ package interview.pilot.async.messaging;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,6 +13,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import interview.pilot.async.domain.AsyncTaskStatus;
+import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
 
@@ -42,7 +44,7 @@ public class PendingTaskDispatcher {
       fixedDelayString = "${app.async.rabbit.dispatch-interval:10s}",
       initialDelayString = "${app.async.rabbit.dispatch-initial-delay:10s}")
   public void dispatchPendingTasks() {
-    Instant now = clock.instant();
+    Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
     Instant cutoff = now.minus(properties.getRepublishAfter());
     var tasks = taskRepository.findDispatchable(
         AsyncTaskStatus.PENDING,
@@ -50,14 +52,15 @@ public class PendingTaskDispatcher {
         PageRequest.of(0, MAX_TASKS_PER_SCAN));
 
     for (AsyncTaskEntity task : tasks) {
-      if (!claimForPublishing(task, now, cutoff)) {
+      PublicationClaim claim = claimForPublishing(task, now, cutoff);
+      if (claim == null) {
         continue;
       }
       try {
         publisher.publish(new TaskMessage(
             task.getTaskId(), task.getTaskType(), task.getBizKey(), task.getExecutionEpoch()));
       } catch (RuntimeException exception) {
-        releasePublishingClaim(task, describe(exception));
+        releasePublishingClaim(claim, describe(exception));
         log.warn("Could not publish async task {} of type {}",
             task.getTaskId(), task.getTaskType(), exception);
       }
@@ -68,18 +71,37 @@ public class PendingTaskDispatcher {
    * The claim uses its own committed transaction. Publishing inside a transaction leaves a
    * window where a fast consumer can read the old PENDING row and race its status transition.
    */
-  private boolean claimForPublishing(AsyncTaskEntity task, Instant now, Instant cutoff) {
+  private PublicationClaim claimForPublishing(AsyncTaskEntity task, Instant now, Instant cutoff) {
+    AsyncTaskStatus claimedStatus = claimedStatus(task);
     Boolean claimed = transactions.execute(status -> taskRepository.claimForPublishing(
-        task.getId(), task.getExecutionEpoch(), now, cutoff, AsyncTaskStatus.PENDING) == 1);
-    return Boolean.TRUE.equals(claimed);
+        task.getId(), task.getExecutionEpoch(), now, cutoff, AsyncTaskStatus.PENDING, claimedStatus) == 1);
+    return Boolean.TRUE.equals(claimed)
+        ? new PublicationClaim(task.getId(), task.getExecutionEpoch(), now, claimedStatus)
+        : null;
   }
 
-  private void releasePublishingClaim(AsyncTaskEntity task, String safeError) {
+  private void releasePublishingClaim(PublicationClaim claim, String safeError) {
     transactions.executeWithoutResult(status -> taskRepository.releasePublishingClaim(
-        task.getId(), task.getExecutionEpoch(), safeError, AsyncTaskStatus.PENDING));
+        claim.databaseId(), claim.executionEpoch(), safeError, claim.claimedAt(),
+        claim.claimedStatus(), AsyncTaskStatus.PENDING));
+  }
+
+  private AsyncTaskStatus claimedStatus(AsyncTaskEntity task) {
+    // The preparation listener used to own PENDING -> PUBLISHED. A fast RabbitMQ delivery
+    // could therefore race the dispatcher's metadata update. Claim this task's lifecycle state
+    // before publishing so the listener observes PUBLISHED and performs no competing update.
+    return task.getTaskType() == AsyncTaskType.INTERVIEW_QUESTION_PREPARATION
+        ? AsyncTaskStatus.PUBLISHED
+        : AsyncTaskStatus.PENDING;
   }
 
   private String describe(RuntimeException exception) {
     return "Task message publication temporarily unavailable";
   }
+
+  private record PublicationClaim(
+      Long databaseId,
+      int executionEpoch,
+      Instant claimedAt,
+      AsyncTaskStatus claimedStatus) { }
 }
