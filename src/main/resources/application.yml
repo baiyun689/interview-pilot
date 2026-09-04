@@ -133,3 +133,36 @@ app:
       model: ${DASHSCOPE_TTS_MODEL:cosyvoice-v3-flash}
       voice: ${DASHSCOPE_TTS_VOICE:longanyang}
       timeout: ${DASHSCOPE_TTS_TIMEOUT:30s}
+    # Realtime voice interview over WebSocket (streaming ASR -> turn engine -> realtime TTS).
+    # Reuses app.voice.asr.api-key; every value below has a code default.
+    realtime:
+      enabled: ${VOICE_REALTIME_ENABLED:true}
+      path: ${VOICE_REALTIME_PATH:/ws/voice-interview}
+      asr:
+        url: ${DASHSCOPE_REALTIME_ASR_URL:wss://dashscope.aliyuncs.com/api-ws/v1/realtime}
+        model: ${DASHSCOPE_REALTIME_ASR_MODEL:qwen3-asr-flash-realtime}
+        language: ${DASHSCOPE_REALTIME_ASR_LANGUAGE:zh}
+        format: pcm
+        sample-rate: 16000
+        enable-turn-detection: true
+        turn-detection-silence-ms: ${DASHSCOPE_REALTIME_VAD_SILENCE_MS:800}
+        restart-max-attempts: 3
+      tts:
+        model: ${DASHSCOPE_REALTIME_TTS_MODEL:qwen3-tts-flash-realtime}
+        voice: ${DASHSCOPE_REALTIME_TTS_VOICE:Cherry}
+        sample-rate: 24000
+        mode: commit
+        language-type: Chinese
+        speech-rate: 1.0
+        volume: 60
+        timeout: ${DASHSCOPE_REALTIME_TTS_TIMEOUT:30s}
+      conversation:
+        # 默认手动确认：VAD 仅用于断句和实时字幕，候选人点“提交回答”后才送审；设为 true 恢复静音自动提交
+        auto-submit: ${VOICE_REALTIME_AUTO_SUBMIT:false}
+        # auto-submit=true 时，最后一句落定后静默多久自动提交（手动模式下不生效）
+        debounce-ms: ${VOICE_REALTIME_DEBOUNCE_MS:1200}
+        ai-speak-cooldown-ms: 800
+        # Duration 必须是单一单位（如 5m）或 ISO-8601（如 PT4M30S）；Spring 不支持 "4m30s" 复合写法
+        idle-warn: PT4M30S
+        idle-timeout: 5m
+        max-message-kb: 256

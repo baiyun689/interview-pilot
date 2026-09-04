@@ -6,6 +6,11 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': 'http://localhost:8080',
+      // Realtime voice WebSocket (ws/wss upgrade)
+      '/ws': {
+        target: 'http://localhost:8080',
+        ws: true,
+      },
     },
   },
 })

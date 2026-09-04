@@ -6,6 +6,7 @@ import { postInterviewAnswerStream, type AnswerStreamInput } from '../api/interv
 import { fetchVoiceCapabilities } from '../api/voice'
 import { ErrorNotice, providerSnapshot, sessionStatusLabel } from '../components/InterviewUi'
 import { QuestionSpeechPlayer } from '../components/QuestionSpeechPlayer'
+import { RealtimeVoicePanel } from '../components/RealtimeVoicePanel'
 import { VoiceRecorder } from '../components/VoiceRecorder'
 import { createRequestId } from '../voice/ids'
 import { useVoiceTurnFlow } from '../voice/useVoiceTurnFlow'
@@ -33,9 +34,14 @@ function clockLabel(seconds: number) {
 export interface InterviewLivePageProps {
   /** 录音环境的测试注入；生产环境无需传入 */
   env?: Partial<VoiceRecorderEnvironment>
+  /**
+   * VOICE 会话初始是否进入实时对话通道。生产默认 true（开口即说、自动断句提交）；
+   * 录音回退链路的页面测试可传 false，从旧的录音/上传/转写面板起步。
+   */
+  defaultRealtime?: boolean
 }
 
-export function InterviewLivePage({ env }: InterviewLivePageProps) {
+export function InterviewLivePage({ env, defaultRealtime = true }: InterviewLivePageProps) {
   const { sessionId = '' } = useParams()
   const draftKey = `interview-answer-draft:${sessionId}`
   const requestKey = `interview-answer-request:${sessionId}`
@@ -48,6 +54,9 @@ export function InterviewLivePage({ env }: InterviewLivePageProps) {
   const [processing, setProcessing] = useState('')
   const [starting, setStarting] = useState(false)
   const [voiceCapabilities, setVoiceCapabilities] = useState<VoiceCapabilities | null>(null)
+  // VOICE sessions default to the talk-through realtime channel; the legacy record/upload flow
+  // remains one click away as a fallback.
+  const [realtimeMode, setRealtimeMode] = useState(defaultRealtime)
   const voice = useVoiceTurnFlow({ sessionId, session, maxRecordingSeconds: voiceCapabilities?.maxRecordingSeconds, env })
   const isVoiceSession = session?.interviewMode === 'VOICE'
   const currentTurn = session?.turns.find((turn) => turn.turnNo === session.currentTurnNo)
@@ -276,7 +285,21 @@ export function InterviewLivePage({ env }: InterviewLivePageProps) {
     {session.status === 'READY' && <div className="state-card"><h2>题库准备完成</h2><p>共 {session.totalMainQuestionCount} 个主流程问题；除自我介绍外，每题包含 1～2 次追问。</p><button className="button button-primary" disabled={starting} onClick={start}>{starting ? '正在开始…' : '开始面试'}</button></div>}
     {session.turns.length > 0 && <div className="conversation" aria-label="面试对话">{session.turns.map((turn) => <article className="turn-card" key={turn.turnNo}><div className="message interviewer"><strong>面试官 · {phaseLabels[turn.phase]}{turn.questionType === 'FOLLOW_UP' ? ' · 追问' : ''}</strong><p>{turn.question}</p></div>{turn.answer && <div className="message candidate"><strong>你的回答</strong><p>{turn.answer}</p></div>}{turn.status === 'FAILED' && <p className="error-notice">本轮处理失败，可使用新的 requestId 重新提交。</p>}</article>)}</div>}
     {session.status === 'INTERVIEWING' && <div className="answer-panel">
-      {isVoiceSession ? voiceAnswerPanel(session) : textAnswerPanel()}
+      {isVoiceSession ? (realtimeMode
+        ? <RealtimeVoicePanel
+            sessionId={session.sessionId}
+            currentQuestion={currentTurn?.question ?? null}
+            onTurnChanged={() => void refresh()}
+            onEnded={() => void refresh()}
+            onSwitchToRecording={() => setRealtimeMode(false)}
+          />
+        : <div>
+            <div className="voice-actions">
+              <button type="button" className="button button-secondary" onClick={() => setRealtimeMode(true)}>切换实时对话</button>
+            </div>
+            {voiceAnswerPanel(session)}
+          </div>)
+        : textAnswerPanel()}
     </div>}
     {session.status === 'EVALUATING' && <div className="state-card" role="status"><h2>正在生成最终报告</h2><p>评分只在全部问答完成后进行，页面会自动刷新。</p></div>}
     {session.status === 'EVALUATION_FAILED' && <div className="state-card"><h2>报告生成失败</h2><p>{session.safeError}</p><Link className="button button-primary" to={`/interviews/${session.sessionId}/report`}>前往报告页重试</Link></div>}

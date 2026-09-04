@@ -102,7 +102,8 @@ function renderLive(env?: Partial<VoiceRecorderEnvironment>, routes: LiveRoutes 
   vi.stubGlobal('fetch', liveFetch(routes))
   return render(<MemoryRouter initialEntries={['/interviews/session-1']} future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
     <Routes>
-      <Route path="/interviews/:sessionId" element={<InterviewLivePage env={env} />} />
+      {/* 本文件专测旧录音/上传/转写回退链路：显式从录音模式起步（实时对话另有测试覆盖） */}
+      <Route path="/interviews/:sessionId" element={<InterviewLivePage env={env} defaultRealtime={false} />} />
     </Routes>
   </MemoryRouter>)
 }

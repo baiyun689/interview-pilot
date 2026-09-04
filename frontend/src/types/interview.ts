@@ -1,7 +1,7 @@
 export type Difficulty = 'EASY' | 'MEDIUM' | 'HARD'
 export type InterviewSize = 'QUICK' | 'STANDARD' | 'DEEP'
 export type InterviewMode = 'TEXT' | 'VOICE'
-export type InputMode = 'TEXT' | 'VOICE'
+export type InputMode = 'TEXT' | 'VOICE' | 'VOICE_REALTIME'
 export type JobSourceType = 'PRESET' | 'CUSTOM'
 export type SessionStatus = 'PREPARING' | 'READY' | 'INTERVIEWING' | 'EVALUATING' | 'COMPLETED' | 'PREPARATION_FAILED' | 'EVALUATION_FAILED'
 export type TurnStatus = 'ASKED' | 'PROCESSING' | 'COMPLETED' | 'FAILED'

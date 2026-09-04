@@ -123,10 +123,27 @@ export function InterviewCreatePage() {
     <header className="page-header"><h1>创建 Java 后端面试</h1><p>先异步准备完整题库，准备完成后由你显式开始。面试过程中不进行即时评分。</p></header>
     <form className="interview-form" onSubmit={submit}>
       <label>候选人简历（可选）<select value={values.resumeId} onChange={(event) => setValues({ ...values, resumeId: event.target.value })}><option value="">不使用简历</option>{resumes.map((resume) => <option key={resume.id} value={resume.id}>{resume.originalFilename}</option>)}</select></label>
-      <fieldset><legend>岗位来源</legend><div className="form-row">
-        <label><input type="radio" checked={values.sourceType === 'PRESET'} onChange={() => setValues({ ...values, sourceType: 'PRESET' })} /> 预设岗位</label>
-        <label><input type="radio" checked={values.sourceType === 'CUSTOM'} onChange={() => setValues({ ...values, sourceType: 'CUSTOM' })} /> 自定义 JD</label>
-      </div></fieldset>
+      <fieldset className="form-group">
+        <legend>岗位来源</legend>
+        <div className="option-grid">
+          <label className={`option-card${values.sourceType === 'PRESET' ? ' is-selected' : ''}`}>
+            <input type="radio" name="sourceType" aria-label="预设岗位" checked={values.sourceType === 'PRESET'} onChange={() => setValues({ ...values, sourceType: 'PRESET' })} />
+            <span className="option-card-body">
+              <span className="option-card-title">预设岗位</span>
+              <span className="option-card-desc" aria-hidden="true">使用内置方向题库，开箱即选</span>
+            </span>
+            <span className="option-card-check" aria-hidden="true" />
+          </label>
+          <label className={`option-card${values.sourceType === 'CUSTOM' ? ' is-selected' : ''}`}>
+            <input type="radio" name="sourceType" aria-label="自定义 JD" checked={values.sourceType === 'CUSTOM'} onChange={() => setValues({ ...values, sourceType: 'CUSTOM' })} />
+            <span className="option-card-body">
+              <span className="option-card-title">自定义 JD</span>
+              <span className="option-card-desc" aria-hidden="true">粘贴岗位描述，按需定制题目</span>
+            </span>
+            <span className="option-card-check" aria-hidden="true" />
+          </label>
+        </div>
+      </fieldset>
       {values.sourceType === 'PRESET' ? <>
         <label>预设岗位<select value={values.presetId} onChange={(event) => setValues({ ...values, presetId: event.target.value })}>{presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.displayName}</option>)}</select></label>
         {selectedPreset && <section className="preset-job-card" aria-label="岗位概览">
@@ -139,12 +156,28 @@ export function InterviewCreatePage() {
         <label>岗位名称<input value={values.jobTitle} maxLength={200} onChange={(event) => setValues({ ...values, jobTitle: event.target.value })} required /></label>
         <label>完整 JD<textarea value={values.jobDescription} maxLength={20_000} rows={10} onChange={(event) => setValues({ ...values, jobDescription: event.target.value })} required /></label>
       </>}
-      <fieldset><legend>面试模式</legend><div className="form-row">
-        <label><input type="radio" checked={values.interviewMode === 'TEXT'} onChange={() => setValues({ ...values, interviewMode: 'TEXT' })} /> 文字面试</label>
-        <label><input type="radio" checked={values.interviewMode === 'VOICE'} disabled={voiceDisabled} onChange={() => setValues({ ...values, interviewMode: 'VOICE' })} /> 语音面试</label>
-      </div>
+      <fieldset className="form-group">
+        <legend>面试模式</legend>
+        <div className="option-grid">
+          <label className={`option-card${values.interviewMode === 'TEXT' ? ' is-selected' : ''}`}>
+            <input type="radio" name="interviewMode" aria-label="文字面试" checked={values.interviewMode === 'TEXT'} onChange={() => setValues({ ...values, interviewMode: 'TEXT' })} />
+            <span className="option-card-body">
+              <span className="option-card-title">文字面试</span>
+              <span className="option-card-desc" aria-hidden="true">键盘输入作答，节奏自主</span>
+            </span>
+            <span className="option-card-check" aria-hidden="true" />
+          </label>
+          <label className={`option-card${values.interviewMode === 'VOICE' ? ' is-selected' : ''}${voiceDisabled ? ' is-disabled' : ''}`}>
+            <input type="radio" name="interviewMode" aria-label="语音面试" checked={values.interviewMode === 'VOICE'} disabled={voiceDisabled} onChange={() => setValues({ ...values, interviewMode: 'VOICE' })} />
+            <span className="option-card-body">
+              <span className="option-card-title">语音面试</span>
+              <span className="option-card-desc" aria-hidden="true">实时转写，说完手动确认提交</span>
+            </span>
+            <span className="option-card-check" aria-hidden="true" />
+          </label>
+        </div>
         {voiceReason && <p className="form-hint" role="status">{voiceReason}</p>}
-        <p className="form-hint">语音面试会朗读题目，并用你的录音转写后确认提交；面试模式在创建时确定。</p>
+        <p className="form-hint">语音面试会朗读题目并支持实时对话，也可回退到录音转写后确认；面试模式在创建时确定。</p>
       </fieldset>
       <div className="form-row">
         <label>难度<select value={values.difficulty} onChange={(event) => setValues({ ...values, difficulty: event.target.value as Difficulty })}><option value="EASY">简单</option><option value="MEDIUM">中等</option><option value="HARD">困难</option></select></label>

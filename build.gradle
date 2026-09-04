@@ -33,6 +33,15 @@ dependencies {
   implementation 'org.springframework.boot:spring-boot-starter-amqp'
   implementation 'org.redisson:redisson-spring-boot-starter:4.0.0'
 
+  // Realtime voice interview (WebSocket + DashScope Qwen3 ASR/TTS Realtime).
+  // starter-websocket brings spring-websocket/spring-messaging; tomcat-embed-websocket is
+  // re-added explicitly because the webmvc starter above excludes it.
+  implementation 'org.springframework.boot:spring-boot-starter-websocket'
+  implementation 'org.apache.tomcat.embed:tomcat-embed-websocket'
+  implementation('com.alibaba:dashscope-sdk-java:2.22.7') {
+    exclude group: 'org.slf4j', module: 'slf4j-simple'
+  }
+
   implementation 'org.springframework.boot:spring-boot-starter-flyway'
   runtimeOnly 'org.flywaydb:flyway-mysql'
   runtimeOnly 'com.mysql:mysql-connector-j'

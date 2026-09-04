@@ -40,6 +40,12 @@ InterviewPilot 是一个基于 Spring Boot 的 AI 技术面试系统。它能够
 
 ![面试过程：问题、回答与动态反馈](assets/images/interview-session.png)
 
+### 语音面试
+
+实时语音对话保持一条 WebSocket：流式识别内容实时回显但不会自动发送，候选人说完点「提交回答」手动确认；面试官以语音播报下一题，中央状态球用动态话筒/声波呈现聆听、思考与播报状态，并可随时回退到录音转写模式。
+
+![语音面试：实时对话、状态动效与手动确认提交](assets/images/interview-voice-realtime.png)
+
 ### 面试报告
 
 面试结束后生成综合评分、能力维度、优势与改进方向，帮助候选人定位后续学习重点。
@@ -56,7 +62,7 @@ InterviewPilot 是一个基于 Spring Boot 的 AI 技术面试系统。它能够
 - 出题阶段由结构化模型一次性生成题卡；运行期由纯 Java 的固定流程策略按阶段、主问题数量与每卡追问配额决策，追问不占用主问题预算，模型不直接改写业务状态。
 - 支持知识库上传、异步索引、Qdrant 向量召回和面试 RAG 上下文注入。
 - 面试结束后通过 RabbitMQ 可靠异步生成报告，支持重试、死信和人工恢复。
-- 语音面试支持实时对话（单条 WebSocket、流式 ASR、服务端 VAD 自动断句、实时 TTS）与 MediaRecorder 录音转写两种模式，实时作答复用同一套回合引擎与幂等控制。
+- 语音面试支持实时对话（单条 WebSocket、流式 ASR、服务端 VAD 自动断句、实时字幕、候选人手动确认提交、实时 TTS）与 MediaRecorder 录音转写两种模式，实时作答复用同一套回合引擎与幂等控制。
 - 提供面试历史、报告查询、模型切换、健康检查、指标和 Trace ID。
 
 当前未实现计费、面试预约和导出。知识库/RAG 需要显式开启 `KNOWLEDGE_ENABLED=true` 并配置 Embedding API Key；语音面试通过 `VOICE_ENABLED=true` 开启（实时 WebSocket 对话默认随之一并启用，录音转写作为兜底）。
@@ -266,9 +272,9 @@ Compose 使用非 `guest` RabbitMQ 用户 `interview_pilot`。RabbitMQ 默认限
 
 ### 实时对话模式（默认）
 
-开启语音后默认使用实时对话：浏览器与后端保持**一条 WebSocket**（`/ws/voice-interview/{sessionId}`，握手通过 `?token=` 携带 JWT 并校验会话归属）。麦克风采集 16kHz/16bit 单声道 PCM，以 100ms 一帧持续上行；后端转发 DashScope 实时 ASR（`qwen3-asr-flash-realtime`，服务端 VAD 静音 800ms 自动断句），识别 final 文本以 `VOICE_REALTIME` 模式直接提交给同一套回合引擎（claim/process），再由实时 TTS（`qwen3-tts-flash-realtime`）整段合成 24kHz PCM、封 WAV 经同一连接回推播放，全程无需逐次点击录音、转写和发送。
+开启语音后默认使用实时对话：浏览器与后端保持**一条 WebSocket**（`/ws/voice-interview/{sessionId}`，握手通过 `?token=` 携带 JWT 并校验会话归属）。麦克风采集 16kHz/16bit 单声道 PCM，以 100ms 一帧持续上行；后端转发 DashScope 实时 ASR（`qwen3-asr-flash-realtime`，服务端 VAD 静音 800ms 仅用于自动断句），partial/final 文本作为实时字幕持续回显并在服务端累积，**默认不会自动提交**——候选人确认内容后点「提交回答」（前端发送 `submit` 控制帧，并可携带最后尚未落定的半句），后端才以 `VOICE_REALTIME` 模式交给同一套回合引擎（claim/process），再由实时 TTS（`qwen3-tts-flash-realtime`）整段合成 24kHz PCM、封 WAV 经同一连接回推播放。如需「停顿后自动发送」，可设 `app.voice.realtime.conversation.auto-submit=true` 恢复。
 
-实时链路为**半双工**：AI 播报期间抑制麦克风上行并设置冷却时间以避免回声；连接空闲 4 分 30 秒提醒、5 分钟关闭。实时模式复用录音模式的总开关与同一把 `DASHSCOPE_SPEECH_API_KEY`，不引入独立凭据；细项通过 `app.voice.realtime.*` 配置且均有默认值（路径、ASR/TTS 模型、VAD、空闲时长、单帧上限等），一般无需调整。
+实时链路为**半双工**：AI 播报期间抑制麦克风上行并设置冷却时间以避免回声；连接空闲 4 分 30 秒提醒、5 分钟关闭。实时模式复用录音模式的总开关与同一把 `DASHSCOPE_SPEECH_API_KEY`，不引入独立凭据；细项通过 `app.voice.realtime.*` 配置且均有默认值（路径、ASR/TTS 模型、VAD、提交方式、空闲时长、单帧上限等），一般无需调整，其中 `conversation.auto-submit` 默认 `false`（手动确认提交），`conversation.debounce-ms` 仅在自动提交模式下生效。
 
 ### 录音模式（文件式、可编辑转写，作为兜底）
 

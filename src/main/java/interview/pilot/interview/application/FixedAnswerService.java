@@ -181,9 +181,19 @@ public class FixedAnswerService {
       }
       recording = requireBindableRecording(session, turn, request.recordingId());
       recording.attach(request.requestId());
-    } else if (request.recordingId() != null) {
-      throw conflict(VoiceErrorCodes.VOICE_INPUT_MODE_MISMATCH,
-          "recordingId requires inputMode VOICE");
+    } else {
+      // TEXT and VOICE_REALTIME are both text-driven and never bind a recording file.
+      // Realtime voice transcribes over a WebSocket, so its answer text arrives directly;
+      // it is still only valid inside a VOICE interview session.
+      if (request.recordingId() != null) {
+        throw conflict(VoiceErrorCodes.VOICE_INPUT_MODE_MISMATCH,
+            "recordingId requires inputMode VOICE");
+      }
+      if (request.inputMode() == InputMode.VOICE_REALTIME
+          && session.getInterviewMode() != InterviewMode.VOICE) {
+        throw conflict(VoiceErrorCodes.VOICE_INPUT_MODE_MISMATCH,
+            "realtime voice answers require a voice interview");
+      }
     }
     var attempt = attempts.save(AnswerAttemptEntity.processing(
         request.requestId(), session.getId(), turn.getId(), hash));

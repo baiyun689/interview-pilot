@@ -7,3 +7,8 @@ out/
 docs/
 .superpowers
 .worktrees/
+
+# 本地面试备考材料（个人使用，不提交）
+/INTERVIEW_PREP.md
+/RESUME_QMAP.md
+/CODE_READING_GUIDE.md

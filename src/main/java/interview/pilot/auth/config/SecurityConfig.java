@@ -26,6 +26,9 @@ public class SecurityConfig {
         .authorizeHttpRequests(auth -> auth
             .requestMatchers("/api/auth/register", "/api/auth/login",
                 "/api/auth/refresh", "/api/auth/logout", "/actuator/health").permitAll()
+            // The voice WebSocket carries its JWT as a ?token= query param and authenticates in
+            // VoiceHandshakeInterceptor (browsers cannot set Authorization on a WS handshake).
+            .requestMatchers("/ws/**").permitAll()
             .anyRequest().authenticated())
         .exceptionHandling(errors -> errors
             .authenticationEntryPoint((request, response, exception) ->
