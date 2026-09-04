@@ -1,12 +1,12 @@
 # InterviewPilot
 
-InterviewPilot 是一个基于 Spring Boot 的 AI 自适应技术面试系统。它能够分析候选人简历，根据固定面试方向或自定义岗位生成面试计划，在多轮问答中动态决定追问、换题、难度调整和结束时机，并在面试完成后异步生成评估报告。
+InterviewPilot 是一个基于 Spring Boot 的 AI 技术面试系统。它能够分析候选人简历，根据固定面试方向（Preset）或自定义岗位 JD 生成结构化题卡，按「自我介绍 → 基础 → 项目经历 → 场景权衡」的固定阶段推进主问题与动态追问，支持文本、录音和实时语音三种作答方式，并在面试完成后异步生成评估报告。
 
 ## 项目展示
 
 ### 开始面试
 
-可选择候选人简历、面试方向、岗位要求、难度、轮次预算、模型和知识库，创建一场可追溯的自适应面试。
+可选择候选人简历、面试方向、岗位要求、难度、面试规模（Quick/Standard/Deep）、模型和知识库，创建一场可追溯的结构化面试。
 
 ![开始面试：配置岗位、模型和知识库](assets/images/interview-create.png)
 
@@ -36,7 +36,7 @@ InterviewPilot 是一个基于 Spring Boot 的 AI 自适应技术面试系统。
 
 ### 面试过程
 
-AI 根据候选人的回答给出针对性反馈、风险信号和下一步面试策略，实现动态追问与难度调整。
+面试官按题卡依次提出主问题，并结合候选人回答与 RAG 上下文动态生成追问；固定流程策略依据主问题数量与每卡追问配额决定继续追问、进入下一主问题或结束面试。
 
 ![面试过程：问题、回答与动态反馈](assets/images/interview-session.png)
 
@@ -52,20 +52,22 @@ AI 根据候选人的回答给出针对性反馈、风险信号和下一步面�
 - 内置 Java 后端、Python 后端、前端、AI Agent、测试开发、算法、系统设计和自定义岗位 8 个面试 Skill。
 - 固定面试方向可以直接使用，也可以通过可选 JD 补充要求；自定义岗位必须提供岗位名称和 JD。
 - 创建面试时固化 Skill、模型、岗位要求和面试计划快照，避免后续配置变化影响历史面试。
-- 使用 POST SSE 渐进返回接收状态、评分反馈、决策和下一题。
-- 模型只提出建议，Java 决策策略负责限制追问次数、能力覆盖、置信度、难度范围和总轮次。
+- 提交答案通过 POST SSE 渐进返回 `ACCEPTED`、`PROCESSING`、`RESULT`（下一题/结束）状态，异常时返回 `ERROR`。
+- 出题阶段由结构化模型一次性生成题卡；运行期由纯 Java 的固定流程策略按阶段、主问题数量与每卡追问配额决策，追问不占用主问题预算，模型不直接改写业务状态。
 - 支持知识库上传、异步索引、Qdrant 向量召回和面试 RAG 上下文注入。
 - 面试结束后通过 RabbitMQ 可靠异步生成报告，支持重试、死信和人工恢复。
+- 语音面试支持实时对话（单条 WebSocket、流式 ASR、服务端 VAD 自动断句、实时 TTS）与 MediaRecorder 录音转写两种模式，实时作答复用同一套回合引擎与幂等控制。
 - 提供面试历史、报告查询、模型切换、健康检查、指标和 Trace ID。
 
-当前未实现计费、语音 ASR/TTS、面试预约、导出和 WebSocket。知识库/RAG 需要显式开启 `KNOWLEDGE_ENABLED=true` 并配置 Embedding API Key。
+当前未实现计费、面试预约和导出。知识库/RAG 需要显式开启 `KNOWLEDGE_ENABLED=true` 并配置 Embedding API Key；语音面试通过 `VOICE_ENABLED=true` 开启（实时 WebSocket 对话默认随之一并启用，录音转写作为兜底）。
 
 ## 技术栈
 
-- 后端：Java 21、Spring Boot 4、Spring MVC、Spring Data JPA、Hibernate、Flyway、Spring AI
+- 后端：Java 21、Spring Boot 4、Spring MVC、WebSocket、Spring Data JPA、Hibernate、Flyway、Spring AI
 - 数据库：MySQL 8.4
 - 消息队列：RabbitMQ 4
 - 向量库：Qdrant
+- 语音：DashScope 实时 ASR/TTS（Qwen3-Realtime，WebSocket），MediaRecorder 非实时转写兜底
 - 缓存与并发协调：Redis 7.4、Redisson
 - 前端：React 18、TypeScript、Vite、Vitest
 - 网关：Nginx
@@ -80,16 +82,16 @@ MySQL 持久化简历、分析结果、岗位要求、Skill 快照、面试计�
 
 Skill、Provider、Model 和 InterviewPlan 都会在创建面试时生成不可变快照。即使之后修改默认模型或 Skill 文件，已经开始的面试仍使用创建时的版本。
 
-### 可控的 AI 决策
+### 固定面试流程与受控的 AI 输出
 
-模型返回评分结果和建议决策，但不会直接控制业务状态。每轮决策包含两个相互独立的维度：
+题卡在出题阶段由结构化模型一次性生成；运行期的题目推进不交给模型，而由纯 Java 的 `FixedInterviewFlowPolicy` 决策，模型不直接改写业务状态。其规则如下：
 
-- `nextStep`：`FOLLOW_UP`、`NEXT_TOPIC`、`FINISH`
-- `difficultyAdjustment`：`INCREASE`、`KEEP`、`DECREASE`
+- 阶段固定为 `SELF_INTRODUCTION → FUNDAMENTALS → PROJECT_EXPERIENCE → SCENARIO_TRADEOFF → END`。
+- 面试规模分 Quick/Standard/Deep 三档，分别规划 6/9/12 个主问题（各阶段数量固定），追问另计、不占用主问题预算。
 
-Java 策略会校验模型建议，并根据置信度、必考能力覆盖、连续追问次数和轮次预算生成最终决策。因此可以出现 `FOLLOW_UP + INCREASE`、`NEXT_TOPIC + DECREASE` 等合法组合。
+每张题卡有独立追问配额：未用完则继续 `FOLLOW_UP`，用完进入同阶段下一主问题，阶段主问题问完即切换阶段，全部阶段结束即 `END`；自我介绍阶段不产生追问。
 
-所有结构化模型输出都必须反序列化为受约束的 Java Record；字段缺失、枚举非法、分数越界或结构错误都会被识别为无效输出，而不是直接进入数据库。
+所有结构化模型输出（题卡、追问、报告）都必须反序列化为受约束的 Java Record；字段缺失、枚举非法或结构错误都会被识别为无效输出，而不是直接进入数据库；追问生成失败时回退到题卡内置的兜底追问，不阻断面试流程。
 
 ### 并发与幂等
 
@@ -260,7 +262,17 @@ Compose 使用非 `guest` RabbitMQ 用户 `interview_pilot`。RabbitMQ 默认限
 
 ## 语音面试（Voice Interview）
 
-语音面试是可选的增强输入方式，默认关闭。打开后，面试官提问会先由 TTS 异步合成语音
+语音面试提供两种模式，均由 `VOICE_ENABLED` 总开关控制，关闭时文字面试完全不受影响。
+
+### 实时对话模式（默认）
+
+开启语音后默认使用实时对话：浏览器与后端保持**一条 WebSocket**（`/ws/voice-interview/{sessionId}`，握手通过 `?token=` 携带 JWT 并校验会话归属）。麦克风采集 16kHz/16bit 单声道 PCM，以 100ms 一帧持续上行；后端转发 DashScope 实时 ASR（`qwen3-asr-flash-realtime`，服务端 VAD 静音 800ms 自动断句），识别 final 文本以 `VOICE_REALTIME` 模式直接提交给同一套回合引擎（claim/process），再由实时 TTS（`qwen3-tts-flash-realtime`）整段合成 24kHz PCM、封 WAV 经同一连接回推播放，全程无需逐次点击录音、转写和发送。
+
+实时链路为**半双工**：AI 播报期间抑制麦克风上行并设置冷却时间以避免回声；连接空闲 4 分 30 秒提醒、5 分钟关闭。实时模式复用录音模式的总开关与同一把 `DASHSCOPE_SPEECH_API_KEY`，不引入独立凭据；细项通过 `app.voice.realtime.*` 配置且均有默认值（路径、ASR/TTS 模型、VAD、空闲时长、单帧上限等），一般无需调整。
+
+### 录音模式（文件式、可编辑转写，作为兜底）
+
+录音模式是可选的增强输入方式，默认关闭。打开后，面试官提问会先由 TTS 异步合成语音
 （可降级），考生用浏览器 `MediaRecorder` 按题录音上传，后端调用 DashScope 非实时 ASR
 异步转写，考生确认（可修改错别字和技术词）转写文本后提交答案。
 
@@ -327,7 +339,7 @@ RabbitMQ worker 内执行；确认后的文本才是领域事实，报告只使�
 
 ### 非目标
 
-- 无 WebSocket 实时语音：首版是按题半双工、文件式 ASR；未来实时化只替换采集与识别 Adapter，状态机与报告模型不变。
+- 实时对话为半双工、TTS 整句合成后整段播放，并非全双工通话或逐字流式播放；实时与录音两种模式共用同一套状态机与报告模型。
 - 不根据声音特征评分：无声纹、情绪或作弊判断，语音只负责输入，不参与评分。
 - 不支持 MaaS workspace 模式：仅支持标准 DashScope 域名 + API Key 认证。
 
@@ -393,10 +405,10 @@ curl -sS -X POST https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-
 1. 调用 `POST /api/resumes` 上传 TXT、PDF 或 DOCX 简历。响应包含持久化分析任务 ID；标准化内容相同的重复简历会返回已有简历和任务。
 2. 轮询 `GET /api/tasks/{taskId}`，或查询 `GET /api/resumes/{id}`，直到简历状态变为 `READY`。
 3. 可选：调用 `POST /api/knowledge-bases` 创建知识库，`POST /api/knowledge-bases/{id}/documents` 上传文档，再轮询 `GET /api/knowledge-bases/{id}/documents`，直到需要使用的文档变为 `READY`。
-4. 调用 `GET /api/interview-skills` 获取固定面试方向。
-5. 调用 `POST /api/interviews` 创建面试，请求包含 `resumeId`、`skillId`、岗位名称、可选或必填 JD、难度、5～15 轮预算、可选 `providerId` 和可选 `knowledgeBaseIds`。
+4. 调用 `GET /api/interview-presets` 获取固定面试方向（Preset）。
+5. 调用 `POST /api/interviews` 创建面试，请求包含 `resumeId`、`skillId`、岗位名称、可选或必填 JD、难度、面试规模（Quick/Standard/Deep，对应 6/9/12 个主问题，追问另计）、可选 `providerId` 和可选 `knowledgeBaseIds`。
 6. 固定 Skill 可以不填写 JD；选择 `custom` 时必须提供岗位名称和 JD。后端会固化 Skill、Provider、Model、岗位要求和面试计划快照，并生成首题。
-7. 调用 `POST /api/interviews/{sessionId}/answers/stream` 提交 `{requestId, answer}`，SSE 会依次发送 `ACCEPTED`、`FEEDBACK`、`DECISION`、可选的 `NEXT_QUESTION` 和 `COMPLETED`。
+7. 调用 `POST /api/interviews/{sessionId}/answers/stream` 提交 `{requestId, answer, inputMode}`，SSE 会依次发送 `ACCEPTED`、`PROCESSING`、`RESULT`（含下一题或结束状态），异常时发送 `ERROR`。
 8. 当 Java 策略或轮次预算结束面试后，会话进入 `EVALUATING`，同时创建持久化报告任务。
 9. 调用 `GET /api/interviews/{sessionId}/report` 查询最终报告。
 
@@ -406,7 +418,8 @@ curl -sS -X POST https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-
 
 - [简历 API](src/main/java/interview/pilot/resume/api/ResumeController.java)
 - [面试 API](src/main/java/interview/pilot/interview/api/InterviewController.java)
-- [Skill API](src/main/java/interview/pilot/interview/api/InterviewSkillController.java)
+- [面试方向 API](src/main/java/interview/pilot/interview/api/InterviewPresetController.java)
+- [语音录制与播报 API](src/main/java/interview/pilot/voice/api/VoiceRecordingController.java)（实时对话走 WebSocket `/ws/voice-interview`，由 `voice/realtime/handler/RealtimeVoiceWebSocketHandler` 处理）
 - [知识库 API](src/main/java/interview/pilot/knowledge/api/KnowledgeBaseController.java)
 - [异步任务 API](src/main/java/interview/pilot/async/api/AsyncTaskController.java)
 - [模型 Provider API](src/main/java/interview/pilot/ai/provider/AiProviderController.java)
@@ -445,7 +458,7 @@ git diff --check
 
 当前已验证：
 
-- 前端 7 个测试文件、59 项测试通过，TypeScript 编译和生产构建成功。
+- 前端组件与自定义 Hook（含实时语音面板、录音、SSE）测试通过，TypeScript 编译和生产构建成功。
 - Skill Catalog、中文 Prompt、面试创建和 AI Gateway 等相关单元测试通过。
 - 基于 Testcontainers 的面试创建持久化、并发答题和 RabbitMQ 报告处理集成测试通过。
 - `bootJar` 构建、`docker compose config` 和 `git diff --check` 通过。
@@ -465,8 +478,8 @@ git diff --check
 - [知识库上传、索引与召回](src/test/java/interview/pilot/knowledge/retrieval/QdrantKnowledgeRetrieverIT.java)
 - [简历分析 Listener](src/test/java/interview/pilot/async/resume/ResumeAnalysisListenerIT.java)
 - [报告 Listener](src/test/java/interview/pilot/async/report/InterviewReportListenerIT.java)
-- [Java 决策策略](src/test/java/interview/pilot/interview/domain/InterviewDecisionPolicyTest.java)
-- [SSE 行为](src/test/java/interview/pilot/interview/api/InterviewSseControllerTest.java)
+- [固定流程策略](src/test/java/interview/pilot/interview/domain/FixedInterviewFlowPolicyTest.java)
+- [回答服务与 SSE 编排](src/test/java/interview/pilot/interview/application/FixedAnswerServiceTest.java)
 
 ## 常见问题
 
