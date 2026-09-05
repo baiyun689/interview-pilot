@@ -50,6 +50,13 @@ public class InterviewQuestionCardEntity {
   @Column(name = "focus_points", nullable = false, updatable = false, columnDefinition = "json")
   private String focusPoints;
 
+  @Column(name = "knowledge_point", updatable = false, length = 128)
+  private String knowledgePoint;
+
+  @JdbcTypeCode(SqlTypes.JSON)
+  @Column(name = "retrieval_keywords", updatable = false, columnDefinition = "json")
+  private String retrievalKeywords;
+
   @Enumerated(EnumType.STRING)
   @Column(name = "grounding_mode", nullable = false, updatable = false, length = 32)
   private GroundingMode groundingMode;
@@ -66,6 +73,10 @@ public class InterviewQuestionCardEntity {
   @Column(name = "source_ids", nullable = false, updatable = false, columnDefinition = "json")
   private String sourceIds;
 
+  @JdbcTypeCode(SqlTypes.JSON)
+  @Column(name = "rubric", updatable = false, columnDefinition = "json")
+  private String rubric;
+
   @Column(name = "follow_up_quota", nullable = false, updatable = false)
   private int followUpQuota;
 
@@ -76,11 +87,23 @@ public class InterviewQuestionCardEntity {
   @Column(name = "created_at", nullable = false, updatable = false)
   private Instant createdAt;
 
+  /** Legacy factory used by the fixed self-introduction card (no question-scoped grounding). */
   public static InterviewQuestionCardEntity create(
       Long sessionId, InterviewPhase phase, int phaseSequence, String topic,
       String questionText, String focusPoints, GroundingMode groundingMode,
       RagStatus ragStatus, String ragContextSnapshot, String sourceIds,
       int followUpQuota, String fallbackFollowUp) {
+    return create(
+        sessionId, phase, phaseSequence, topic, questionText, focusPoints,
+        null, null, groundingMode, ragStatus, ragContextSnapshot, sourceIds, null,
+        followUpQuota, fallbackFollowUp);
+  }
+
+  public static InterviewQuestionCardEntity create(
+      Long sessionId, InterviewPhase phase, int phaseSequence, String topic,
+      String questionText, String focusPoints, String knowledgePoint, String retrievalKeywords,
+      GroundingMode groundingMode, RagStatus ragStatus, String ragContextSnapshot,
+      String sourceIds, String rubric, int followUpQuota, String fallbackFollowUp) {
     if (phase == InterviewPhase.SELF_INTRODUCTION && followUpQuota != 0) {
       throw new IllegalArgumentException("self introduction follow-up quota must be zero");
     }
@@ -97,10 +120,13 @@ public class InterviewQuestionCardEntity {
     card.topic = Objects.requireNonNull(topic);
     card.questionText = Objects.requireNonNull(questionText);
     card.focusPoints = Objects.requireNonNull(focusPoints);
+    card.knowledgePoint = knowledgePoint;
+    card.retrievalKeywords = retrievalKeywords;
     card.groundingMode = Objects.requireNonNull(groundingMode);
     card.ragStatus = Objects.requireNonNull(ragStatus);
     card.ragContextSnapshot = Objects.requireNonNull(ragContextSnapshot);
     card.sourceIds = Objects.requireNonNull(sourceIds);
+    card.rubric = rubric;
     card.followUpQuota = followUpQuota;
     card.fallbackFollowUp = fallbackFollowUp;
     return card;

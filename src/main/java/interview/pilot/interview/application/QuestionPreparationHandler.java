@@ -1,6 +1,6 @@
 package interview.pilot.interview.application;
 
-import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -36,8 +36,9 @@ public class QuestionPreparationHandler {
   private final AsyncTaskRepository tasks;
   private final InterviewSessionRepository sessions;
   private final InterviewQuestionCardRepository cards;
-  private final PhaseRagRetriever rag;
-  private final QuestionDeckGenerator generator;
+  private final QuestionSkeletonGenerator skeletonGenerator;
+  private final QuestionRagRetriever questionRagRetriever;
+  private final RubricGenerator rubricGenerator;
   private final FollowUpQuotaAllocator quotas;
   private final ObjectMapper objectMapper;
   private final TransactionTemplate transactions;
@@ -46,35 +47,53 @@ public class QuestionPreparationHandler {
       AsyncTaskRepository tasks,
       InterviewSessionRepository sessions,
       InterviewQuestionCardRepository cards,
-      PhaseRagRetriever rag,
-      QuestionDeckGenerator generator,
+      QuestionSkeletonGenerator skeletonGenerator,
+      QuestionRagRetriever questionRagRetriever,
+      RubricGenerator rubricGenerator,
       FollowUpQuotaAllocator quotas,
       ObjectMapper objectMapper,
       PlatformTransactionManager transactionManager) {
     this.tasks = tasks;
     this.sessions = sessions;
     this.cards = cards;
-    this.rag = rag;
-    this.generator = generator;
+    this.skeletonGenerator = skeletonGenerator;
+    this.questionRagRetriever = questionRagRetriever;
+    this.rubricGenerator = rubricGenerator;
     this.quotas = quotas;
     this.objectMapper = objectMapper;
     this.transactions = new TransactionTemplate(transactionManager);
   }
 
-  /** Short inspection transaction, followed by RAG/LLM work outside a transaction. */
+  /**
+   * Short inspection transaction, then the two-stage generation pipeline outside a transaction:
+   * question skeletons -> one precise RAG snapshot per question -> per-question rubric deck.
+   */
   public Outcome prepare(TaskMessage message) {
     Target target = inspect(message);
     if (target.terminal()) return Outcome.STALE;
+    InterviewBriefSnapshot brief = target.brief();
 
-    var ragByPhase = new EnumMap<InterviewPhase, RagContextSnapshot>(InterviewPhase.class);
-    for (InterviewPhase phase : List.of(
-        InterviewPhase.FUNDAMENTALS,
-        InterviewPhase.PROJECT_EXPERIENCE,
-        InterviewPhase.SCENARIO_TRADEOFF)) {
-      ragByPhase.put(phase, rag.retrieve(target.brief(), phase));
+    // Stage 1: question skeletons (text + knowledge point + focus points), no RAG involved.
+    List<QuestionSkeletonOutput.Skeleton> skeletons = skeletonGenerator.generate(brief);
+
+    // Stage 2: question-scoped retrieval (one precise snapshot per question).
+    Map<QuestionCardKey, RagContextSnapshot> questionSnapshots = new LinkedHashMap<>();
+    for (QuestionSkeletonOutput.Skeleton skeleton : skeletons) {
+      QuestionRetrievalSeed seed = new QuestionRetrievalSeed(
+          skeleton.phase(),
+          skeleton.knowledgePoint(),
+          skeleton.retrievalKeywords(),
+          skeleton.question(),
+          brief.difficulty());
+      questionSnapshots.put(
+          QuestionCardKey.of(skeleton.phase(), skeleton.sequence()),
+          questionRagRetriever.retrieve(brief.knowledgeScope(), seed));
     }
-    PreparedQuestionDeck deck = generator.generate(target.brief(), ragByPhase);
-    return transactions.execute(status -> persist(message, target, ragByPhase, deck));
+
+    // Stage 3: per-question rubric + deterministic grounding decision, frozen into a deck.
+    PreparedQuestionDeck deck = rubricGenerator.generate(brief, skeletons, questionSnapshots);
+
+    return transactions.execute(status -> persist(message, target, questionSnapshots, deck));
   }
 
   public Target inspect(TaskMessage message) {
@@ -126,7 +145,7 @@ public class QuestionPreparationHandler {
   private Outcome persist(
       TaskMessage message,
       Target target,
-      Map<InterviewPhase, RagContextSnapshot> ragByPhase,
+      Map<QuestionCardKey, RagContextSnapshot> questionSnapshots,
       PreparedQuestionDeck deck) {
     AsyncTaskEntity task = tasks.findByTaskId(message.taskId()).orElseThrow();
     InterviewSessionEntity session = sessions.findBySessionId(target.sessionId()).orElseThrow();
@@ -146,11 +165,17 @@ public class QuestionPreparationHandler {
         SELF_INTRODUCTION, "[]", GroundingMode.GENERAL, RagStatus.NOT_REQUESTED,
         encode(selfRag), "[]", 0, null));
     for (PreparedQuestionDeck.PreparedQuestion question : deck.questions()) {
-      RagContextSnapshot phaseRag = ragByPhase.get(question.phase());
+      QuestionCardKey key = QuestionCardKey.of(question.phase(), question.sequence());
+      RagContextSnapshot questionRag = questionSnapshots.get(key);
+      if (questionRag == null) {
+        throw new InvalidQuestionDeckException("missing question RAG snapshot for " + key);
+      }
       cards.save(InterviewQuestionCardEntity.create(
           session.getId(), question.phase(), question.sequence(), question.topic(),
-          question.question(), encode(question.focusPoints()), question.groundingMode(),
-          phaseRag.status(), encode(phaseRag), encode(question.evidenceRefs()),
+          question.question(), encode(question.focusPoints()),
+          question.knowledgePoint(), encode(question.retrievalKeywords()),
+          question.groundingMode(), questionRag.status(), encode(questionRag),
+          encode(question.evidenceRefs()), encode(question.rubric()),
           quotas.allocate(question.phase()), question.fallbackFollowUp()));
     }
     cards.flush();

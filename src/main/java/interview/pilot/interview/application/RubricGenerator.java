@@ -1,14 +1,20 @@
 package interview.pilot.interview.application;
 
+import java.util.List;
 import java.util.Map;
 
 import interview.pilot.interview.domain.InterviewBriefSnapshot;
-import interview.pilot.interview.domain.InterviewPhase;
 import interview.pilot.interview.domain.PreparedQuestionDeck;
 import interview.pilot.interview.rag.RagContextSnapshot;
 
-public interface QuestionDeckGenerator {
+/**
+ * Stage 3: turns question skeletons plus their question-scoped RAG snapshots into a validated deck
+ * with a traceable rubric per question.
+ */
+public interface RubricGenerator {
+
   PreparedQuestionDeck generate(
       InterviewBriefSnapshot brief,
-      Map<InterviewPhase, RagContextSnapshot> ragByPhase);
+      List<QuestionSkeletonOutput.Skeleton> skeletons,
+      Map<QuestionCardKey, RagContextSnapshot> snapshots);
 }
