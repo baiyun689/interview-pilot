@@ -47,7 +47,7 @@ public class InterviewReportListener {
       return;
     }
     try {
-      var outcome = handler.handle(message);
+      var outcome = handler.handle(message, retries.retryCountOf(source));
       if (outcome == FixedInterviewReportHandler.Outcome.TERMINAL) {
         completeBestEffort(key, token);
       } else {

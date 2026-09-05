@@ -23,7 +23,8 @@ class RetryableTaskPolicyRegistryTest {
           new KnowledgeDocumentIndexRetryPolicy(mock(KnowledgeDocumentRepository.class)),
           new KnowledgeDocumentDeleteRetryPolicy(mock(KnowledgeDocumentRepository.class)),
           new VoiceTranscriptionRetryPolicy(),
-          new QuestionSpeechSynthesisRetryPolicy()));
+          new QuestionSpeechSynthesisRetryPolicy(),
+          new AnswerEvaluationRetryPolicy()));
 
   @Test
   void routesEveryExistingTaskTypeToItsPolicy() {
@@ -41,6 +42,8 @@ class RetryableTaskPolicyRegistryTest {
         .isInstanceOf(VoiceTranscriptionRetryPolicy.class);
     assertThat(registry.forType(AsyncTaskType.QUESTION_SPEECH_SYNTHESIS))
         .isInstanceOf(QuestionSpeechSynthesisRetryPolicy.class);
+    assertThat(registry.forType(AsyncTaskType.ANSWER_EVALUATION))
+        .isInstanceOf(AnswerEvaluationRetryPolicy.class);
   }
 
   @Test

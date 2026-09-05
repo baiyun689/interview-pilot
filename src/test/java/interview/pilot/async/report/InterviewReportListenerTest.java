@@ -1,6 +1,7 @@
 package interview.pilot.async.report;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -36,7 +37,7 @@ class InterviewReportListenerTest {
 
     listener.receive(task, source);
 
-    verify(handler, never()).handle(any());
+    verify(handler, never()).handle(any(), anyInt());
     verify(retries, never()).routeFailure(any(), any());
   }
 }

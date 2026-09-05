@@ -90,6 +90,11 @@ app:
         model: ${KIMI_MODEL:moonshot-v1-8k}
         enabled: ${KIMI_ENABLED:false}
         timeout: ${KIMI_TIMEOUT:30s}
+  answer-evaluation:
+    enabled: ${ANSWER_EVALUATION_ENABLED:true}
+    # Report attempts (5s/30s/120s retry ladder) to wait for pending per-turn evaluations
+    # before proceeding with terminal evaluations and raw-text fallback for the rest.
+    report-barrier-max-attempts: ${ANSWER_EVALUATION_REPORT_BARRIER_MAX_ATTEMPTS:3}
   knowledge:
     enabled: ${KNOWLEDGE_ENABLED:false}
     files-root: ${KNOWLEDGE_FILES_ROOT:./data/knowledge}

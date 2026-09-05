@@ -18,6 +18,8 @@ import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.async.messaging.TaskMessage;
+import interview.pilot.interview.domain.AnswerEvaluation;
+import interview.pilot.interview.domain.EvalStatus;
 import interview.pilot.interview.domain.FixedInterviewReport;
 import interview.pilot.interview.domain.FixedInterviewEvidencePolicy;
 import interview.pilot.interview.domain.InterviewBriefSnapshot;
@@ -28,6 +30,7 @@ import interview.pilot.interview.infrastructure.InterviewReportEntity;
 import interview.pilot.interview.infrastructure.InterviewReportRepository;
 import interview.pilot.interview.infrastructure.InterviewSessionEntity;
 import interview.pilot.interview.infrastructure.InterviewSessionRepository;
+import interview.pilot.interview.infrastructure.InterviewTurnEntity;
 import interview.pilot.interview.infrastructure.InterviewTurnRepository;
 import interview.pilot.interview.rag.RagContextSnapshot;
 import tools.jackson.core.JacksonException;
@@ -43,7 +46,9 @@ public class FixedInterviewReportHandler {
   private final InterviewReportRepository reports;
   private final ObjectMapper objectMapper;
   private final TransactionTemplate transactions;
+  private final AnswerEvaluationProperties evaluationProperties;
   private final FixedInterviewEvidencePolicy evidencePolicy = new FixedInterviewEvidencePolicy();
+  private final ReportEvaluationBarrier evaluationBarrier = new ReportEvaluationBarrier();
 
   public FixedInterviewReportHandler(
       FixedReportGenerator generator,
@@ -53,6 +58,7 @@ public class FixedInterviewReportHandler {
       InterviewQuestionCardRepository cards,
       InterviewReportRepository reports,
       ObjectMapper objectMapper,
+      AnswerEvaluationProperties evaluationProperties,
       PlatformTransactionManager transactionManager) {
     this.generator = generator;
     this.tasks = tasks;
@@ -61,11 +67,12 @@ public class FixedInterviewReportHandler {
     this.cards = cards;
     this.reports = reports;
     this.objectMapper = objectMapper;
+    this.evaluationProperties = evaluationProperties;
     this.transactions = new TransactionTemplate(transactionManager);
   }
 
-  public Outcome handle(TaskMessage message) {
-    Begin begin = transactions.execute(status -> begin(message));
+  public Outcome handle(TaskMessage message, int completedRetries) {
+    Begin begin = transactions.execute(status -> begin(message, completedRetries));
     if (begin.terminal()) return Outcome.STALE;
     try {
       FixedInterviewReport report = generator.generate(
@@ -110,7 +117,7 @@ public class FixedInterviewReportHandler {
     return Boolean.TRUE.equals(result);
   }
 
-  private Begin begin(TaskMessage message) {
+  private Begin begin(TaskMessage message, int completedRetries) {
     AsyncTaskEntity task = task(message);
     InterviewSessionEntity session = session(task);
     if (task.getExecutionEpoch() != message.executionEpoch()
@@ -136,6 +143,16 @@ public class FixedInterviewReportHandler {
         storedTurns.stream().map(turn -> new FixedInterviewEvidencePolicy.TurnEvidence(
             turn.getTurnNo(), turn.getSourceCardId(), turn.getPhase(),
             turn.getQuestionType(), turn.getStatus())).toList());
+    List<EvalStatus> formalStatuses = storedTurns.stream()
+        .filter(turn -> turn.getPhase() != InterviewPhase.SELF_INTRODUCTION)
+        .map(turn -> turn.getEvalStatus() == null ? EvalStatus.NOT_REQUIRED : turn.getEvalStatus())
+        .toList();
+    if (evaluationBarrier.shouldAwait(formalStatuses, completedRetries,
+        evaluationProperties.getReportBarrierMaxAttempts())) {
+      // Per-turn evaluations are still running; requeue through the report retry ladder and wait,
+      // bounded by reportBarrierMaxAttempts so the report can never hang indefinitely.
+      throw new ReportGenerationRetryableException(task.getAttemptCount());
+    }
     var evidence = new ArrayList<FixedReportInput.TurnEvidence>();
     var allowed = new HashSet<String>();
     var availability = new EnumMap<InterviewPhase, String>(InterviewPhase.class);
@@ -151,7 +168,7 @@ public class FixedInterviewReportHandler {
       }
       evidence.add(new FixedReportInput.TurnEvidence(
           turn.getTurnNo(), turn.getPhase().name(), turn.getQuestionType().name(),
-          turn.getQuestionText(), turn.getAnswerText(), rag, refs));
+          turn.getQuestionText(), turn.getAnswerText(), rag, refs, evaluationOf(turn)));
     }
     return new Begin(
         task.getTaskId(), session.getId(), session.getUserAccountId(), session.getSessionId(),
@@ -247,6 +264,15 @@ public class FixedInterviewReportHandler {
     } catch (JacksonException exception) {
       throw new IllegalStateException("Stored report input is invalid", exception);
     }
+  }
+
+  private AnswerEvaluation evaluationOf(InterviewTurnEntity turn) {
+    if ((turn.getEvalStatus() == EvalStatus.OK
+        || turn.getEvalStatus() == EvalStatus.GENERAL_FALLBACK)
+        && turn.getAnswerEvaluation() != null && !turn.getAnswerEvaluation().isBlank()) {
+      return decode(turn.getAnswerEvaluation(), AnswerEvaluation.class);
+    }
+    return null;
   }
 
   private List<String> decodeStringList(String json) {

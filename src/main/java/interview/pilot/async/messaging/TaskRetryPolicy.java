@@ -17,7 +17,7 @@ public class TaskRetryPolicy {
   }
 
   public RouteOutcome routeFailure(TaskMessage task, Message source) {
-    int completedRetryDelays = retryCount(source);
+    int completedRetryDelays = retryCountOf(source);
     if (completedRetryDelays < MAX_RETRY_COUNT) {
       publisher.publishRetry(task, completedRetryDelays + 1);
       return RouteOutcome.RETRY;
@@ -26,7 +26,8 @@ public class TaskRetryPolicy {
     return RouteOutcome.DEAD_LETTER;
   }
 
-  private int retryCount(Message source) {
+  /** Number of delayed retries already consumed (header x-retry-count); 0 on first delivery. */
+  public int retryCountOf(Message source) {
     Object value = source.getMessageProperties()
         .getHeader(RabbitTopologyConfig.RETRY_COUNT_HEADER);
     return value instanceof Number number ? number.intValue() : 0;

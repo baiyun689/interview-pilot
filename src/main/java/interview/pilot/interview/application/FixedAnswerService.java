@@ -58,6 +58,7 @@ public class FixedAnswerService {
   private final TransactionTemplate transactions;
   private final VoiceRecordingRepository recordings;
   private final QuestionSpeechTaskCreator questionSpeeches;
+  private final AnswerEvaluationProperties evaluationProperties;
   private final FixedInterviewFlowPolicy flow = new FixedInterviewFlowPolicy();
 
   public FixedAnswerService(
@@ -71,7 +72,8 @@ public class FixedAnswerService {
       ObjectMapper objectMapper,
       PlatformTransactionManager transactionManager,
       VoiceRecordingRepository recordings,
-      QuestionSpeechTaskCreator questionSpeeches) {
+      QuestionSpeechTaskCreator questionSpeeches,
+      AnswerEvaluationProperties evaluationProperties) {
     this.sessions = sessions;
     this.turns = turns;
     this.cards = cards;
@@ -83,6 +85,7 @@ public class FixedAnswerService {
     this.transactions = new TransactionTemplate(transactionManager);
     this.recordings = recordings;
     this.questionSpeeches = questionSpeeches;
+    this.evaluationProperties = evaluationProperties;
   }
 
   public FixedAnswerClaim claim(
@@ -321,6 +324,7 @@ public class FixedAnswerService {
       throw conflict("ANSWER_FINALIZATION_CONFLICT", "Answer finalization conflicted");
     }
     current.completeAnswer();
+    scheduleAnswerEvaluation(session, current, work.requestId());
     InterviewTurnEntity nextTurn = null;
     if (work.next().kind() == NextKind.END) {
       session.beginEvaluation();
@@ -347,6 +351,33 @@ public class FixedAnswerService {
         nextTurn == null ? null : view(nextTurn), false);
     attempt.complete(encode(result));
     return result;
+  }
+
+  /**
+   * Outbox in the same transaction that completes the answer (plan §3.6): a formal turn gets a
+   * PENDING ANSWER_EVALUATION task whose bizKey is unique per session+turn; the self-introduction
+   * turn is marked SKIPPED. The evaluation itself runs later off the answer critical path.
+   */
+  private void scheduleAnswerEvaluation(
+      InterviewSessionEntity session, InterviewTurnEntity turn, UUID requestId) {
+    if (turn.getPhase() == InterviewPhase.SELF_INTRODUCTION) {
+      turn.skipEvaluation();
+      return;
+    }
+    if (!evaluationProperties.isEnabled()) {
+      return; // turn stays NOT_REQUIRED and the report uses the legacy raw-text path
+    }
+    turn.markEvaluationPending();
+    String key = interview.pilot.async.policy.AnswerEvaluationRetryPolicy.BIZ_KEY_PREFIX
+        + session.getSessionId() + ":" + turn.getTurnNo();
+    if (tasks.findByTaskTypeAndBizKey(AsyncTaskType.ANSWER_EVALUATION, key).isEmpty()) {
+      tasks.save(AsyncTaskEntity.pending(
+          session.getUserAccountId(), AsyncTaskType.ANSWER_EVALUATION, key,
+          encode(java.util.Map.of(
+              "sessionId", session.getSessionId(),
+              "turnNo", turn.getTurnNo(),
+              "requestId", requestId))));
+    }
   }
 
   private void failBestEffort(Work work) {

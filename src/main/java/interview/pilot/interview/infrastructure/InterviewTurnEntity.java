@@ -9,6 +9,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.type.SqlTypes;
 
+import interview.pilot.interview.domain.EvalStatus;
 import interview.pilot.interview.domain.InputMode;
 import interview.pilot.interview.domain.InterviewPhase;
 import interview.pilot.interview.domain.QuestionType;
@@ -51,6 +52,12 @@ public class InterviewTurnEntity {
   private String questionText;
   @Column(name = "answer_text", columnDefinition = "longtext")
   private String answerText;
+  @JdbcTypeCode(SqlTypes.JSON)
+  @Column(name = "answer_evaluation", columnDefinition = "json")
+  private String answerEvaluation;
+  @Enumerated(EnumType.STRING)
+  @Column(name = "eval_status", nullable = false, length = 24)
+  private EvalStatus evalStatus = EvalStatus.NOT_REQUIRED;
   @Enumerated(EnumType.STRING) @Column(name = "input_mode", nullable = false, length = 16)
   private InputMode inputMode;
   @Column(name = "processing_error", length = 255)
@@ -99,6 +106,54 @@ public class InterviewTurnEntity {
     status = TurnStatus.COMPLETED;
     answeredAt = Instant.now();
     processingError = null;
+  }
+
+  /** A completed formal turn now has an ANSWER_EVALUATION outbox task on the way. */
+  public void markEvaluationPending() {
+    if (status != TurnStatus.COMPLETED) {
+      throw new IllegalStateException("only a completed turn can await evaluation");
+    }
+    if (evalStatus != EvalStatus.NOT_REQUIRED) {
+      throw new IllegalStateException("turn evaluation is already scheduled");
+    }
+    this.evalStatus = EvalStatus.PENDING;
+  }
+
+  /** Self-introduction turns are answered but never evaluated. */
+  public void skipEvaluation() {
+    if (status != TurnStatus.COMPLETED) {
+      throw new IllegalStateException("only a completed turn can skip evaluation");
+    }
+    if (evalStatus != EvalStatus.NOT_REQUIRED) {
+      throw new IllegalStateException("turn evaluation is already scheduled");
+    }
+    this.evalStatus = EvalStatus.SKIPPED;
+  }
+
+  /** Final-transaction attach of the structured judgment (optimistic @Version guards the row). */
+  public void attachEvaluation(String evaluationJson, EvalStatus result) {
+    if (status != TurnStatus.COMPLETED) {
+      throw new IllegalStateException("only a completed turn can store evaluation");
+    }
+    if (evalStatus != EvalStatus.PENDING) {
+      throw new IllegalStateException("only a pending evaluation can be attached");
+    }
+    if (result != EvalStatus.OK && result != EvalStatus.GENERAL_FALLBACK) {
+      throw new IllegalArgumentException("attached evaluation must be OK or GENERAL_FALLBACK");
+    }
+    if (evaluationJson == null || evaluationJson.isBlank()) {
+      throw new IllegalArgumentException("evaluation json is required");
+    }
+    this.answerEvaluation = evaluationJson;
+    this.evalStatus = result;
+  }
+
+  /** Retry exhaustion: keep the answer flow intact, mark only the evaluation as failed. */
+  public void failEvaluation() {
+    if (evalStatus != EvalStatus.PENDING) {
+      throw new IllegalStateException("only a pending evaluation can fail");
+    }
+    this.evalStatus = EvalStatus.FAILED;
   }
 
   public void failAnswer(String error) {
