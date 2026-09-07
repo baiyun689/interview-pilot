@@ -2,6 +2,55 @@
 
 InterviewPilot 是一个基于 Spring Boot 的 AI 技术面试系统。它能够分析候选人简历，根据固定面试方向（Preset）或自定义岗位 JD 生成结构化题卡，按「自我介绍 → 基础 → 项目经历 → 场景权衡」的固定阶段推进主问题与动态追问，支持文本、录音和实时语音三种作答方式，并在面试完成后异步生成评估报告。
 
+## 整体架构
+
+系统自上而下分为接入层、安全与流量治理、面试核心链路、异步任务总线和存储/外部依赖五层；耗时的大模型调用与业务状态推进解耦，一致性与可靠性作为横切设计贯穿各层。
+
+```mermaid
+flowchart TB
+    subgraph L1["接入层"]
+        direction LR
+        WEB["Web 面试端 · REST/SSE"]
+        VOICE["语音面试 · WebSocket / MediaRecorder"]
+    end
+
+    subgraph L2["安全与流量治理"]
+        direction LR
+        JWT["JWT 认证"]
+        OWN["三层数据归属校验"]
+        LUA["Redis Lua 多维限流"]
+        LEASE["ZSET 并发租约"]
+    end
+
+    subgraph L3["面试核心链路"]
+        direction LR
+        KB["① 知识库构建"] --> GEN["② 骨架→逐题检索→Rubric 冻结"] --> FLOW["③ 状态机推进"] --> EVAL["④ 答案评估"] --> RPT["⑤ Barrier 聚合报告"]
+    end
+
+    subgraph L4["异步任务总线"]
+        direction LR
+        TASK["MySQL 任务表 Outbox"] --> SCAN["定时扫表"] --> MQ["RabbitMQ 重试/DLQ"] --> HDL["Handler 幂等领权"]
+    end
+
+    subgraph L5["存储与外部依赖"]
+        direction LR
+        DB[("MySQL")]
+        RDS[("Redis")]
+        VDB[("Qdrant")]
+        FS[("私有存储")]
+        LLM["Spring AI / LLM"]
+        TTS["DashScope ASR/TTS"]
+    end
+
+    L1 --> L2 --> L3
+    L3 <-->|"Outbox 登记 / 异步回写"| L4
+    L3 --> L5
+    L4 --> L5
+
+    classDef core fill:#EAF1FE,stroke:#3B6FD4,stroke-width:1.5px,color:#1A1B1C;
+    class GEN,FLOW,EVAL,RPT core;
+```
+
 ## 项目展示
 
 ### 开始面试
