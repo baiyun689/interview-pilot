@@ -8,7 +8,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class KnowledgeRankerTest {
-  private final KnowledgeRanker ranker = new KnowledgeRanker();
+  private final KnowledgeRanker ranker = new DefaultKnowledgeRanker();
 
   @Test
   void sortsByRealScoreAndKeepsUsefulAdjacentChunks() {

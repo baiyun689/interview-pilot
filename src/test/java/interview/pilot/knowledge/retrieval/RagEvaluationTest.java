@@ -17,7 +17,7 @@ class RagEvaluationTest {
   void versionedEvaluationSetMeetsRecallMrrAndNoMatchTargets() throws Exception {
     InputStream stream = getClass().getResourceAsStream("/rag-evaluation/v1.json");
     Suite suite = new ObjectMapper().readValue(stream, Suite.class);
-    KnowledgeRanker ranker = new KnowledgeRanker();
+    KnowledgeRanker ranker = new DefaultKnowledgeRanker();
     int retrievedCases = 0;
     int hits = 0;
     double reciprocalRanks = 0;
@@ -76,7 +76,7 @@ class RagEvaluationTest {
             1, 0, sameDoc.id(), candidate.score(), candidate.content(), null))
         .toList();
 
-    List<String> ranked = new KnowledgeRanker().rank(candidates, 3, 0.72, 2_000).stream()
+    List<String> ranked = new DefaultKnowledgeRanker().rank(candidates, 3, 0.72, 2_000).stream()
         .map(KnowledgeChunk::pointId)
         .toList();
 

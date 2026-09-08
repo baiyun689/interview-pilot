@@ -43,7 +43,7 @@ import interview.pilot.knowledge.infrastructure.KnowledgeDocumentRepository;
     "spring.main.allow-bean-definition-overriding=true"
 })
 @Testcontainers
-class QdrantKnowledgeRetrieverIT {
+class QdrantVectorRetrievalSourceIT {
   private static final UUID USER_A = UUID.randomUUID();
   private static final UUID USER_B = UUID.randomUUID();
   private static final UUID KB_A = UUID.randomUUID();
@@ -149,14 +149,14 @@ class QdrantKnowledgeRetrieverIT {
     var intent = new RetrievalIntent("Spring事务", "backend", "MEDIUM",
         List.of(), List.of(), 5, 0.5);
 
-    var retriever = new QdrantKnowledgeRetriever(vectorStore,
+    var retriever = new QdrantVectorRetrievalSource(vectorStore,
         new interview.pilot.knowledge.config.KnowledgeProperties(
             true, java.nio.file.Path.of("./build/tmp/kt"), 800, 100, 32,
             "knowledge_chunks_v1", 5, 0.5,
             new interview.pilot.knowledge.config.KnowledgeProperties.Qdrant("localhost", 6334),
             new interview.pilot.knowledge.config.KnowledgeProperties.Embedding(
                 java.net.URI.create("http://localhost"), "k", "text-embedding-v3", 1024)),
-        aiMetrics);
+        aiMetrics, new DefaultKnowledgeRanker());
 
     var result = retriever.retrieve(scope, intent);
     assertThat(result.status()).isEqualTo(RetrievalStatus.RETRIEVED);
@@ -177,14 +177,14 @@ class QdrantKnowledgeRetrieverIT {
     var intent = new RetrievalIntent("Spring事务失败边界", "Spring事务", "HARD",
         List.of(), List.of("Spring事务"), 5, 0.5);
 
-    var result = new QdrantKnowledgeRetriever(vectorStore,
+    var result = new QdrantVectorRetrievalSource(vectorStore,
         new interview.pilot.knowledge.config.KnowledgeProperties(
             true, java.nio.file.Path.of("./build/tmp/kt-covered"), 800, 100, 32,
             "knowledge_chunks_v1", 5, 0.5,
             new interview.pilot.knowledge.config.KnowledgeProperties.Qdrant("localhost", 6334),
             new interview.pilot.knowledge.config.KnowledgeProperties.Embedding(
                 java.net.URI.create("http://localhost"), "k", "text-embedding-v3", 1024)),
-        aiMetrics).retrieve(scope, intent);
+        aiMetrics, new DefaultKnowledgeRanker()).retrieve(scope, intent);
 
     assertThat(result.chunks()).anySatisfy(chunk ->
         assertThat(chunk.content()).contains("Spring事务"));
@@ -234,7 +234,7 @@ class QdrantKnowledgeRetrieverIT {
 
   @Test
   void returnsUnavailableWhenVectorStoreFails() {
-    var failingRetriever = new QdrantKnowledgeRetriever(
+    var failingRetriever = new QdrantVectorRetrievalSource(
         new FailingVectorStore(),
         new interview.pilot.knowledge.config.KnowledgeProperties(
             true, java.nio.file.Path.of("./build/tmp/kt2"), 800, 100, 32,
@@ -242,7 +242,7 @@ class QdrantKnowledgeRetrieverIT {
             new interview.pilot.knowledge.config.KnowledgeProperties.Qdrant("localhost", 6334),
             new interview.pilot.knowledge.config.KnowledgeProperties.Embedding(
                 java.net.URI.create("http://localhost"), "k", "text-embedding-v3", 1024)),
-        aiMetrics);
+        aiMetrics, new DefaultKnowledgeRanker());
     var scope = new ValidatedKnowledgeScope(
         USER_A, List.of(KB_A),
         List.of(new ValidatedKnowledgeScope.DocumentRevision(UUID.randomUUID(), 1)),
@@ -261,14 +261,14 @@ class QdrantKnowledgeRetrieverIT {
   private RetrievedKnowledge retrieve(ValidatedKnowledgeScope scope, String query) {
     var intent = new RetrievalIntent(query, "backend", "MEDIUM",
         List.of(), List.of(), 5, 0.5);
-    var retriever = new QdrantKnowledgeRetriever(vectorStore,
+    var retriever = new QdrantVectorRetrievalSource(vectorStore,
         new interview.pilot.knowledge.config.KnowledgeProperties(
             true, java.nio.file.Path.of("./build/tmp/kt3"), 800, 100, 32,
             "knowledge_chunks_v1", 5, 0.5,
             new interview.pilot.knowledge.config.KnowledgeProperties.Qdrant("localhost", 6334),
             new interview.pilot.knowledge.config.KnowledgeProperties.Embedding(
                 java.net.URI.create("http://localhost"), "k", "text-embedding-v3", 1024)),
-        aiMetrics);
+        aiMetrics, new DefaultKnowledgeRanker());
     return retriever.retrieve(scope, intent);
   }
 

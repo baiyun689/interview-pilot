@@ -17,13 +17,14 @@ import interview.pilot.common.observability.AiMetrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import interview.pilot.knowledge.config.KnowledgeProperties;
 
-class QdrantKnowledgeRetrieverTest {
+class QdrantVectorRetrievalSourceTest {
   private final VectorStore vectorStore = mock(VectorStore.class);
   private final AiMetrics metrics = new AiMetrics(new SimpleMeterRegistry());
 
-  private QdrantKnowledgeRetriever retriever() {
-    return new QdrantKnowledgeRetriever(
-        vectorStore, KnowledgeProperties.testDefaults(3, 12, 0.72, 2_000), metrics);
+  private QdrantVectorRetrievalSource source() {
+    return new QdrantVectorRetrievalSource(
+        vectorStore, KnowledgeProperties.testDefaults(3, 12, 0.72, 2_000), metrics,
+        new DefaultKnowledgeRanker());
   }
 
   @Test
@@ -34,7 +35,7 @@ class QdrantKnowledgeRetrieverTest {
     var scope = scope();
     var intent = intent();
 
-    RetrievedKnowledge result = retriever().retrieve(scope, intent);
+    RetrievedKnowledge result = source().retrieve(scope, intent);
 
     assertThat(result.status()).isEqualTo(RetrievalStatus.UNAVAILABLE);
     assertThat(result.failureReason()).contains("SCORE_MISSING");
@@ -50,7 +51,7 @@ class QdrantKnowledgeRetrieverTest {
     var scope = scope();
     var intent = intent();
 
-    RetrievedKnowledge result = retriever().retrieve(scope, intent);
+    RetrievedKnowledge result = source().retrieve(scope, intent);
 
     assertThat(result.status()).isEqualTo(RetrievalStatus.RETRIEVED);
     assertThat(result.chunks()).extracting(KnowledgeChunk::pointId)

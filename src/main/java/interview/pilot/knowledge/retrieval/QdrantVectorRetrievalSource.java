@@ -18,22 +18,34 @@ import org.springframework.stereotype.Component;
 import interview.pilot.common.observability.AiMetrics;
 import interview.pilot.knowledge.config.KnowledgeProperties;
 
+/**
+ * Dense-vector retrieval source backed by the Qdrant {@link VectorStore}. This is the single
+ * source wired in today; additional lexical/MCP/web sources implement {@link RetrievalSource} and
+ * are fused by the aggregate {@link KnowledgeRetriever}.
+ */
 @Component
 @ConditionalOnProperty(prefix = "app.knowledge", name = "enabled", havingValue = "true")
-public class QdrantKnowledgeRetriever implements KnowledgeRetriever {
-  private static final Logger log = LoggerFactory.getLogger(QdrantKnowledgeRetriever.class);
+public class QdrantVectorRetrievalSource implements RetrievalSource {
+  private static final Logger log = LoggerFactory.getLogger(QdrantVectorRetrievalSource.class);
   private final VectorStore vectorStore;
   private final KnowledgeProperties properties;
   private final AiMetrics metrics;
   private final String embeddingModel;
-  private final KnowledgeRanker ranker = new KnowledgeRanker();
+  private final KnowledgeRanker ranker;
 
-  public QdrantKnowledgeRetriever(
-      VectorStore vectorStore, KnowledgeProperties properties, AiMetrics metrics) {
+  public QdrantVectorRetrievalSource(
+      VectorStore vectorStore, KnowledgeProperties properties, AiMetrics metrics,
+      KnowledgeRanker ranker) {
     this.vectorStore = vectorStore;
     this.properties = properties;
     this.metrics = metrics;
     this.embeddingModel = properties.embedding().model();
+    this.ranker = ranker;
+  }
+
+  @Override
+  public String name() {
+    return "vector";
   }
 
   @Override
@@ -85,7 +97,7 @@ public class QdrantKnowledgeRetriever implements KnowledgeRetriever {
           chunks, latency, null);
     } catch (RuntimeException exception) {
       Duration latency = Duration.ofNanos(System.nanoTime() - started);
-      log.warn("Knowledge retrieval failed for user {}", scope.userId(), exception);
+      log.warn("Vector retrieval source failed for user {}", scope.userId(), exception);
       metrics.knowledgeRetrievalDuration("UNAVAILABLE", latency, 0);
       return RetrievedKnowledge.unavailable(
           intent.query(), embeddingModel, describe(exception), latency);
@@ -189,6 +201,6 @@ public class QdrantKnowledgeRetriever implements KnowledgeRetriever {
 
   private static String describe(RuntimeException exception) {
     String message = exception.getMessage();
-    return message != null ? message : "Qdrant search failed";
+    return message != null ? message : "Vector retrieval source failed";
   }
 }
