@@ -7,10 +7,18 @@ import interview.pilot.interview.domain.InterviewBriefSnapshot;
 
 public record FixedReportInput(
     InterviewBriefSnapshot brief,
-    List<TurnEvidence> completedTurns) {
+    List<TurnEvidence> completedTurns,
+    boolean recruitment,
+    int expectedMainQuestions,
+    List<UnassessedQuestion> unassessedQuestions) {
   public FixedReportInput {
     completedTurns = List.copyOf(completedTurns);
+    unassessedQuestions = List.copyOf(unassessedQuestions);
   }
+  public FixedReportInput(InterviewBriefSnapshot brief, List<TurnEvidence> completedTurns) {
+    this(brief, completedTurns, false, brief.totalMainQuestionCount(), List.of());
+  }
+  public record UnassessedQuestion(String question, String reason) {}
 
   /**
    * Per-turn evidence. {@code evaluation} is the asynchronously produced structured judgment when

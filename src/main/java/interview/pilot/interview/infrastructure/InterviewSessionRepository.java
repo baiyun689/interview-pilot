@@ -18,6 +18,13 @@ import jakarta.persistence.LockModeType;
 public interface InterviewSessionRepository extends JpaRepository<InterviewSessionEntity, Long> {
   Optional<InterviewSessionEntity> findBySessionId(UUID sessionId);
 
+  @Query(value = "select count(*) from hiring_interview_invitation i "
+      + "join hiring_batch_member m on m.id=i.batch_member_id join hiring_batch b on b.id=m.batch_id "
+      + "join hiring_organization o on o.id=b.organization_id join hiring_application a on a.id=i.application_id "
+      + "where i.id=:id and i.status='STARTED' and o.active=true "
+      + "and a.submission_no=m.submission_no and a.status not in ('WITHDRAWN','FINISHED')", nativeQuery = true)
+  long countActiveHiringInvitation(@Param("id") Long invitationId);
+
   Optional<InterviewSessionEntity> findBySessionIdAndUserAccountId(
       UUID sessionId, Long userAccountId);
 

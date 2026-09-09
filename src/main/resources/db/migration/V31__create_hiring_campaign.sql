@@ -1,0 +1,60 @@
+CREATE TABLE hiring_batch (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  organization_id BIGINT NOT NULL,
+  job_id BIGINT NOT NULL,
+  scheme_revision_id BIGINT NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  round_no INT NOT NULL,
+  request_key VARCHAR(64) COLLATE utf8mb4_bin NOT NULL,
+  request_hash VARCHAR(64) NOT NULL,
+  opens_at TIMESTAMP(6) NOT NULL,
+  latest_start_at TIMESTAMP(6) NOT NULL,
+  closes_at TIMESTAMP(6) NOT NULL,
+  timezone VARCHAR(64) NOT NULL,
+  created_at TIMESTAMP(6) NOT NULL,
+  version BIGINT NOT NULL DEFAULT 0,
+  UNIQUE KEY uq_batch_request (organization_id, request_key),
+  UNIQUE KEY uq_batch_org (organization_id, id),
+  FOREIGN KEY (organization_id, job_id) REFERENCES hiring_job(organization_id, id),
+  FOREIGN KEY (scheme_revision_id) REFERENCES hiring_scheme_revision(id),
+  CHECK (round_no > 0 AND opens_at <= latest_start_at AND latest_start_at < closes_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE hiring_batch_member (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  batch_id BIGINT NOT NULL,
+  application_id BIGINT NOT NULL,
+  submission_no INT NOT NULL,
+  job_revision INT NOT NULL,
+  work_id BIGINT NOT NULL,
+  approved_snapshot JSON NULL,
+  approved_by BIGINT NULL,
+  approved_at TIMESTAMP(6) NULL,
+  version BIGINT NOT NULL DEFAULT 0,
+  UNIQUE KEY uq_batch_member (batch_id, application_id),
+  FOREIGN KEY (batch_id) REFERENCES hiring_batch(id),
+  FOREIGN KEY (application_id) REFERENCES hiring_application(id),
+  FOREIGN KEY (work_id) REFERENCES hiring_work(id),
+  FOREIGN KEY (approved_by) REFERENCES user_account(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE hiring_interview_invitation (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  public_id CHAR(36) NOT NULL UNIQUE,
+  batch_member_id BIGINT NOT NULL UNIQUE,
+  application_id BIGINT NOT NULL,
+  candidate_id BIGINT NOT NULL,
+  round_no INT NOT NULL,
+  status VARCHAR(20) NOT NULL,
+  active_slot TINYINT GENERATED ALWAYS AS (CASE WHEN status IN ('CREATED','ISSUED','ACCEPTED','STARTED') THEN 1 ELSE NULL END) STORED,
+  issued_at TIMESTAMP(6) NULL,
+  planned_at TIMESTAMP(6) NULL,
+  schedule_revision INT NOT NULL DEFAULT 0,
+  version BIGINT NOT NULL DEFAULT 0,
+  UNIQUE KEY uq_active_invitation (application_id, round_no, active_slot),
+  INDEX ix_invitation_candidate (candidate_id, id),
+  FOREIGN KEY (batch_member_id) REFERENCES hiring_batch_member(id),
+  FOREIGN KEY (application_id) REFERENCES hiring_application(id),
+  FOREIGN KEY (candidate_id) REFERENCES user_account(id),
+  CHECK (status IN ('CREATED','ISSUED','ACCEPTED','STARTED','COMPLETED','DECLINED','CANCELLED','EXPIRED'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

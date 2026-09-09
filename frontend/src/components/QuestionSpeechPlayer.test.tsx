@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setAccessToken } from '../api/request'
 import { AUTOPLAY_STORAGE_KEY, QuestionSpeechPlayer } from './QuestionSpeechPlayer'
@@ -37,6 +37,8 @@ async function renderReady(ui: React.ReactElement) {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mediaResponse(new Blob(['audio'], { type: 'audio/webm' }))))
   const view = render(ui)
   const audio = await screen.findByLabelText('题目语音')
+  // The audio node can appear before React flushes the effect registering canplay.
+  await act(async () => {})
   return { view, audio }
 }
 

@@ -26,6 +26,7 @@ public class SecurityConfig {
         .authorizeHttpRequests(auth -> auth
             .requestMatchers("/api/auth/register", "/api/auth/login",
                 "/api/auth/refresh", "/api/auth/logout", "/actuator/health").permitAll()
+            .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/public/jobs", "/api/public/jobs/*").permitAll()
             // The voice WebSocket carries its JWT as a ?token= query param and authenticates in
             // VoiceHandshakeInterceptor (browsers cannot set Authorization on a WS handshake).
             .requestMatchers("/ws/**").permitAll()

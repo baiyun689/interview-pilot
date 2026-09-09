@@ -1,0 +1,8 @@
+ALTER TABLE hiring_organization ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE;
+
+CREATE TABLE hiring_platform_operator (
+  id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_account_id BIGINT NOT NULL UNIQUE,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
+  FOREIGN KEY (user_account_id) REFERENCES user_account(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

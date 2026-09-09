@@ -112,6 +112,44 @@ public class InterviewSessionEntity {
   @Version @Column(nullable = false)
   private long version;
 
+  @Column(name = "hiring_invitation_id", updatable = false)
+  private Long hiringInvitationId;
+
+  @JdbcTypeCode(SqlTypes.JSON)
+  @Column(name = "execution_plan", columnDefinition = "json")
+  private String executionPlan;
+
+  @Column(name = "answer_deadline", updatable = false)
+  private Instant answerDeadline;
+
+  public boolean isRecruitment() { return hiringInvitationId != null; }
+  public void cancelRecruitment() {
+    if (!isRecruitment()) throw new IllegalStateException("only recruitment sessions can be cancelled");
+    if (status == SessionStatus.INTERVIEWING || status == SessionStatus.READY) {
+      status = SessionStatus.CANCELLED; completedAt = Instant.now(); safeError = "企业面试已终止";
+    }
+  }
+
+  public void bindInvitation(Long invitationId, Instant deadline, int questionCount) {
+    if (id != null || status != SessionStatus.PREPARING || hiringInvitationId != null
+        || questionCount < 1 || questionCount > 20) throw new IllegalStateException("invitation must be frozen before persistence");
+    hiringInvitationId = Objects.requireNonNull(invitationId);
+    answerDeadline = Objects.requireNonNull(deadline);
+    totalMainQuestionCount = questionCount;
+  }
+
+  public void freezeExecutionPlan(String snapshot) {
+    if (!isRecruitment() || status != SessionStatus.PREPARING || executionPlan != null)
+      throw new IllegalStateException("execution plan is already frozen");
+    executionPlan = Objects.requireNonNull(snapshot);
+  }
+
+  public void requireAnswerWindow() {
+    if (isRecruitment() && (status != SessionStatus.INTERVIEWING || !Instant.now().isBefore(answerDeadline))) {
+      throw new interview.pilot.common.exception.BusinessException("INTERVIEW_CLOSED", "本次面试已结束或超过作答期限", org.springframework.http.HttpStatus.CONFLICT);
+    }
+  }
+
   public static InterviewSessionEntity preparing(
       Long userAccountId, Long resumeId, Difficulty difficulty, InterviewSize interviewSize,
       JobSourceType jobSourceType, String jobTitle, String providerId, String modelName,
@@ -163,11 +201,12 @@ public class InterviewSessionEntity {
     if (status != SessionStatus.INTERVIEWING || nextTurnNo != currentTurnNo + 1) {
       throw new IllegalStateException("interview cannot advance");
     }
-    if (questionType != QuestionType.MAIN && questionType != QuestionType.FOLLOW_UP) {
+    if (questionType != QuestionType.MAIN && questionType != QuestionType.FOLLOW_UP
+        && !(isRecruitment() && questionType == QuestionType.SELF_INTRODUCTION)) {
       throw new IllegalArgumentException("next question type must be main or follow-up");
     }
     currentTurnNo = nextTurnNo;
-    if (questionType == QuestionType.MAIN) currentMainQuestionNo++;
+    if (questionType == QuestionType.MAIN || questionType == QuestionType.SELF_INTRODUCTION) currentMainQuestionNo++;
   }
 
   public void beginEvaluation() { transition(SessionStatus.EVALUATING, "evaluation cannot start"); }

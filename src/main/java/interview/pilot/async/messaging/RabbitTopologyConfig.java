@@ -20,6 +20,7 @@ import interview.pilot.async.domain.AsyncTaskType;
 @Configuration
 @EnableConfigurationProperties(AsyncRabbitProperties.class)
 public class RabbitTopologyConfig {
+  public static final String HIRING_WORK_QUEUE = "interview-pilot.hiring.work.main";
   public static final String RESUME_ANALYSIS_MAIN_EXCHANGE =
       "interview-pilot.resume.analysis";
   public static final String RESUME_ANALYSIS_MAIN_QUEUE =
@@ -97,6 +98,7 @@ public class RabbitTopologyConfig {
   Declarables asyncTaskTopology() {
     List<Declarable> declarations = new ArrayList<>();
     declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.RESUME_ANALYSIS)));
+    declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.HIRING_WORK)));
     declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.INTERVIEW_QUESTION_PREPARATION)));
     declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.INTERVIEW_EVALUATION)));
     declarations.addAll(pipelineDeclarations(routeFor(AsyncTaskType.ANSWER_EVALUATION)));
@@ -109,6 +111,8 @@ public class RabbitTopologyConfig {
 
   public static PipelineRoute routeFor(AsyncTaskType taskType) {
     return switch (taskType) {
+      case HIRING_WORK -> new PipelineRoute("interview-pilot.hiring.work", HIRING_WORK_QUEUE,
+          "hiring.work", "interview-pilot.hiring.work.dead-letter", "interview-pilot.hiring.work.dlq", "hiring.work.dead");
       case RESUME_ANALYSIS -> new PipelineRoute(
           RESUME_ANALYSIS_MAIN_EXCHANGE,
           RESUME_ANALYSIS_MAIN_QUEUE,

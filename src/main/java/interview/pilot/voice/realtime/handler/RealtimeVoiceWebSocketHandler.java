@@ -143,7 +143,15 @@ public class RealtimeVoiceWebSocketHandler extends TextWebSocketHandler {
   private void handleControl(String channelId, Connection connection, WsInbound inbound) {
     RealtimeVoiceSession voice = connection.voiceSession;
     switch (inbound.normalizedAction()) {
-      case "submit" -> voice.requestSubmit(inbound.text());
+      case "submit" -> {
+        var binding=connection.binding;
+        if(binding==null || (binding.recruitment() && inbound.turnNo()==null)
+            || (inbound.turnNo()!=null && inbound.turnNo()!=binding.turnNo())) {
+          send(connection.session,WsOutbound.Error.of("ANSWER_VERSION_CONFLICT","当前题目已变化，请重新连接后确认问题"));
+          return;
+        }
+        voice.requestSubmit(inbound.text(),()->connection.binding==binding);
+      }
       case "end_interview" -> closeQuietly(connection.session, CloseStatus.NORMAL);
       case "mute" -> {
         voice.setMuted(true);
@@ -160,31 +168,39 @@ public class RealtimeVoiceWebSocketHandler extends TextWebSocketHandler {
   // ---- turn processing (runs on the session's single worker thread) -----------------------
 
   private void startAsr(String channelId) {
-    Connection connection = connections.get(channelId);
-    if (connection == null) {
-      return;
-    }
-    asr.start(channelId,
-        finalText -> onAsrFinal(channelId, finalText),
-        partialText -> {
-          Connection c = connections.get(channelId);
-          if (c != null) {
-            send(c.session, WsOutbound.Subtitle.partial(partialText));
-          }
-        },
-        error -> {
-          log.warn("[realtime {}] ASR upstream error: {}", channelId, error.toString());
-          restartAsr(channelId);
-        });
+    startAsr(channelId,false);
   }
 
-  private void onAsrFinal(String channelId, String finalText) {
+  private void startAsr(String channelId,boolean restart) {
     Connection connection = connections.get(channelId);
     if (connection == null) {
       return;
     }
-    send(connection.session, WsOutbound.Subtitle.finalized(finalText));
-    connection.voiceSession.appendFinalSegment(finalText);
+    int generation=connection.asrGeneration.incrementAndGet();
+    java.util.function.Consumer<String> finalResult=finalText -> onAsrFinal(channelId,generation,finalText);
+    java.util.function.Consumer<String> partialResult=partialText -> {
+          Connection c = connections.get(channelId);
+          if (c != null && c.asrGeneration.get()==generation && !c.voiceSession.uplinkSuppressed()) {
+            send(c.session, WsOutbound.Subtitle.partial(partialText));
+          }
+        };
+    java.util.function.Consumer<Throwable> failure=error -> {
+          if(connection.asrGeneration.get()!=generation) return;
+          log.warn("[realtime {}] ASR upstream error: {}", channelId, error.toString());
+          restartAsr(channelId);
+        };
+    if(restart) asr.restart(channelId,finalResult,partialResult,failure);
+    else asr.start(channelId,finalResult,partialResult,failure);
+  }
+
+  private void onAsrFinal(String channelId, int generation, String finalText) {
+    Connection connection = connections.get(channelId);
+    if (connection == null || connection.asrGeneration.get()!=generation || connection.voiceSession.uplinkSuppressed()) {
+      return;
+    }
+    connection.voiceSession.appendFinalSegment(finalText,
+        ()->connection.asrGeneration.get()==generation,
+        ()->send(connection.session, WsOutbound.Subtitle.finalized(finalText)));
   }
 
   private void restartAsr(String channelId) {
@@ -200,15 +216,7 @@ public class RealtimeVoiceWebSocketHandler extends TextWebSocketHandler {
     }
     meterRegistry.counter("voice.realtime.asr.restart").increment();
     try {
-      asr.restart(channelId,
-          finalText -> onAsrFinal(channelId, finalText),
-          partialText -> {
-            Connection c = connections.get(channelId);
-            if (c != null) {
-              send(c.session, WsOutbound.Subtitle.partial(partialText));
-            }
-          },
-          error -> log.warn("[realtime {}] restarted ASR still failing: {}", channelId, error.toString()));
+      startAsr(channelId,true);
     } catch (RuntimeException ex) {
       log.error("[realtime {}] ASR restart failed", channelId, ex);
       send(connection.session, WsOutbound.Error.of("ASR_UNAVAILABLE", "语音识别重连失败"));
@@ -233,12 +241,12 @@ public class RealtimeVoiceWebSocketHandler extends TextWebSocketHandler {
     if (connection == null) {
       return;
     }
-    send(connection.session, WsOutbound.Control.of("answer_committed", mergedText));
     send(connection.session, WsOutbound.Control.of("thinking", "面试官正在思考…"));
     long start = System.currentTimeMillis();
     try {
       VoiceTurnOutcome outcome =
-          orchestrator.submitAnswer(connection.user, connection.businessSessionId, mergedText);
+          orchestrator.submitAnswer(connection.user, connection.businessSessionId, mergedText, connection.binding);
+      send(connection.session, WsOutbound.Control.of("answer_committed", mergedText));
       meterRegistry.timer("voice.realtime.turn").record(
           java.time.Duration.ofMillis(System.currentTimeMillis() - start));
       meterRegistry.counter("voice.realtime.turn.total").increment();
@@ -264,6 +272,15 @@ public class RealtimeVoiceWebSocketHandler extends TextWebSocketHandler {
 
   private void deliverQuestion(Connection connection, VoiceTurnOutcome outcome) {
     int turnNo = outcome.nextTurnNo() == null ? 0 : outcome.nextTurnNo();
+    boolean advancing=connection.binding!=null && connection.binding.turnNo()!=turnNo;
+    connection.binding=orchestrator.bind(connection.user,connection.businessSessionId,turnNo);
+    if(connection.binding.recruitment()) connection.voiceSession.requireManualConfirmation();
+    // Freeze each ASR callback generation to the question that supplied its audio.
+    // A provider may return an old final segment after the next question is delivered.
+    if(advancing) {
+      try {startAsr(connection.session.getId(),true);}
+      catch(RuntimeException ex) {send(connection.session,WsOutbound.Error.of("ASR_UNAVAILABLE","下一题语音识别暂不可用，可切换文字继续"));}
+    }
     if (outcome.nextQuestion() != null) {
       send(connection.session, WsOutbound.Text.of(outcome.nextQuestion(), turnNo));
     }
@@ -340,6 +357,8 @@ public class RealtimeVoiceWebSocketHandler extends TextWebSocketHandler {
     private final java.util.UUID businessSessionId;
     private final AtomicInteger asrRestarts = new AtomicInteger();
     private final AtomicBoolean idleWarned = new AtomicBoolean();
+    private final AtomicInteger asrGeneration = new AtomicInteger();
+    private volatile VoiceTurnOrchestrator.TurnBinding binding;
 
     private Connection(WebSocketSession session, RealtimeVoiceSession voiceSession,
                        CurrentUser user, java.util.UUID businessSessionId) {

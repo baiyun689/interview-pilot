@@ -17,6 +17,11 @@ public class KnowledgeRepositoryAdapterAutoConfiguration {
   }
 
   @Bean
+  KnowledgeChunkRepository knowledgeChunkRepository(KnowledgeChunkJpaRepository delegate) {
+    return new KnowledgeChunkRepositoryAdapter(delegate);
+  }
+
+  @Bean
   KnowledgeRevisionCandidates knowledgeRevisionCandidates(KnowledgeDocumentJpaRepository delegate) {
     return () -> delegate.findRevisionCleanupCandidates().stream()
         .map(document -> new KnowledgeRevisionCandidates.Candidate(

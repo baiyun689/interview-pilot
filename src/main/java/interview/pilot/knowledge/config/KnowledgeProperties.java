@@ -19,10 +19,12 @@ public record KnowledgeProperties(
     int candidateCount,
     int contextCharacterBudget,
     Qdrant qdrant,
-    Embedding embedding) {
+    Embedding embedding,
+    RetrievalMode retrieval) {
 
   @ConstructorBinding
   public KnowledgeProperties {
+    if (retrieval == null) retrieval = RetrievalMode.VECTOR;
     if (filesRoot == null) {
       throw new IllegalArgumentException("Knowledge files root is required");
     }
@@ -53,6 +55,17 @@ public record KnowledgeProperties(
       throw new IllegalArgumentException("Knowledge embedding configuration is required");
     }
   }
+
+  public KnowledgeProperties(
+      boolean enabled, Path filesRoot, int chunkSize, int chunkOverlap, int batchSize,
+      String collectionName, int topK, double similarityThreshold,
+      int candidateCount, int contextCharacterBudget, Qdrant qdrant, Embedding embedding) {
+    this(enabled, filesRoot, chunkSize, chunkOverlap, batchSize, collectionName,
+        topK, similarityThreshold, candidateCount, contextCharacterBudget, qdrant, embedding,
+        RetrievalMode.VECTOR);
+  }
+
+  public enum RetrievalMode { VECTOR, HYBRID }
 
   public KnowledgeProperties(
       boolean enabled, Path filesRoot, int chunkSize, int chunkOverlap, int batchSize,

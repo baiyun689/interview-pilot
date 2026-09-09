@@ -7,7 +7,8 @@ public enum SessionStatus {
   EVALUATING,
   COMPLETED,
   PREPARATION_FAILED,
-  EVALUATION_FAILED;
+  EVALUATION_FAILED,
+  CANCELLED;
 
   public boolean canTransitionTo(SessionStatus target) {
     return switch (this) {
@@ -17,7 +18,7 @@ public enum SessionStatus {
       case EVALUATING -> target == COMPLETED || target == EVALUATION_FAILED;
       case PREPARATION_FAILED -> target == PREPARING;
       case EVALUATION_FAILED -> target == EVALUATING;
-      case COMPLETED -> false;
+      case COMPLETED, CANCELLED -> false;
     };
   }
 }

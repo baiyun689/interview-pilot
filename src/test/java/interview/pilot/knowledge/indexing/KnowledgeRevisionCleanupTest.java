@@ -19,11 +19,13 @@ import org.springframework.ai.vectorstore.filter.Filter;
 import interview.pilot.interview.domain.SessionStatus;
 import interview.pilot.interview.infrastructure.InterviewSessionEntity;
 import interview.pilot.interview.infrastructure.InterviewSessionRepository;
+import interview.pilot.knowledge.infrastructure.KnowledgeChunkRepository;
 import interview.pilot.knowledge.retrieval.ValidatedKnowledgeScope;
 import tools.jackson.databind.ObjectMapper;
 
 class KnowledgeRevisionCleanupTest {
   private final ObjectMapper objectMapper = new ObjectMapper();
+  private final KnowledgeChunkRepository chunks = mock(KnowledgeChunkRepository.class);
 
   @Test
   void keepsRevisionReferencedByActiveInterview() throws Exception {
@@ -39,10 +41,12 @@ class KnowledgeRevisionCleanupTest {
     when(sessions.findAllByOrderByCreatedAtDesc()).thenReturn(List.of(session));
 
     new KnowledgeRevisionCleanup(
-        Optional.of(store), sessions, objectMapper, mock(KnowledgeRevisionCandidates.class))
+        Optional.of(store), sessions, objectMapper, mock(KnowledgeRevisionCandidates.class),
+        chunks)
         .cleanupOlderRevisions(documentId, 2);
 
     verify(store, never()).delete(any(Filter.Expression.class));
+    org.mockito.Mockito.verifyNoInteractions(chunks);
   }
 
   @Test
@@ -53,10 +57,13 @@ class KnowledgeRevisionCleanupTest {
     when(sessions.findAllByOrderByCreatedAtDesc()).thenReturn(List.of());
 
     new KnowledgeRevisionCleanup(
-        Optional.of(store), sessions, objectMapper, mock(KnowledgeRevisionCandidates.class))
+        Optional.of(store), sessions, objectMapper, mock(KnowledgeRevisionCandidates.class),
+        chunks)
         .cleanupOlderRevisions(documentId, 2);
 
     verify(store).delete(any(Filter.Expression.class));
+    verify(chunks).deleteByDocumentIdAndIndexRevision(documentId, 1);
+    verify(chunks, never()).deleteByDocumentIdAndIndexRevision(documentId, 2);
   }
 
   @Test
@@ -71,12 +78,14 @@ class KnowledgeRevisionCleanupTest {
     doThrow(new RuntimeException("temporary"))
         .doNothing().when(store).delete(any(Filter.Expression.class));
     var cleanup = new KnowledgeRevisionCleanup(
-        Optional.of(store), sessions, objectMapper, candidates);
+        Optional.of(store), sessions, objectMapper, candidates,
+        chunks);
 
     cleanup.retryEligibleCleanups();
     cleanup.retryEligibleCleanups();
 
     verify(store, times(2)).delete(any(Filter.Expression.class));
+    verify(chunks).deleteByDocumentIdAndIndexRevision(documentId, 1);
   }
 
   @Test
@@ -89,9 +98,12 @@ class KnowledgeRevisionCleanupTest {
         new KnowledgeRevisionCandidates.Candidate(documentId, 1, 2)));
     when(sessions.findAllByOrderByCreatedAtDesc()).thenReturn(List.of());
 
-    new KnowledgeRevisionCleanup(Optional.of(store), sessions, objectMapper, candidates)
+    new KnowledgeRevisionCleanup(Optional.of(store), sessions, objectMapper, candidates,
+        chunks)
         .retryEligibleCleanups();
 
     verify(store).delete(any(Filter.Expression.class));
+    verify(chunks).deleteByDocumentIdAndIndexRevision(documentId, 2);
+    verify(chunks, never()).deleteByDocumentIdAndIndexRevision(documentId, 1);
   }
 }

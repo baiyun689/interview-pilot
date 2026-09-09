@@ -18,6 +18,7 @@ class RetryableTaskPolicyRegistryTest {
   private final RetryableTaskPolicyRegistry registry = new RetryableTaskPolicyRegistry(
       List.of(
           new ResumeAnalysisRetryPolicy(mock(ResumeRepository.class)),
+          new HiringWorkRetryPolicy(),
           new InterviewPreparationRetryPolicy(mock(InterviewSessionRepository.class)),
           new InterviewEvaluationRetryPolicy(mock(InterviewSessionRepository.class)),
           new KnowledgeDocumentIndexRetryPolicy(mock(KnowledgeDocumentRepository.class)),

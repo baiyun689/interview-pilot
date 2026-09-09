@@ -3,7 +3,7 @@ export type InterviewSize = 'QUICK' | 'STANDARD' | 'DEEP'
 export type InterviewMode = 'TEXT' | 'VOICE'
 export type InputMode = 'TEXT' | 'VOICE' | 'VOICE_REALTIME'
 export type JobSourceType = 'PRESET' | 'CUSTOM'
-export type SessionStatus = 'PREPARING' | 'READY' | 'INTERVIEWING' | 'EVALUATING' | 'COMPLETED' | 'PREPARATION_FAILED' | 'EVALUATION_FAILED'
+export type SessionStatus = 'PREPARING' | 'READY' | 'INTERVIEWING' | 'EVALUATING' | 'COMPLETED' | 'PREPARATION_FAILED' | 'EVALUATION_FAILED' | 'CANCELLED'
 export type TurnStatus = 'ASKED' | 'PROCESSING' | 'COMPLETED' | 'FAILED'
 export type InterviewPhase = 'SELF_INTRODUCTION' | 'FUNDAMENTALS' | 'PROJECT_EXPERIENCE' | 'SCENARIO_TRADEOFF'
 export type QuestionType = 'SELF_INTRODUCTION' | 'MAIN' | 'FOLLOW_UP'
@@ -29,6 +29,9 @@ export interface InterviewTurn {
 }
 
 export interface InterviewSession {
+  recruitment?: boolean
+  answerDeadline?: string | null
+  version?: number
   sessionId: string
   resumeId: number | null
   jobTitle: string

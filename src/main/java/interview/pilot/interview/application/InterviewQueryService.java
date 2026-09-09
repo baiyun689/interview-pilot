@@ -56,6 +56,7 @@ public class InterviewQueryService {
   @Transactional(readOnly = true)
   public List<InterviewHistoryResponse> list(CurrentUser user) {
     return sessions.findAllByUserAccountIdOrderByCreatedAtDesc(requireOwner(user)).stream()
+        .filter(session -> !session.isRecruitment())
         .map(session -> new InterviewHistoryResponse(
             session.getSessionId(), session.getJobTitle(), session.getStatus(),
             session.getDifficulty(), session.getInterviewSize(), session.getInterviewMode(),
@@ -71,6 +72,7 @@ public class InterviewQueryService {
   public ReportQueryResult report(CurrentUser user, UUID sessionId) {
     Long ownerId = requireOwner(user);
     InterviewSessionEntity session = session(ownerId, sessionId);
+    if (session.isRecruitment()) throw new BusinessException("HIRING_REPORT_PRIVATE", "企业面试反馈需经人工审核后发布", HttpStatus.FORBIDDEN);
     var task = tasks.findByTaskTypeAndBizKeyAndUserAccountId(
         AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + sessionId, ownerId).orElse(null);
     if (session.getStatus() == SessionStatus.COMPLETED) {
@@ -108,7 +110,8 @@ public class InterviewQueryService {
         session.getInterviewMode(), session.getJobSourceType(), session.getCurrentTurnNo(),
         session.getCurrentMainQuestionNo(), session.getTotalMainQuestionCount(),
         session.getProviderId(), session.getModelName(),
-        preparation == null ? null : preparation.getTaskId(), session.getSafeError(), turnViews);
+        preparation == null ? null : preparation.getTaskId(), session.isRecruitment() ? null : session.getSafeError(), turnViews,
+        session.isRecruitment(), session.getAnswerDeadline(), session.getVersion());
   }
 
   private InterviewSessionEntity session(Long ownerId, UUID sessionId) {

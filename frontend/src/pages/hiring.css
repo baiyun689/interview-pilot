@@ -1,0 +1,126 @@
+.hiring-page { width: min(1120px, 100%); margin: 0 auto; padding: 20px 0 48px; }
+.hiring-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.hiring-page > header > p:last-child { max-width: 640px; }
+.hiring-workspace { padding-top: 0; }
+.hiring-workspace > header { margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0; }
+.hiring-workspace > header h1 { font-size: 30px; }
+.hiring-workspace > header p:last-child { margin-bottom: 0; }
+.hiring-card h2 a { text-decoration: none; color: #1e293b; }
+.hiring-card h2 a:hover { color: #4338ca; }
+.hiring-page h2, .hiring-page h3 { overflow-wrap: anywhere; }
+.hiring-tabs { display: flex; gap: 6px; overflow-x: auto; border-bottom: 1px solid #e2e8f0; margin: 12px 0 28px; padding-bottom: 8px; }
+.hiring-page .hiring-tabs button { white-space: nowrap; border-color: transparent; background: transparent; color: #64748b; }
+.hiring-page .hiring-tabs button[aria-pressed="true"] { background: #eef2ff; color: #4338ca; font-weight: 650; }
+.hiring-page button { min-height: 42px; transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease; }
+.hiring-page button:active:not(:disabled) { background-color: #eef2ff; }
+.hiring-page button.hiring-primary:hover:not(:disabled) { background: #3730a3; color: white; box-shadow: 0 3px 10px #4338ca20; }
+.hiring-page button[aria-expanded="true"] { background: #eef2ff; border-color: #c7d2fe; color: #4338ca; }
+.hiring-pagination { justify-content: flex-end; color: #64748b; font-size: 13px; }
+.hiring-card > .hiring-card { box-shadow: none; border-radius: 12px; background: #fafbfe; }
+.hiring-public { padding: 32px; min-height: 100vh; }
+.hiring-page header { margin-bottom: 30px; }
+.hiring-page h1 { margin: 10px 0; font-size: clamp(27px, 4vw, 38px); letter-spacing: -1px; }
+.hiring-page h2 { font-size: 21px; }
+.hiring-page h3 { font-size: 18px; }
+.hiring-page p { color: #59677c; line-height: 1.75; }
+.hiring-page a { color: #4338ca; text-underline-offset: 4px; }
+.hiring-eyebrow { color: #64748b; font-size: 12px; font-weight: 650; letter-spacing: 1.3px; }
+.hiring-card { padding: 24px; margin: 20px 0; border: 1px solid #e2e8f0; border-radius: 18px; background: #fff; box-shadow: 0 4px 16px #17203304; }
+.hiring-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.hiring-grid > .hiring-card { margin: 0; }
+.hiring-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.hiring-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+.hiring-page button { background: #fff; color: #334155; border: 1px solid #cbd5e1; border-radius: 9px; padding: 9px 15px; cursor: pointer; }
+.hiring-page button:hover:not(:disabled) { border-color: #6366f1; color: #4338ca; }
+.hiring-page button.hiring-primary { background: #4338ca; color: #fff; border-color: #4338ca; }
+.hiring-page button:disabled { opacity: .5; cursor: not-allowed; }
+.hiring-page label { display: block; margin: 16px 0; font-size: 14px; font-weight: 550; }
+.hiring-page input, .hiring-page select, .hiring-page textarea { display: block; width: 100%; padding: 11px; margin-top: 7px; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; background: #fff; color: #172033; }
+.hiring-page textarea { resize: vertical; }
+.hiring-page input:focus-visible, .hiring-page textarea:focus-visible, .hiring-page select:focus-visible { outline: 2px solid #a5b4fc; outline-offset: 2px; }
+.hiring-page .hiring-checkbox { display: flex; align-items: center; gap: 10px; font-weight: 400; }
+.hiring-checkbox input { width: auto; margin: 0; }
+.hiring-page .hiring-error { color: #b42318; background: #fef3f2; border: 1px solid #fecdca; padding: 14px; border-radius: 9px; }
+.hiring-badge { background: #eef2ff; color: #4338ca; padding: 6px 11px; border-radius: 20px; font-size: 13px; }
+.hiring-prose { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.85; color: #475569; max-height: 520px; overflow: auto; }
+.hiring-excerpt { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; }
+.hiring-page details { margin-top: 20px; }
+.hiring-page summary { cursor: pointer; padding: 8px 0; font-weight: 550; }
+.hiring-list-row { border-top: 1px solid #e2e8f0; padding: 15px 0; }
+.hiring-editor, .hiring-preview { border-top: 1px solid #e2e8f0; margin-top: 24px; padding-top: 20px; }
+.hiring-stage-editor { border: 1px solid #e2e8f0; background: #f8fafc; padding: 20px; margin: 16px 0; border-radius: 12px; }
+.hiring-evidence { border-bottom: 1px solid #e2e8f0; padding: 24px 0; }
+.hiring-evidence blockquote { border-left: 3px solid #a5b4fc; background: #f8fafc; margin: 14px 0; padding: 14px 18px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
+.hiring-evidence li { margin: 10px 0; line-height: 1.7; }
+.hiring-badge-green { background: #ecfdf5; color: #047857; }
+.hiring-progress { padding: 18px; background: #eef2ff; border-radius: 12px; color: #4338ca; }
+.hiring-pulse { display: inline-block; height: 8px; width: 8px; border-radius: 50%; background: #6366f1; margin-right: 10px; animation: hiring-pulse 1.5s infinite; }
+.hiring-stages { display: flex; flex-wrap: wrap; gap: 12px; }
+.hiring-stages > div { flex: 1 1 160px; background: #f8fafc; padding: 16px; border-radius: 12px; display: grid; gap: 8px; }
+.hiring-stages span { font-size: 12px; color: #6366f1; }
+.hiring-stages small, .hiring-footnote { color: #64748b; font-size: 12px; }
+@keyframes hiring-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .hiring-pulse { animation: none; } .hiring-page button { transition: none; } }
+@media (max-width: 760px) { .hiring-grid { grid-template-columns: 1fr; } .hiring-card { padding: 18px; } .hiring-public { padding: 20px; } }
+
+/* Public careers: clear actions, generous text sizes, and distinct content panels. */
+.hiring-public { background: #f4f6fb; }
+.careers-page { font-size: 16px; }
+.careers-page .careers-hero { display: flex; justify-content: space-between; align-items: center; gap: 28px; padding: 36px; border: 1px solid #dce2fa; border-radius: 24px; background: linear-gradient(115deg, #eef0ff, #f0f7ff); margin-bottom: 34px; }
+.careers-kicker { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid #d8dcf6; border-radius: 10px; background: #ffffffb8; color: #4338ca; font-size: 15px; font-weight: 650; }
+.careers-hero h1 { margin: 18px 0 10px; }
+.careers-hero p { margin: 0; font-size: 17px; }
+.careers-page .careers-button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 46px; padding: 11px 18px; border: 1px solid transparent; border-radius: 11px; font-size: 16px; font-weight: 600; line-height: 1.4; text-decoration: none; transition: background 150ms ease, box-shadow 150ms ease; }
+.careers-page .careers-button-primary { background: #4338ca; color: #fff; border-color: #4338ca; }
+.careers-page .careers-button-primary:hover { background: #3730a3; box-shadow: 0 4px 12px #4338ca24; }
+.careers-page .careers-button-light, .careers-page .careers-button-outline { background: #fff; color: #334155; border-color: #d5dce8; }
+.careers-page .careers-button-light:hover, .careers-page .careers-button-outline:hover { background: #eef2ff; border-color: #a5b4fc; color: #4338ca; }
+.careers-page .careers-button:focus-visible { outline: 3px solid #818cf8; outline-offset: 3px; }
+.careers-hero > .careers-button { flex-shrink: 0; }
+.careers-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.careers-section-heading h2 { margin: 0; font-size: 24px; }
+.careers-section-heading span { color: #64748b; font-size: 15px; }
+.careers-grid { gap: 24px; }
+.careers-grid .careers-job-card { display: flex; flex-direction: column; padding: 28px; border-radius: 20px; box-shadow: 0 6px 24px #17203306; }
+.careers-company { display: flex; align-items: center; gap: 12px; color: #526078; font-size: 16px; font-weight: 550; overflow-wrap: anywhere; }
+.careers-company-icon, .careers-apply-icon { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; flex-shrink: 0; border-radius: 12px; background: #eef2ff; color: #5145cd; }
+.careers-job-card h2 { font-size: 24px; line-height: 1.45; margin: 22px 0 16px; }
+.careers-tags { display: flex; flex-wrap: wrap; gap: 10px; }
+.careers-tags span { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #e4e8ef; background: #f5f7fb; padding: 7px 11px; border-radius: 8px; font-size: 15px; color: #475569; }
+.careers-tags svg { flex-shrink: 0; }
+.careers-summary { margin: 22px 0; padding: 16px 18px; background: #f7f9fc; border-radius: 12px; flex: 1; }
+.careers-summary p { margin: 0; font-size: 16px; line-height: 1.8; overflow-wrap: anywhere; }
+.careers-job-card > .careers-button { align-self: stretch; justify-content: space-between; }
+.careers-empty { padding: 40px; text-align: center; background: #fff; border: 1px solid #e2e8f0; border-radius: 18px; color: #64748b; }
+.careers-page .careers-back { margin-bottom: 24px; }
+.careers-page .careers-detail-header { padding: 30px; background: #eef2ff; border: 1px solid #dce2fa; border-radius: 20px; margin-bottom: 24px; }
+.careers-detail-header h1 { margin: 18px 0; }
+.careers-detail-layout { display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 24px; align-items: start; }
+.careers-detail-layout > .hiring-card { margin: 0; padding: 28px; }
+.careers-description h2 { margin-top: 0; padding-bottom: 18px; border-bottom: 1px solid #e8edf5; }
+.careers-description .hiring-prose { max-height: none; overflow: visible; font-size: 17px; line-height: 1.95; }
+.careers-apply { position: sticky; top: 24px; }
+.careers-apply h2 { margin-bottom: 10px; }
+.careers-apply .careers-button, .careers-apply > button { width: 100%; }
+.careers-apply > button { min-height: 48px; font-size: 16px; }
+.careers-apply label { font-size: 16px; }
+.careers-application-note { margin: 20px 0; padding: 14px; background: #f4f6fb; border-radius: 10px; color: #59677c; font-size: 15px; line-height: 1.7; }
+.careers-apply .careers-resubmit { align-items: flex-start; font-size: 15px; line-height: 1.6; }
+.careers-resubmit input { margin-top: 5px; flex-shrink: 0; }
+.careers-success { color: #047857; }
+@media (max-width: 960px) { .careers-detail-layout { grid-template-columns: 1fr; } .careers-apply { position: static; } }
+@media (max-width: 760px) {
+  .careers-page .careers-hero { padding: 24px; align-items: stretch; flex-direction: column; gap: 24px; }
+  .careers-section-heading { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .careers-grid .careers-job-card, .careers-detail-layout > .hiring-card, .careers-page .careers-detail-header { padding: 22px; }
+  .careers-job-card h2 { font-size: 22px; }
+}
+@media (prefers-reduced-motion: reduce) { .careers-page .careers-button { transition: none; } }
+.hiring-review-detail { border-top:1px solid #e5e7ef; margin-top:24px; padding-top:24px; }
+.hiring-review-detail h3 { margin-top:24px; }
+.hiring-review-text { white-space:pre-wrap; overflow-wrap:anywhere; font-size:16px; line-height:1.85; }
+.hiring-review-evidence details { background:#f6f7fc; padding:18px; border:1px solid #e4e7f0; border-radius:14px; margin:12px 0; }
+.hiring-review-evidence summary { font-size:16px; font-weight:600; cursor:pointer; line-height:1.6; }
+.hiring-review-detail fieldset { border:1px solid #e1e5ee; border-radius:12px; margin:20px 0; padding:16px; }
+.hiring-feedback-preview { background:#eef4ff; border:1px solid #c8d8f8; border-radius:16px; padding:22px; margin-top:20px; }
+.hiring-feedback-list { margin-top:24px; }

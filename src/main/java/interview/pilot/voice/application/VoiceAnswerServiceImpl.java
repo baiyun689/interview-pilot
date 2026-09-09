@@ -308,6 +308,7 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
       throw conflict(VoiceErrorCodes.VOICE_TURN_NOT_CURRENT,
           "The interview is not accepting voice recordings");
     }
+    session.requireAnswerWindow();
     if (turnNo != session.getCurrentTurnNo()) {
       throw conflict(VoiceErrorCodes.VOICE_TURN_NOT_CURRENT,
           "The turn is not the current interview turn");
@@ -428,6 +429,7 @@ public class VoiceAnswerServiceImpl implements VoiceAnswerModule {
     if (session.getStatus() != SessionStatus.INTERVIEWING) {
       throw turnNotCurrent();
     }
+    session.requireAnswerWindow();
     var turn = turns.findBySessionIdAndTurnNo(session.getId(), session.getCurrentTurnNo())
         .orElseThrow(this::turnNotCurrent);
     if (turn.getStatus() != TurnStatus.ASKED && turn.getStatus() != TurnStatus.FAILED) {

@@ -11,13 +11,26 @@ import { InterviewReportPage } from './pages/InterviewReportPage'
 import { KnowledgeBasePage } from './pages/KnowledgeBasePage'
 import { LoginPage } from './pages/LoginPage'
 import { RegisterPage } from './pages/RegisterPage'
+import { EnterprisePage } from './pages/EnterprisePage'
+import { HiringJobsPage, HiringJobDetailPage } from './pages/HiringJobsPage'
+import { CandidateApplicationsPage } from './pages/CandidateApplicationsPage'
+import { HiringPlatformPage } from './pages/HiringPlatformPage'
+import { CandidateInvitationsPage } from './pages/CandidateInvitationsPage'
+import { NotificationsPage } from './pages/NotificationsPage'
 
 export function App() {
   return (
     <Routes>
+      <Route path="/jobs" element={<div className="hiring-public"><HiringJobsPage /></div>} />
+      <Route path="/jobs/:jobId" element={<div className="hiring-public"><HiringJobDetailPage /></div>} />
       <Route path="/login" element={<PublicOnlyRoute><LoginPage /></PublicOnlyRoute>} />
       <Route path="/register" element={<PublicOnlyRoute><RegisterPage /></PublicOnlyRoute>} />
       <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+        <Route path="/enterprise" element={<EnterprisePage />} />
+        <Route path="/platform" element={<HiringPlatformPage />} />
+        <Route path="/candidate/applications" element={<CandidateApplicationsPage />} />
+        <Route path="/candidate/invitations" element={<CandidateInvitationsPage />} />
+        <Route path="/notifications" element={<NotificationsPage />} />
         <Route index element={<Navigate replace to="/resumes" />} />
         <Route path="/resumes" element={<ResumeListPage />} />
         <Route path="/resumes/:resumeId" element={<ResumeDetailPage />} />

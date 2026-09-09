@@ -29,9 +29,26 @@ public class AiFixedReportGenerator implements FixedReportGenerator {
   @Override
   public FixedInterviewReport generate(
       String providerId, String modelName, FixedReportInput input) {
-    return output.invoke(new AiRequest(
-        providerId, modelName, systemPrompt,
+    var phases = input.recruitment()
+        ? input.completedTurns().stream().map(FixedReportInput.TurnEvidence::phase).filter(p -> !p.equals("SELF_INTRODUCTION")).distinct().sorted().toList()
+        : java.util.Arrays.stream(interview.pilot.interview.domain.InterviewPhase.values()).map(Enum::name).toList();
+    String schema = phases.stream().map(p -> "\"" + p + "\": 0到100整数").collect(java.util.stream.Collectors.joining(", "));
+    String renderedSystem = systemPrompt.replace("{{PHASE_SCORE_SCHEMA}}", schema)
+        + "\n本次 phaseScores 必须恰好包含以下键，不得增加或缺少：" + String.join(", ", phases) + "。";
+    var report = output.invoke(new AiRequest(
+        providerId, modelName, renderedSystem,
         userPrompt.replace("{{CONTEXT_JSON}}", json.encode(input)),
         FixedInterviewReport.class), FixedInterviewReport.class);
+    if (!input.recruitment()) return report;
+    var availability = new java.util.EnumMap<interview.pilot.interview.domain.InterviewPhase, String>(interview.pilot.interview.domain.InterviewPhase.class);
+    for (var turn : input.completedTurns()) {
+      var phase = interview.pilot.interview.domain.InterviewPhase.valueOf(turn.phase());
+      if (phase != interview.pilot.interview.domain.InterviewPhase.SELF_INTRODUCTION) {
+        var snapshot = (interview.pilot.interview.rag.RagContextSnapshot) turn.ragSnapshot();
+        availability.put(phase, snapshot.status().name());
+      }
+    }
+    return new FixedInterviewReport(report.overallScore(), report.phaseScores(), report.strengths(), report.improvements(),
+        report.technicalReferences(), report.conflictNotes(), report.summary(), availability);
   }
 }

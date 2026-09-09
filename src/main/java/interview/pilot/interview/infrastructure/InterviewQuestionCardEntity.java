@@ -110,8 +110,8 @@ public class InterviewQuestionCardEntity {
     if (!phase.allowsFollowUp() && followUpQuota != 0) {
       throw new IllegalArgumentException("phase does not allow follow-ups");
     }
-    if (phase.allowsFollowUp() && (followUpQuota < 1 || followUpQuota > 2)) {
-      throw new IllegalArgumentException("follow-up quota must be 1 or 2");
+    if (phase.allowsFollowUp() && (followUpQuota < 0 || followUpQuota > 2)) {
+      throw new IllegalArgumentException("follow-up quota must be between 0 and 2");
     }
     var card = new InterviewQuestionCardEntity();
     card.sessionId = Objects.requireNonNull(sessionId);

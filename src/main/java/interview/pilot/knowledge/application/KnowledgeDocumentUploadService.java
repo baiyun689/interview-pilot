@@ -31,6 +31,7 @@ import interview.pilot.knowledge.config.KnowledgeProperties;
 import interview.pilot.knowledge.infrastructure.KnowledgeBaseEntity;
 import interview.pilot.knowledge.infrastructure.KnowledgeBaseRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentEntity;
+import interview.pilot.knowledge.infrastructure.KnowledgeChunkRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentRepository;
 import interview.pilot.knowledge.storage.KnowledgeDocumentStore;
 
@@ -45,6 +46,7 @@ public class KnowledgeDocumentUploadService {
   private final TransactionTemplate transactionTemplate;
   private final boolean knowledgeEnabled;
   private final VectorStore vectorStore;
+  private final KnowledgeChunkRepository chunkRepository;
 
   public KnowledgeDocumentUploadService(
       KnowledgeBaseRepository baseRepository,
@@ -53,13 +55,15 @@ public class KnowledgeDocumentUploadService {
       KnowledgeDocumentStore store,
       PlatformTransactionManager transactionManager,
       KnowledgeProperties properties,
-      Optional<VectorStore> vectorStore) {
+      Optional<VectorStore> vectorStore,
+      KnowledgeChunkRepository chunkRepository) {
     this.baseRepository = baseRepository;
     this.documentRepository = documentRepository;
     this.taskRepository = taskRepository;
     this.store = store;
     this.knowledgeEnabled = properties.enabled();
     this.vectorStore = vectorStore.orElse(null);
+    this.chunkRepository = chunkRepository;
     this.transactionTemplate = new TransactionTemplate(transactionManager);
     this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
   }
@@ -170,6 +174,7 @@ public class KnowledgeDocumentUploadService {
     }));
 
     deleteVectorsBestEffort(target.documentId());
+    deleteChunksBestEffort(target.documentId());
     deleteStoredFileBestEffort(target.storageKey());
 
     transactionTemplate.executeWithoutResult(status -> {
@@ -206,6 +211,15 @@ public class KnowledgeDocumentUploadService {
           new Filter.Key("document_id"), new Filter.Value(documentId.toString())));
     } catch (RuntimeException exception) {
       log.warn("Failed to delete vectors for knowledge document {}: {}",
+          documentId, exception.getMessage());
+    }
+  }
+
+  private void deleteChunksBestEffort(UUID documentId) {
+    try {
+      chunkRepository.deleteByDocumentId(documentId);
+    } catch (RuntimeException exception) {
+      log.warn("Failed to delete lexical chunks for knowledge document {}: {}",
           documentId, exception.getMessage());
     }
   }

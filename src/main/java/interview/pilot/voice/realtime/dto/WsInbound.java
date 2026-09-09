@@ -9,7 +9,8 @@ package interview.pilot.voice.realtime.dto;
  * </ul>
  * Unknown fields are ignored (the shared ObjectMapper leaves FAIL_ON_UNKNOWN_PROPERTIES off).
  */
-public record WsInbound(String type, String data, String action, String text) {
+public record WsInbound(String type, String data, String action, String text, Integer turnNo) {
+  public WsInbound(String type,String data,String action,String text) {this(type,data,action,text,null);}
 
   public boolean isAudio() {
     return "audio".equals(type);

@@ -37,6 +37,10 @@ public abstract class AbstractKnowledgeDocumentRetryPolicy extends AbstractRetry
     UUID documentId = parseKnowledgeDocumentId(task.getBizKey());
     KnowledgeDocumentEntity document = knowledgeDocuments.findByDocumentId(documentId)
         .orElseThrow(AbstractRetryableTaskPolicy::stateInvalid);
+    if (document.getKnowledgeBase() != null && document.getKnowledgeBase().getOrganizationId() != null) {
+      throw new interview.pilot.common.exception.BusinessException("ENTERPRISE_RETRY_REQUIRED",
+          "请在企业知识库页面重试，以校验当前企业权限", org.springframework.http.HttpStatus.CONFLICT);
+    }
     if (document.getStatus() != KnowledgeDocumentStatus.FAILED) {
       throw stateInvalid();
     }

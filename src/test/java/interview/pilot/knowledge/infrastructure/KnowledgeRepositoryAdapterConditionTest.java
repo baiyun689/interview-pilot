@@ -35,6 +35,7 @@ class KnowledgeRepositoryAdapterConditionTest {
         .run(context -> {
       assertThat(context).hasSingleBean(KnowledgeBaseRepository.class);
       assertThat(context).hasSingleBean(KnowledgeDocumentRepository.class);
+      assertThat(context).hasSingleBean(KnowledgeChunkRepository.class);
     });
   }
 
@@ -54,6 +55,11 @@ class KnowledgeRepositoryAdapterConditionTest {
     @Bean
     KnowledgeDocumentJpaRepository knowledgeDocumentJpaRepository() {
       return mock(KnowledgeDocumentJpaRepository.class);
+    }
+
+    @Bean
+    KnowledgeChunkJpaRepository knowledgeChunkJpaRepository() {
+      return mock(KnowledgeChunkJpaRepository.class);
     }
   }
 }

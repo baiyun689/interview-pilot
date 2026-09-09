@@ -7,6 +7,15 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 
+import interview.pilot.common.observability.AiMetrics;
+import interview.pilot.knowledge.infrastructure.KnowledgeChunkRepository;
+import interview.pilot.knowledge.retrieval.DefaultKnowledgeRanker;
+import interview.pilot.knowledge.retrieval.HybridKnowledgeRetriever;
+import interview.pilot.knowledge.retrieval.KeywordRetrievalSource;
+import interview.pilot.knowledge.retrieval.KnowledgeRetriever;
+import interview.pilot.knowledge.retrieval.QdrantVectorRetrievalSource;
+import interview.pilot.knowledge.retrieval.RetrievalSource;
+
 import com.google.common.util.concurrent.Futures;
 import io.qdrant.client.QdrantClient;
 
@@ -34,6 +43,68 @@ class KnowledgeConfigurationTest {
       "app.knowledge.embedding.model=text-embedding-v3",
       "app.knowledge.embedding.dimensions=1024"
   };
+
+  @Test
+  void omittedRetrievalModeDefaultsToVectorAndOnlyWiresVectorSource() {
+    retrievalContextRunner("app.knowledge.enabled=true").run(context -> {
+      assertThat(context).hasNotFailed();
+      assertThat(context.getBean(KnowledgeProperties.class).retrieval())
+          .isEqualTo(KnowledgeProperties.RetrievalMode.VECTOR);
+      assertThat(context).hasSingleBean(KnowledgeRetriever.class);
+      assertThat(context).hasSingleBean(RetrievalSource.class);
+      assertThat(context).doesNotHaveBean(KeywordRetrievalSource.class);
+    });
+  }
+
+  @Test
+  void explicitVectorModeDoesNotWireKeywordSource() {
+    retrievalContextRunner("app.knowledge.enabled=true", "app.knowledge.retrieval=vector")
+        .run(context -> {
+          assertThat(context).hasNotFailed();
+          assertThat(context).hasSingleBean(RetrievalSource.class);
+          assertThat(context).doesNotHaveBean(KeywordRetrievalSource.class);
+        });
+  }
+
+  @Test
+  void hybridModeWiresBothSourcesAndOneAggregate() {
+    retrievalContextRunner("app.knowledge.enabled=true", "app.knowledge.retrieval=hybrid")
+        .run(context -> {
+          assertThat(context).hasNotFailed();
+          assertThat(context.getBean(KnowledgeProperties.class).retrieval())
+              .isEqualTo(KnowledgeProperties.RetrievalMode.HYBRID);
+          assertThat(context.getBeansOfType(RetrievalSource.class)).hasSize(2);
+          assertThat(context).hasSingleBean(KeywordRetrievalSource.class);
+          assertThat(context).hasSingleBean(KnowledgeRetriever.class);
+        });
+  }
+
+  @Test
+  void disabledKnowledgeNeverWiresSourcesEvenWithHybridSelected() {
+    retrievalContextRunner("app.knowledge.enabled=false", "app.knowledge.retrieval=hybrid")
+        .run(context -> {
+          assertThat(context).hasNotFailed();
+          assertThat(context).doesNotHaveBean(RetrievalSource.class);
+          assertThat(context).hasSingleBean(KnowledgeRetriever.class);
+        });
+  }
+
+  @Test
+  void invalidRetrievalModeFailsBinding() {
+    retrievalContextRunner("app.knowledge.retrieval=typo")
+        .run(context -> assertThat(context).hasFailed());
+  }
+
+  private ApplicationContextRunner retrievalContextRunner(String... properties) {
+    return new ApplicationContextRunner()
+        .withUserConfiguration(KnowledgeAutoConfiguration.class, HybridKnowledgeRetriever.class,
+            QdrantVectorRetrievalSource.class, KeywordRetrievalSource.class, DefaultKnowledgeRanker.class)
+        .withBean(VectorStore.class, () -> mock(VectorStore.class))
+        .withBean(AiMetrics.class, () -> mock(AiMetrics.class))
+        .withBean(KnowledgeChunkRepository.class, () -> mock(KnowledgeChunkRepository.class))
+        .withPropertyValues(VALID_PROPERTIES)
+        .withPropertyValues(properties);
+  }
 
   @Test
   void rejectsCollectionNameOtherThanKnowledgeChunksV1DuringBinding() {

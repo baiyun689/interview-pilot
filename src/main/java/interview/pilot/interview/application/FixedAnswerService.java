@@ -83,6 +83,7 @@ public class FixedAnswerService {
     this.followUps = followUps;
     this.objectMapper = objectMapper;
     this.transactions = new TransactionTemplate(transactionManager);
+    this.transactions.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
     this.recordings = recordings;
     this.questionSpeeches = questionSpeeches;
     this.evaluationProperties = evaluationProperties;
@@ -160,9 +161,18 @@ public class FixedAnswerService {
     long ownerId = owner(user);
     var session = sessions.findBySessionIdAndUserAccountId(sessionId, ownerId)
         .orElseThrow(() -> notFound());
-    String hash = SubmissionFingerprint.of(request.answer(), request.inputMode(), request.recordingId());
+    if (session.isRecruitment()) session = sessions.findByIdForUpdate(session.getId()).orElseThrow(this::notFound);
+    String hash = fingerprint(request);
     var existing = attempts.findByRequestId(request.requestId());
     if (existing.isPresent()) return replay(existing.get(), sessionId, request, hash);
+    if (session.isRecruitment() && (request.expectedTurnNo() == null || request.sessionVersion() == null))
+      throw conflict("ANSWER_VERSION_REQUIRED", "请刷新面试页面后再提交回答");
+    if ((request.expectedTurnNo() != null && request.expectedTurnNo() != session.getCurrentTurnNo())
+        || (request.sessionVersion() != null && request.sessionVersion() != session.getVersion()))
+      throw conflict("ANSWER_VERSION_CONFLICT", "面试进度已在其他页面更新，请刷新后确认当前题目");
+    session.requireAnswerWindow();
+    if (session.isRecruitment() && sessions.countActiveHiringInvitation(session.getHiringInvitationId()) != 1)
+      throw conflict("HIRING_INTERVIEW_UNAVAILABLE", "当前企业面试不可继续作答");
     if (session.getStatus() != SessionStatus.INTERVIEWING) {
       throw conflict("INTERVIEW_NOT_ACTIVE", "Interview is not accepting answers");
     }
@@ -240,8 +250,14 @@ public class FixedAnswerService {
     sessions.findBySessionIdAndUserAccountId(sessionId, ownerId).orElseThrow(this::notFound);
     var attempt = attempts.findByRequestId(request.requestId())
         .orElseThrow(() -> conflict("ANSWER_CLAIM_CONFLICT", "Answer claim conflicted"));
-    String hash = SubmissionFingerprint.of(request.answer(), request.inputMode(), request.recordingId());
+    String hash = fingerprint(request);
     return replay(attempt, sessionId, request, hash);
+  }
+
+  private static String fingerprint(SubmitAnswerRequest request) {
+    String base = SubmissionFingerprint.of(request.answer(), request.inputMode(), request.recordingId());
+    return request.expectedTurnNo() == null && request.sessionVersion() == null ? base
+        : SubmissionFingerprint.sha256(base + ":" + request.expectedTurnNo() + ":" + request.sessionVersion());
   }
 
   private FixedAnswerClaim replay(
@@ -272,7 +288,17 @@ public class FixedAnswerService {
     InterviewQuestionCardEntity parent = allCards.stream()
         .filter(card -> card.getId().equals(current.getSourceCardId()))
         .findFirst().orElseThrow();
-    Next next = chooseNext(session.getInterviewSize(), current, allTurns, allCards, parent);
+    Next next;
+    if (session.isRecruitment()) {
+      var plan = decode(session.getExecutionPlan(), interview.pilot.interview.domain.InterviewExecutionPlan.class);
+      int followUpsAsked = (int) allTurns.stream().filter(turn -> turn.getQuestionType() == QuestionType.FOLLOW_UP
+          && parent.getId().equals(turn.getSourceCardId())).count();
+      var step = plan.next(parent.getId(), followUpsAsked);
+      next = step.finished() ? Next.end() : step.followUp() ? Next.followUp(step.card().phase(), step.card().id())
+          : Next.main(step.card().phase(), allCards.stream().filter(card -> card.getId().equals(step.card().id())).findFirst().orElseThrow());
+    } else {
+      next = chooseNext(session.getInterviewSize(), current, allTurns, allCards, parent);
+    }
     return new Work(
         session.getSessionId(), session.getId(), current.getId(), attemptId,
         request.requestId(), current.getTurnNo(), request.answer(), session.getDifficulty(),
@@ -316,6 +342,12 @@ public class FixedAnswerService {
 
   private FixedAnswerResult completeInTransaction(Work work, String nextQuestion) {
     var session = sessions.findBySessionId(work.sessionId()).orElseThrow();
+    if (session.isRecruitment()) {
+      session = sessions.findByIdForUpdate(session.getId()).orElseThrow();
+      session.requireAnswerWindow();
+      if (sessions.countActiveHiringInvitation(session.getHiringInvitationId()) != 1)
+        throw conflict("HIRING_INTERVIEW_UNAVAILABLE", "当前企业面试不可继续作答");
+    }
     var current = turns.findById(work.turnId()).orElseThrow();
     var attempt = attempts.findById(work.attemptId()).orElseThrow();
     if (current.getStatus() != interview.pilot.interview.domain.TurnStatus.PROCESSING
@@ -337,7 +369,9 @@ public class FixedAnswerService {
     } else {
       nextTurn = InterviewTurnEntity.asked(
           session.getId(), current.getTurnNo() + 1, work.next().phase(),
-          work.next().kind() == NextKind.MAIN ? QuestionType.MAIN : QuestionType.FOLLOW_UP,
+          work.next().kind() == NextKind.MAIN
+              ? (work.next().phase() == InterviewPhase.SELF_INTRODUCTION ? QuestionType.SELF_INTRODUCTION : QuestionType.MAIN)
+              : QuestionType.FOLLOW_UP,
           work.next().sourceCardId(), nextQuestion);
       turns.save(nextTurn);
       // Same transaction as the turn (plan §11): VOICE sessions with TTS configured get a
@@ -381,6 +415,10 @@ public class FixedAnswerService {
   }
 
   private void failBestEffort(Work work) {
+    var session = sessions.findBySessionId(work.sessionId()).orElseThrow();
+    if (session.isRecruitment() && !java.time.Instant.now().isBefore(session.getAnswerDeadline())) {
+      return; // The deadline sweep owns completion of answers admitted before the cutoff.
+    }
     attempts.findById(work.attemptId()).ifPresent(attempt -> {
       if (attempt.getStatus() == AnswerAttemptStatus.PROCESSING) attempt.fail("ANSWER_PROCESSING_FAILED");
     });

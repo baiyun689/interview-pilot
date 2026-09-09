@@ -7,11 +7,17 @@ public record ValidatedKnowledgeScope(
     UUID userId,
     List<UUID> knowledgeBaseIds,
     List<DocumentRevision> documents,
-    String embeddingVersion) {
+    String embeddingVersion,
+    Long organizationId) {
+
+  public ValidatedKnowledgeScope(UUID userId, List<UUID> knowledgeBaseIds,
+      List<DocumentRevision> documents, String embeddingVersion) {
+    this(userId, knowledgeBaseIds, documents, embeddingVersion, null);
+  }
 
   public ValidatedKnowledgeScope {
-    if (userId == null) {
-      throw new IllegalArgumentException("userId must not be null");
+    if ((userId == null) == (organizationId == null) || (organizationId != null && organizationId < 1)) {
+      throw new IllegalArgumentException("Exactly one valid personal or organization owner is required");
     }
     knowledgeBaseIds = List.copyOf(knowledgeBaseIds);
     if (knowledgeBaseIds.isEmpty()) {

@@ -20,7 +20,7 @@ class InterviewSessionResponseTest {
     var response = new InterviewSessionResponse(
         UUID.randomUUID(), 7L, "Java 后端", "JD", SessionStatus.INTERVIEWING,
         Difficulty.MEDIUM, InterviewSize.STANDARD, InterviewMode.VOICE,
-        JobSourceType.CUSTOM, 3, 2, 9, "dashscope", "qwen", null, null, List.of());
+        JobSourceType.CUSTOM, 3, 2, 9, "dashscope", "qwen", null, null, List.of(), false, null, 0);
 
     assertThat(response.interviewMode()).isEqualTo(InterviewMode.VOICE);
   }
@@ -30,7 +30,7 @@ class InterviewSessionResponseTest {
     var response = new InterviewSessionResponse(
         UUID.randomUUID(), 7L, "Java 后端", "JD", SessionStatus.INTERVIEWING,
         Difficulty.MEDIUM, InterviewSize.STANDARD, InterviewMode.VOICE,
-        JobSourceType.CUSTOM, 3, 2, 9, "dashscope", "qwen", null, null, List.of());
+        JobSourceType.CUSTOM, 3, 2, 9, "dashscope", "qwen", null, null, List.of(), false, null, 0);
 
     String json = new ObjectMapper().writeValueAsString(response);
 

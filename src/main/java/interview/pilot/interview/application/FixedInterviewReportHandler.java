@@ -77,10 +77,12 @@ public class FixedInterviewReportHandler {
     try {
       FixedInterviewReport report = generator.generate(
           begin.providerId(), begin.modelName(), begin.input());
-      validate(report, begin.allowedSourceIds(), begin.ragAvailability());
+      validate(report, begin.allowedSourceIds(), begin.ragAvailability(), begin.input());
       return transactions.execute(status -> complete(message, begin, report));
     } catch (AiStructuredOutputException | IllegalArgumentException exception) {
-      transactions.executeWithoutResult(status -> failInvalid(message, begin));
+      String category = exception instanceof InvalidReport invalid ? invalid.category
+          : exception instanceof AiStructuredOutputException ? "STRUCTURE" : "CONTENT";
+      transactions.executeWithoutResult(status -> failInvalid(message, begin, category));
       return Outcome.TERMINAL;
     } catch (RuntimeException exception) {
       transactions.executeWithoutResult(status -> recordRetryable(message, begin));
@@ -136,13 +138,26 @@ public class FixedInterviewReportHandler {
     InterviewBriefSnapshot brief = decode(session.getBriefSnapshot(), InterviewBriefSnapshot.class);
     var storedTurns = turns.findAllBySessionIdOrderByTurnNo(session.getId());
     var storedCards = cards.findAllBySessionIdOrderByPhaseAscPhaseSequenceAsc(session.getId());
-    evidencePolicy.requireComplete(
+    if (!session.isRecruitment()) evidencePolicy.requireComplete(
         brief.totalMainQuestionCount(),
         storedCards.stream().map(card -> new FixedInterviewEvidencePolicy.CardEvidence(
             card.getId(), card.getPhase(), card.getFollowUpQuota())).toList(),
         storedTurns.stream().map(turn -> new FixedInterviewEvidencePolicy.TurnEvidence(
             turn.getTurnNo(), turn.getSourceCardId(), turn.getPhase(),
             turn.getQuestionType(), turn.getStatus())).toList());
+    var unassessed = new ArrayList<FixedReportInput.UnassessedQuestion>();
+    if (session.isRecruitment()) {
+      if (storedCards.size() != session.getTotalMainQuestionCount()) throw new IllegalStateException("Frozen recruitment deck is incomplete");
+      for (var card : storedCards) {
+        var main = storedTurns.stream().filter(t -> t.getSourceCardId().equals(card.getId()) && t.getQuestionType() != interview.pilot.interview.domain.QuestionType.FOLLOW_UP).findFirst();
+        if (main.isEmpty() || main.get().getStatus() != interview.pilot.interview.domain.TurnStatus.COMPLETED)
+          unassessed.add(new FixedReportInput.UnassessedQuestion(card.getQuestionText(),
+              main.isPresent() && main.get().getStatus() == interview.pilot.interview.domain.TurnStatus.FAILED ? "PROCESSING_FAILED" : "NOT_ANSWERED"));
+      }
+      storedTurns = storedTurns.stream().filter(t -> t.getStatus() == interview.pilot.interview.domain.TurnStatus.COMPLETED).toList();
+      if (storedTurns.stream().noneMatch(t -> t.getPhase() != InterviewPhase.SELF_INTRODUCTION))
+        throw new IllegalStateException("No completed formal answers available for recruitment evaluation");
+    }
     List<EvalStatus> formalStatuses = storedTurns.stream()
         .filter(turn -> turn.getPhase() != InterviewPhase.SELF_INTRODUCTION)
         .map(turn -> turn.getEvalStatus() == null ? EvalStatus.NOT_REQUIRED : turn.getEvalStatus())
@@ -173,14 +188,14 @@ public class FixedInterviewReportHandler {
     return new Begin(
         task.getTaskId(), session.getId(), session.getUserAccountId(), session.getSessionId(),
         session.getProviderId(), session.getModelName(), task.getAttemptCount(),
-        task.getExecutionEpoch(), new FixedReportInput(brief, evidence),
+        task.getExecutionEpoch(), new FixedReportInput(brief, evidence, session.isRecruitment(), session.getTotalMainQuestionCount(), unassessed),
         Set.copyOf(allowed), Map.copyOf(availability), false);
   }
 
-  private void validate(
+  static void validate(
       FixedInterviewReport report,
       Set<String> allowedSources,
-      Map<InterviewPhase, String> expectedAvailability) {
+      Map<InterviewPhase, String> expectedAvailability, FixedReportInput input) {
     if (report == null) throw new IllegalArgumentException("report is required");
     for (var reference : report.technicalReferences()) {
       if (!allowedSources.contains(reference.sourceId())) {
@@ -188,14 +203,18 @@ public class FixedInterviewReportHandler {
       }
     }
     if (!report.ragAvailability().equals(expectedAvailability)) {
-      throw new IllegalArgumentException("report RAG availability does not match snapshots");
+      throw new InvalidReport("RAG_AVAILABILITY");
     }
-    if (!report.phaseScores().keySet().equals(Set.of(
+    Set<InterviewPhase> expectedPhases = input.recruitment()
+        ? input.completedTurns().stream().map(t -> InterviewPhase.valueOf(t.phase()))
+            .filter(phase -> phase != InterviewPhase.SELF_INTRODUCTION).collect(java.util.stream.Collectors.toSet())
+        : Set.of(
         InterviewPhase.SELF_INTRODUCTION,
         InterviewPhase.FUNDAMENTALS,
         InterviewPhase.PROJECT_EXPERIENCE,
-        InterviewPhase.SCENARIO_TRADEOFF))) {
-      throw new IllegalArgumentException("report phase scores are incomplete");
+        InterviewPhase.SCENARIO_TRADEOFF);
+    if (!report.phaseScores().keySet().equals(expectedPhases)) {
+      throw new InvalidReport("PHASES");
     }
   }
 
@@ -212,13 +231,18 @@ public class FixedInterviewReportHandler {
     return Outcome.TERMINAL;
   }
 
-  private void failInvalid(TaskMessage message, Begin begin) {
+  private void failInvalid(TaskMessage message, Begin begin, String category) {
     AsyncTaskEntity task = task(message);
     InterviewSessionEntity session = session(task);
     if (!current(task, session, begin)) return;
     task.setStatus(AsyncTaskStatus.FAILED);
-    task.setLastError("INVALID_INTERVIEW_REPORT");
-    session.evaluationFailed("INVALID_INTERVIEW_REPORT");
+    task.setLastError("INVALID_INTERVIEW_REPORT:" + category);
+    session.evaluationFailed("INVALID_INTERVIEW_REPORT:" + category);
+  }
+
+  private static final class InvalidReport extends IllegalArgumentException {
+    private final String category;
+    private InvalidReport(String category) {super("Invalid report: " + category);this.category=category;}
   }
 
   private void recordRetryable(TaskMessage message, Begin begin) {

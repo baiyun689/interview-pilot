@@ -57,9 +57,25 @@ public class VoiceTurnOrchestrator {
    * returned so the client can show it.
    */
   public VoiceTurnOutcome submitAnswer(CurrentUser user, UUID sessionId, String answerText) {
+    return submitAnswer(user, sessionId, answerText, null);
+  }
+
+  public record TurnBinding(int turnNo, long version, boolean recruitment) {
+    public TurnBinding(int turnNo,long version) {this(turnNo,version,false);}
+  }
+
+  public TurnBinding bind(CurrentUser user, UUID sessionId, int expectedTurnNo) {
+    var session=sessions.findBySessionIdAndUserAccountId(sessionId,user.databaseId()).orElseThrow();
+    if(session.getCurrentTurnNo()!=expectedTurnNo)
+      throw new interview.pilot.common.exception.BusinessException("ANSWER_VERSION_CONFLICT", "面试进度已变更，请重新连接", org.springframework.http.HttpStatus.CONFLICT);
+    return new TurnBinding(expectedTurnNo,session.getVersion(),session.isRecruitment());
+  }
+
+  public VoiceTurnOutcome submitAnswer(CurrentUser user, UUID sessionId, String answerText, TurnBinding binding) {
     String trimmed = answerText == null ? "" : answerText.trim();
     SubmitAnswerRequest request = new SubmitAnswerRequest(
-        UUID.randomUUID(), trimmed, InputMode.VOICE_REALTIME, null);
+        UUID.randomUUID(), trimmed, InputMode.VOICE_REALTIME, null,
+        binding==null?null:binding.turnNo(),binding==null?null:binding.version());
 
     FixedAnswerClaim claim = answers.claim(user, sessionId, request);
     FixedAnswerResult result = answers.process(claim);
@@ -88,6 +104,7 @@ public class VoiceTurnOrchestrator {
     if (session == null || session.getStatus() != SessionStatus.INTERVIEWING) {
       return null;
     }
+    session.requireAnswerWindow();
     InterviewTurnEntity current = turns
         .findBySessionIdAndTurnNo(session.getId(), session.getCurrentTurnNo()).orElse(null);
     if (current == null || current.getQuestionText() == null || current.getQuestionText().isBlank()) {

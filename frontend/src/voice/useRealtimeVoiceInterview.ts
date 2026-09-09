@@ -40,6 +40,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions = {}) {
   // Latest not-yet-final partial, so a manual submit can carry the last half-sentence the server VAD
   // has not yet finalized (manual-confirm mode never relies on silence to flush it).
   const partialRef = useRef('')
+  const questionTurnRef = useRef<number | undefined>(undefined)
 
   const clearSpeakingFallback = useCallback(() => {
     if (speakingFallbackRef.current !== null) {
@@ -126,6 +127,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions = {}) {
     setError(null)
     const socket = new VoiceInterviewSocket(sessionId, {
       onOpen: () => {
+        questionTurnRef.current=undefined
         setConnection('open')
         setPhase('listening')
         void mic.start().catch(() => undefined)
@@ -143,6 +145,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions = {}) {
         }
       },
       onText: (msg) => {
+        questionTurnRef.current=msg.turnNo
         setInterviewer(msg.content)
         setPhase('speaking')
         optionsRef.current.onQuestion?.(msg.content, msg.turnNo)
@@ -177,7 +180,7 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions = {}) {
   // last in-flight partial; the server only advances the turn after this explicit submit.
   const submitNow = useCallback(() => {
     const extra = partialRef.current.trim()
-    socketRef.current?.sendControl('submit', extra || undefined)
+    socketRef.current?.sendControl('submit', extra || undefined, questionTurnRef.current)
   }, [])
 
   useEffect(() => () => {

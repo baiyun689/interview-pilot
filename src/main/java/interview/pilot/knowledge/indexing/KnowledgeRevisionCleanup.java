@@ -12,6 +12,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 
 import interview.pilot.interview.domain.SessionStatus;
 import interview.pilot.interview.infrastructure.InterviewSessionRepository;
+import interview.pilot.knowledge.infrastructure.KnowledgeChunkRepository;
 import interview.pilot.knowledge.retrieval.ValidatedKnowledgeScope;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
@@ -23,14 +24,23 @@ public final class KnowledgeRevisionCleanup {
   private final InterviewSessionRepository sessions;
   private final ObjectMapper objectMapper;
   private final KnowledgeRevisionCandidates candidates;
+  private final KnowledgeChunkRepository chunkRepository;
+  private java.util.List<KnowledgeRevisionReference> additionalReferences = java.util.List.of();
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public void setAdditionalReferences(java.util.List<KnowledgeRevisionReference> references) {
+    this.additionalReferences = java.util.List.copyOf(references);
+  }
 
   public KnowledgeRevisionCleanup(
       Optional<VectorStore> vectorStore, InterviewSessionRepository sessions,
-      ObjectMapper objectMapper, KnowledgeRevisionCandidates candidates) {
+      ObjectMapper objectMapper, KnowledgeRevisionCandidates candidates,
+      KnowledgeChunkRepository chunkRepository) {
     this.vectorStore = vectorStore.orElse(null);
     this.sessions = sessions;
     this.objectMapper = objectMapper;
     this.candidates = candidates;
+    this.chunkRepository = chunkRepository;
   }
 
   @Scheduled(
@@ -56,6 +66,7 @@ public final class KnowledgeRevisionCleanup {
         vectorStore.delete(and(
             eq("document_id", documentId.toString()),
             eq("index_revision", String.valueOf(revision))));
+        chunkRepository.deleteByDocumentIdAndIndexRevision(documentId, revision);
       } catch (RuntimeException exception) {
         log.warn("Knowledge revision cleanup deferred document={} revision={} reason={}",
             documentId, revision, exception.getMessage());
@@ -64,6 +75,7 @@ public final class KnowledgeRevisionCleanup {
   }
 
   private boolean hasActiveReference(UUID documentId, int revision) {
+    if (additionalReferences.stream().anyMatch(source -> source.references(documentId, revision))) return true;
     return sessions.findAllByOrderByCreatedAtDesc().stream()
         .filter(session -> session.getStatus() == SessionStatus.PREPARING
             || session.getStatus() == SessionStatus.READY

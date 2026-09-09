@@ -1,4 +1,15 @@
 spring:
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:1025}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      "[mail.smtp.auth]": ${SMTP_AUTH:false}
+      "[mail.smtp.starttls.enable]": ${SMTP_STARTTLS:false}
+      "[mail.smtp.connectiontimeout]": 5000
+      "[mail.smtp.timeout]": 5000
+      "[mail.smtp.writetimeout]": 5000
   config:
     import: optional:file:.env[.properties]
   servlet:
@@ -36,7 +47,7 @@ logging:
     # console pattern prints it on every line so voice/async event logs are correlated without
     # a separate traceId= field (RabbitMQ listener threads have no HTTP traceId — correlate
     # those via taskId + executionEpoch, plan §16).
-    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %5p [%t] [%X{traceId:-}] %c{1.} - %m%n"
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %5p [%t] [%X{traceId:-}] %c{1} - %m%n"
 
 management:
   endpoints:
@@ -50,6 +61,13 @@ server:
   forward-headers-strategy: framework
 
 app:
+  hiring:
+    mail-enabled: ${HIRING_MAIL_ENABLED:false}
+    mail-from: ${HIRING_MAIL_FROM:interview-pilot@example.test}
+    public-base-url: ${HIRING_PUBLIC_BASE_URL:http://localhost:5173}
+    reminder-hours: ${HIRING_REMINDER_HOURS:24,1}
+    max-batch-members: ${HIRING_MAX_BATCH_MEMBERS:200}
+    evidence-retention-days: ${HIRING_EVIDENCE_RETENTION_DAYS:90}
   jwt:
     access-token-ttl: 15m
     refresh-token-ttl: 7d
@@ -97,6 +115,7 @@ app:
     report-barrier-max-attempts: ${ANSWER_EVALUATION_REPORT_BARRIER_MAX_ATTEMPTS:3}
   knowledge:
     enabled: ${KNOWLEDGE_ENABLED:false}
+    retrieval: ${KNOWLEDGE_RETRIEVAL:vector}
     files-root: ${KNOWLEDGE_FILES_ROOT:./data/knowledge}
     chunk-size: ${KNOWLEDGE_CHUNK_SIZE:800}
     chunk-overlap: ${KNOWLEDGE_CHUNK_OVERLAP:100}

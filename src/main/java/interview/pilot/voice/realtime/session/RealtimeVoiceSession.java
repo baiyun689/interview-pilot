@@ -54,6 +54,9 @@ public class RealtimeVoiceSession {
   private volatile boolean muted;
   private volatile long lastActivityAt = System.currentTimeMillis();
   private volatile boolean closed;
+  private volatile long answerGeneration;
+  private volatile boolean manualConfirmationRequired;
+  public void requireManualConfirmation() {manualConfirmationRequired=true;}
 
   public RealtimeVoiceSession(WebSocketSession webSocket, CurrentUser user, UUID sessionId,
                               RealtimeVoiceProperties.Conversation config,
@@ -92,13 +95,21 @@ public class RealtimeVoiceSession {
 
   /** Append a final ASR sentence to the merge buffer; arm the silence timer only in auto-submit mode. */
   public void appendFinalSegment(String segment) {
+    appendFinalSegment(segment,()->true,()->{});
+  }
+
+  /** Validate the provider generation on this actor, atomically with buffer append and subtitles. */
+  public void appendFinalSegment(String segment,java.util.function.BooleanSupplier currentGeneration,Runnable accepted) {
     if (closed || segment == null || segment.isBlank()) {
       return;
     }
     touch();
+    long generation=answerGeneration;
     executor.execute(() -> {
+      if(generation!=answerGeneration || !currentGeneration.getAsBoolean()) return;
+      accepted.run();
       mergeBuffer.append(segment.trim());
-      if (config.autoSubmitEnabled()) {
+      if (config.autoSubmitEnabled() && !manualConfirmationRequired) {
         armDebounce();
       }
     });
@@ -106,11 +117,17 @@ public class RealtimeVoiceSession {
 
   /** Manual submit; optional extra text is merged before draining. */
   public void requestSubmit(String extraText) {
+    requestSubmit(extraText,()->true);
+  }
+
+  public void requestSubmit(String extraText,java.util.function.BooleanSupplier currentQuestion) {
     if (closed) {
       return;
     }
     touch();
+    long generation=answerGeneration;
     executor.execute(() -> {
+      if(generation!=answerGeneration || !currentQuestion.getAsBoolean()) return;
       if (extraText != null && !extraText.isBlank()) {
         mergeBuffer.append(extraText.trim());
       }
@@ -174,7 +191,8 @@ public class RealtimeVoiceSession {
     if (text.isEmpty()) {
       return;
     }
-    runTurnGated(() -> submitter.submit(text));
+    try {runTurnGated(() -> submitter.submit(text));}
+    finally {answerGeneration++;}
   }
 
   /** Runs one blocking turn with half-duplex gating; serialized by the single worker thread. */

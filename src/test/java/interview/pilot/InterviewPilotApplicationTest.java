@@ -34,6 +34,7 @@ import interview.pilot.interview.infrastructure.InterviewKnowledgeBaseRepository
 import interview.pilot.auth.infrastructure.UserAccountRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeBaseJpaRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentJpaRepository;
+import interview.pilot.knowledge.infrastructure.KnowledgeChunkJpaRepository;
 import interview.pilot.voice.infrastructure.QuestionSpeechRepository;
 import interview.pilot.voice.infrastructure.VoiceRecordingRepository;
 import org.springframework.aop.support.AopUtils;
@@ -49,6 +50,7 @@ import org.springframework.aop.support.AopUtils;
 })
 @AutoConfigureMockMvc
 class InterviewPilotApplicationTest {
+  @MockitoBean private interview.pilot.recruitment.infrastructure.HiringStore hiringStore;
   @MockitoBean
   private RedissonClient redissonClient;
 
@@ -90,6 +92,9 @@ class InterviewPilotApplicationTest {
 
   @MockitoBean
   private KnowledgeDocumentJpaRepository knowledgeDocumentJpaRepository;
+
+  @MockitoBean
+  private KnowledgeChunkJpaRepository knowledgeChunkJpaRepository;
 
   @MockitoBean
   private VoiceRecordingRepository voiceRecordingRepository;

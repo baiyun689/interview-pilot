@@ -26,7 +26,10 @@ public record InterviewSessionResponse(
     String modelName,
     UUID preparationTaskId,
     String safeError,
-    List<InterviewTurnView> turns) {
+    List<InterviewTurnView> turns,
+    boolean recruitment,
+    java.time.Instant answerDeadline,
+    long version) {
   public InterviewSessionResponse {
     turns = List.copyOf(turns);
   }

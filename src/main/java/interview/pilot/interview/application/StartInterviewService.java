@@ -44,6 +44,9 @@ public class StartInterviewService {
     var session = sessions.findForStart(sessionId, ownerId)
         .orElseThrow(() -> new BusinessException(
             "INTERVIEW_NOT_FOUND", "Interview not found", HttpStatus.NOT_FOUND));
+    if (session.isRecruitment()) {
+      throw new BusinessException("HIRING_INVITATION_REQUIRED", "请从面试邀请页面开始或恢复企业面试", HttpStatus.CONFLICT);
+    }
     var existing = turns.findBySessionIdAndTurnNo(session.getId(), 1);
     if (session.getStatus() == SessionStatus.INTERVIEWING && existing.isPresent()) {
       return response(sessionId, existing.get(), true);

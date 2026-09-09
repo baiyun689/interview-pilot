@@ -45,6 +45,7 @@ import interview.pilot.common.ratelimit.RateLimiter;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeBaseJpaRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentJpaRepository;
+import interview.pilot.knowledge.infrastructure.KnowledgeChunkJpaRepository;
 import interview.pilot.voice.infrastructure.QuestionSpeechRepository;
 import interview.pilot.voice.infrastructure.VoiceRecordingRepository;
 
@@ -58,6 +59,7 @@ import interview.pilot.voice.infrastructure.VoiceRecordingRepository;
 })
 @AutoConfigureMockMvc
 class AuthControllerTest {
+  @MockitoBean private interview.pilot.recruitment.infrastructure.HiringStore hiringStore;
   @MockitoBean RedissonClient redissonClient;
   @MockitoBean AiSettingRepository aiSettingRepository;
   @MockitoBean ResumeRepository resumeRepository;
@@ -73,6 +75,7 @@ class AuthControllerTest {
   @MockitoBean RateLimiter rateLimiter;
   @MockitoBean KnowledgeBaseJpaRepository knowledgeBaseJpaRepository;
   @MockitoBean KnowledgeDocumentJpaRepository knowledgeDocumentJpaRepository;
+  @MockitoBean KnowledgeChunkJpaRepository knowledgeChunkJpaRepository;
   @MockitoBean InterviewKnowledgeBaseRepository interviewKnowledgeBaseRepository;
   @MockitoBean VoiceRecordingRepository voiceRecordingRepository;
   @MockitoBean QuestionSpeechRepository questionSpeechRepository;

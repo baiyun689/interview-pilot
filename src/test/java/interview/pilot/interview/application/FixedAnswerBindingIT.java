@@ -181,6 +181,18 @@ class FixedAnswerBindingIT {
 
   // ---------------------------------------------------------------- happy path
 
+  @Test void staleTabCannotApplyItsAnswerToTheNextTurnAndReplayKeepsItsVersion() {
+    var current=sessions.findById(session.getId()).orElseThrow();
+    var request=new SubmitAnswerRequest(UUID.randomUUID(),"缓存回答",InputMode.TEXT,null,current.getCurrentTurnNo(),current.getVersion());
+    submit(request);
+    assertThat(submit(request).idempotentReplay()).isTrue();
+    assertThatThrownBy(()->answers.claim(user,session.getSessionId(),new SubmitAnswerRequest(UUID.randomUUID(),"旧页面回答",InputMode.TEXT,null,current.getCurrentTurnNo(),current.getVersion())))
+        .isInstanceOfSatisfying(BusinessException.class,e->assertThat(e.code()).isEqualTo("ANSWER_VERSION_CONFLICT"));
+    assertThatThrownBy(()->answers.claim(user,session.getSessionId(),new SubmitAnswerRequest(request.requestId(),"缓存回答",InputMode.TEXT,null,current.getCurrentTurnNo()+1,current.getVersion())))
+        .isInstanceOfSatisfying(BusinessException.class,e->assertThat(e.code()).isEqualTo("REQUEST_ID_CONFLICT"));
+    assertThat(turns.findBySessionIdAndTurnNo(session.getId(),2).orElseThrow().getAnswerText()).isNull();
+  }
+
   @Test
   void textSubmissionPersistsTheSubmissionFingerprintAndMarksTheTurnText() {
     var request = new SubmitAnswerRequest(UUID.randomUUID(), "  有效回答  ");

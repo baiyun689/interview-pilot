@@ -12,6 +12,7 @@ export function providerSnapshot(providerId: string, modelName: string) {
 }
 
 export const sessionStatusLabel: Record<string, string> = {
+  CANCELLED: '已终止',
   PREPARING: '题库准备中', READY: '待开始', INTERVIEWING: '面试中',
   EVALUATING: '报告生成中', COMPLETED: '已完成',
   PREPARATION_FAILED: '题库准备失败', EVALUATION_FAILED: '报告生成失败',

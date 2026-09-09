@@ -53,6 +53,7 @@ a:focus-visible {
 }
 
 .sidebar {
+  overflow-y: auto;
   position: sticky;
   top: 0;
   display: flex;
@@ -105,6 +106,11 @@ a:focus-visible {
   display: grid;
   gap: 7px;
 }
+
+.navigation-label { display: block; margin: 10px 14px 5px; color: #94a3b8; font-size: 11px; letter-spacing: .06em; }
+.sidebar { scrollbar-width: thin; scrollbar-color: #334155 transparent; }
+.sidebar .nav-link { min-height: 42px; }
+.navigation-item:first-child .navigation-label { margin-top: 0; }
 
 .nav-link {
   display: flex;
@@ -810,11 +816,18 @@ a:focus-visible {
 
   .navigation {
     display: grid;
-    grid-template-columns: repeat(4, minmax(68px, 1fr));
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(80px, 1fr);
     gap: 5px;
     overflow-x: auto;
     scrollbar-width: none;
   }
+
+  .navigation-label { display: none; }
+  .sidebar-footer { position: absolute; top: 14px; right: 18px; }
+  .sidebar-footer .account-summary { display: none; }
+  .sidebar-footer .logout-button { margin-top: 8px; }
 
   .nav-link {
     flex-direction: column;
@@ -834,6 +847,8 @@ a:focus-visible {
     padding: 34px 18px 64px;
   }
 }
+
+@media (prefers-reduced-motion: reduce) { .nav-link { transition: none; } .nav-link:hover { transform: none; } }
 
 @media (max-width: 680px) {
   .provider-grid {

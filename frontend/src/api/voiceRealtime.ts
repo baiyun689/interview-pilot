@@ -167,8 +167,8 @@ export class VoiceInterviewSocket {
     this.send({ type: 'audio', data: base64Pcm })
   }
 
-  sendControl(action: string, text?: string): void {
-    this.send({ type: 'control', action, ...(text ? { text } : {}) })
+  sendControl(action: string, text?: string, turnNo?: number): void {
+    this.send({ type: 'control', action, ...(text ? { text } : {}), ...(turnNo != null ? {turnNo} : {}) })
   }
 
   private send(payload: Record<string, unknown>): void {

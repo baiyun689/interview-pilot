@@ -2,6 +2,7 @@ package interview.pilot.knowledge.retrieval;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -19,9 +20,8 @@ import interview.pilot.common.observability.AiMetrics;
 import interview.pilot.knowledge.config.KnowledgeProperties;
 
 /**
- * Dense-vector retrieval source backed by the Qdrant {@link VectorStore}. This is the single
- * source wired in today; additional lexical/MCP/web sources implement {@link RetrievalSource} and
- * are fused by the aggregate {@link KnowledgeRetriever}.
+ * Dense-vector retrieval source backed by the Qdrant {@link VectorStore}. Vector mode preserves
+ * the original final ranking; hybrid mode supplies the full candidate pool to RRF.
  */
 @Component
 @ConditionalOnProperty(prefix = "app.knowledge", name = "enabled", havingValue = "true")
@@ -83,7 +83,12 @@ public class QdrantVectorRetrievalSource implements RetrievalSource {
             scored.missingScores(), scope.userId());
       }
 
-      List<KnowledgeChunk> chunks = ranker.rank(
+      List<KnowledgeChunk> chunks = properties.retrieval() == KnowledgeProperties.RetrievalMode.HYBRID
+          ? scored.chunks().stream()
+              .filter(chunk -> chunk.score() >= intent.similarityThreshold())
+              .sorted(Comparator.comparingDouble(KnowledgeChunk::score).reversed())
+              .limit(candidateCount).toList()
+          : ranker.rank(
           scored.chunks(),
           intent.topK(), intent.similarityThreshold(),
           intent.contextCharacterBudget());
@@ -105,7 +110,8 @@ public class QdrantVectorRetrievalSource implements RetrievalSource {
   }
 
   private Filter.Expression buildFilter(ValidatedKnowledgeScope scope) {
-    var userFilter = eq("user_id", scope.userId().toString());
+    var userFilter = scope.organizationId() == null
+        ? eq("user_id", scope.userId().toString()) : eq("organization_id", scope.organizationId().toString());
     var kbFilter = in("knowledge_base_id", scope.knowledgeBaseIds().stream()
         .map(UUID::toString).toList());
 

@@ -29,6 +29,7 @@ import interview.pilot.knowledge.config.KnowledgeProperties;
 import interview.pilot.knowledge.domain.KnowledgeDocumentStatus;
 import interview.pilot.knowledge.infrastructure.KnowledgeBaseEntity;
 import interview.pilot.knowledge.infrastructure.KnowledgeBaseRepository;
+import interview.pilot.knowledge.infrastructure.KnowledgeChunkRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentEntity;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentRepository;
 import interview.pilot.knowledge.storage.KnowledgeDocumentStore;
@@ -40,7 +41,8 @@ class KnowledgeDocumentUploadServiceTest {
     KnowledgeDocumentUploadService service = new KnowledgeDocumentUploadService(
         mock(KnowledgeBaseRepository.class), mock(KnowledgeDocumentRepository.class),
         mock(AsyncTaskRepository.class), mock(KnowledgeDocumentStore.class),
-        mock(PlatformTransactionManager.class), properties(false), Optional.empty());
+        mock(PlatformTransactionManager.class), properties(false), Optional.empty(),
+        mock(KnowledgeChunkRepository.class));
 
     CurrentUser user = new CurrentUser(
         42L, java.util.UUID.randomUUID(), "user@example.com", "User");
@@ -67,7 +69,8 @@ class KnowledgeDocumentUploadServiceTest {
     var documents = mock(KnowledgeDocumentRepository.class);
     KnowledgeDocumentUploadService service = new KnowledgeDocumentUploadService(
         bases, documents, mock(AsyncTaskRepository.class), mock(KnowledgeDocumentStore.class),
-        new TestTransactionManager(), properties(true), Optional.empty());
+        new TestTransactionManager(), properties(true), Optional.empty(),
+        mock(KnowledgeChunkRepository.class));
     when(bases.findByKnowledgeBaseIdAndUserAccountId(baseId, user.databaseId()))
         .thenReturn(Optional.of(base));
     when(documents.findVisibleByKnowledgeBaseIdsAndUserAccountId(
@@ -90,9 +93,11 @@ class KnowledgeDocumentUploadServiceTest {
     var documents = mock(KnowledgeDocumentRepository.class);
     var store = mock(KnowledgeDocumentStore.class);
     var vectorStore = mock(VectorStore.class);
+    var chunks = mock(KnowledgeChunkRepository.class);
     KnowledgeDocumentUploadService service = new KnowledgeDocumentUploadService(
         bases, documents, mock(AsyncTaskRepository.class), store,
-        new TestTransactionManager(), properties(true), Optional.of(vectorStore));
+        new TestTransactionManager(), properties(true), Optional.of(vectorStore),
+        chunks);
     when(bases.findByKnowledgeBaseIdAndUserAccountId(baseId, user.databaseId()))
         .thenReturn(Optional.of(base));
     when(documents.findByDocumentIdWithKnowledgeBase(docId)).thenReturn(Optional.of(document));
@@ -104,6 +109,7 @@ class KnowledgeDocumentUploadServiceTest {
     assertThat(document.getStatus()).isEqualTo(KnowledgeDocumentStatus.DELETED);
     verify(vectorStore).delete(any(org.springframework.ai.vectorstore.filter.Filter.Expression.class));
     verify(store).delete("storage/notes.md");
+    verify(chunks).deleteByDocumentId(docId);
   }
 
   private static KnowledgeBaseEntity base(UUID baseId, Long userAccountId) {

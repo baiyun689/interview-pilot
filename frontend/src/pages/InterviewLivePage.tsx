@@ -157,7 +157,8 @@ export function InterviewLivePage({ env, defaultRealtime = true }: InterviewLive
     const controller = new AbortController(); streamController.current = controller
     const requestId = requestIdForTurn(requestKey, session.currentTurnNo)
     try {
-      await postInterviewAnswerStream(sessionId, { requestId, answer: normalized, inputMode: input.inputMode, recordingId: input.recordingId }, {
+      await postInterviewAnswerStream(sessionId, { requestId, answer: normalized, inputMode: input.inputMode, recordingId: input.recordingId,
+        ...(session.recruitment ? {expectedTurnNo:session.currentTurnNo,sessionVersion:session.version} : {}) }, {
         signal: controller.signal,
         onEvent: (_name, event) => receive(event),
       })
@@ -278,7 +279,8 @@ export function InterviewLivePage({ env, defaultRealtime = true }: InterviewLive
   if (!session && !error) return <p className="page-status" role="status">正在加载面试…</p>
   if (!session) return <section className="state-card"><h1>无法加载面试</h1><ErrorNotice error={error} /></section>
   return <section className="live-page">
-    <header className="interview-session-header"><div><h1>{session.jobTitle}</h1><p>{session.jobSourceType === 'PRESET' ? '预设岗位' : '自定义 JD'} · {session.interviewSize}</p><p>{providerSnapshot(session.providerId, session.modelName)}</p></div><span className="status-chip status-enabled">{sessionStatusLabel[session.status]}</span></header>
+    <header className="interview-session-header"><div><h1>{session.jobTitle}</h1>{session.recruitment ? <p>企业面试</p> : <><p>{session.jobSourceType === 'PRESET' ? '预设岗位' : '自定义 JD'} · {session.interviewSize}</p><p>{providerSnapshot(session.providerId, session.modelName)}</p></>}</div><span className="status-chip status-enabled">{sessionStatusLabel[session.status]}</span></header>
+    {session.recruitment && session.answerDeadline && <p className="hiring-progress">作答截止：{new Date(session.answerDeadline).toLocaleString()}。刷新或离开页面不会暂停计时。</p>}
     <p className="interview-progress">主问题进度 {session.currentMainQuestionNo} / {session.totalMainQuestionCount}</p>
     {session.status === 'PREPARING' && <div className="state-card" role="status"><h2>正在准备完整题库</h2><p>基础、项目和场景题会一次生成并校验。页面每 2 秒自动刷新。</p></div>}
     {session.status === 'PREPARATION_FAILED' && <div className="state-card"><h2>题库准备失败</h2><p>{session.safeError ?? '题库输出未通过校验'}</p><button className="button button-primary" onClick={retryPreparation}>重新准备</button></div>}
@@ -301,9 +303,10 @@ export function InterviewLivePage({ env, defaultRealtime = true }: InterviewLive
           </div>)
         : textAnswerPanel()}
     </div>}
-    {session.status === 'EVALUATING' && <div className="state-card" role="status"><h2>正在生成最终报告</h2><p>评分只在全部问答完成后进行，页面会自动刷新。</p></div>}
-    {session.status === 'EVALUATION_FAILED' && <div className="state-card"><h2>报告生成失败</h2><p>{session.safeError}</p><Link className="button button-primary" to={`/interviews/${session.sessionId}/report`}>前往报告页重试</Link></div>}
-    {(session.status === 'EVALUATING' || session.status === 'EVALUATION_FAILED' || session.status === 'COMPLETED') && <Link className="button button-primary report-link" to={`/interviews/${session.sessionId}/report`}>查看最终报告</Link>}
+    {session.recruitment && session.status !== 'INTERVIEWING' && <div className="state-card"><h2>{session.status === 'CANCELLED' ? '本次面试已终止' : '本次面试作答已结束'}</h2><p>企业审核后会发布反馈，你可以返回面试邀请查看进度。</p><Link to="/candidate/invitations">返回面试邀请</Link></div>}
+    {!session.recruitment && session.status === 'EVALUATING' && <div className="state-card" role="status"><h2>正在生成最终报告</h2><p>评分只在全部问答完成后进行，页面会自动刷新。</p></div>}
+    {!session.recruitment && session.status === 'EVALUATION_FAILED' && <div className="state-card"><h2>报告生成失败</h2><p>{session.safeError}</p><Link className="button button-primary" to={`/interviews/${session.sessionId}/report`}>前往报告页重试</Link></div>}
+    {!session.recruitment && (session.status === 'EVALUATING' || session.status === 'EVALUATION_FAILED' || session.status === 'COMPLETED') && <Link className="button button-primary report-link" to={`/interviews/${session.sessionId}/report`}>查看最终报告</Link>}
   </section>
 }
 

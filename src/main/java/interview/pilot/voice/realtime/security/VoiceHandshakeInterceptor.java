@@ -61,6 +61,8 @@ public class VoiceHandshakeInterceptor implements HandshakeInterceptor {
       return reject(response, "missing session id");
     }
     boolean owned = sessions.findBySessionIdAndUserAccountId(sessionId, user.get().databaseId())
+        .filter(s -> !s.isRecruitment() || (s.getStatus() == interview.pilot.interview.domain.SessionStatus.INTERVIEWING
+            && java.time.Instant.now().isBefore(s.getAnswerDeadline())))
         .isPresent();
     if (!owned) {
       log.warn("Rejected voice WS handshake for session {} not owned by user {}",

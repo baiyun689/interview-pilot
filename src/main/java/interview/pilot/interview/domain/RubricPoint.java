@@ -11,8 +11,8 @@ package interview.pilot.interview.domain;
 public record RubricPoint(String keyPoint, String acceptanceHint, String sourcePointId) {
 
   public RubricPoint {
-    keyPoint = required(keyPoint, 40, "keyPoint");
-    acceptanceHint = required(acceptanceHint, 200, "acceptanceHint");
+    keyPoint = required(keyPoint, 300, "keyPoint");
+    acceptanceHint = required(acceptanceHint, 1000, "acceptanceHint");
     sourcePointId = (sourcePointId == null || sourcePointId.isBlank()) ? null : sourcePointId.trim();
   }
 

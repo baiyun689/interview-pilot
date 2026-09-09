@@ -28,6 +28,37 @@ class QdrantVectorRetrievalSourceTest {
   }
 
   @Test
+  void organizationScopeUsesOrganizationFilterInsteadOfEmployeeIdentity() {
+    when(vectorStore.similaritySearch(org.mockito.ArgumentMatchers.any(SearchRequest.class))).thenReturn(List.of());
+    var personal = scope();
+    source().retrieve(new ValidatedKnowledgeScope(null, personal.knowledgeBaseIds(), personal.documents(), "v3", 321L), intent());
+    var capture = org.mockito.ArgumentCaptor.forClass(SearchRequest.class);
+    org.mockito.Mockito.verify(vectorStore).similaritySearch(capture.capture());
+    String filter = capture.getValue().getFilterExpression().toString();
+    assertThat(filter).contains("organization_id", "321").doesNotContain("user_id");
+  }
+
+  @Test
+  void hybridReturnsFullRankedCandidatePoolBeforeFinalDeduplicationAndBudget() {
+    var defaults = KnowledgeProperties.testDefaults(1, 12, 0.72, 100);
+    var properties = new KnowledgeProperties(
+        defaults.enabled(), defaults.filesRoot(), defaults.chunkSize(), defaults.chunkOverlap(),
+        defaults.batchSize(), defaults.collectionName(), defaults.topK(), defaults.similarityThreshold(),
+        defaults.candidateCount(), defaults.contextCharacterBudget(), defaults.qdrant(), defaults.embedding(),
+        KnowledgeProperties.RetrievalMode.HYBRID);
+    var candidates = List.of(document("p-low", 0.1), document("p2", 0.8), document("p1", 0.95));
+    when(vectorStore.similaritySearch(org.mockito.ArgumentMatchers.any(SearchRequest.class)))
+        .thenReturn(candidates);
+    var source = new QdrantVectorRetrievalSource(vectorStore, properties, metrics, new DefaultKnowledgeRanker());
+    var request = new RetrievalIntent("事务", "backend", "MEDIUM", List.of(), List.of(),
+        1, 12, 0.72, 100);
+    // Test documents have identical text: hybrid must not deduplicate before cross-source voting.
+    assertThat(source.retrieve(scope(), request).chunks()).extracting(KnowledgeChunk::pointId)
+        .containsExactly("p1", "p2");
+    assertThat(source().retrieve(scope(), request).chunks()).hasSize(1);
+  }
+
+  @Test
   void resultsWithoutScoresAreReportedAsUnavailableInsteadOfSilentZero() {
     Document unscored = document("doc-1", null);
     when(vectorStore.similaritySearch(org.mockito.ArgumentMatchers.any(SearchRequest.class)))

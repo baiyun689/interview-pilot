@@ -4,9 +4,14 @@ build/
 *.iml
 .env
 out/
-docs/
+/docs/*
+!/docs/enterprise-interview-v1-plan.md
+!/docs/enterprise-interview-v1-progress.md
+!/docs/hiring-review-notification-guide.md
 .superpowers
 .worktrees/
+.codex-*.log
+.codex-local/
 
 # 本地面试备考材料（个人使用，不提交）
 /INTERVIEW_PREP.md

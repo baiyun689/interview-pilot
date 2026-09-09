@@ -1,6 +1,33 @@
 # InterviewPilot
 
-InterviewPilot 是一个基于 Spring Boot 的 AI 技术面试系统。它能够分析候选人简历，根据固定面试方向（Preset）或自定义岗位 JD 生成结构化题卡，按「自我介绍 → 基础 → 项目经历 → 场景权衡」的固定阶段推进主问题与动态追问，支持文本、录音和实时语音三种作答方式，并在面试完成后异步生成评估报告。
+InterviewPilot 是一个基于 Spring Boot 与 React 的企业面试管理与 AI 辅助评估系统，同时保留个人模拟面试能力。企业可以发布岗位、接收简历投递，结合 JD、简历与企业知识库准备面试题，人工确认后批量下发邀请；候选人安排日程并完成面试，企业结合回答证据和 AI 报告进行人工评审，再独立发布公开反馈。
+
+项目采用单体分模块架构，围绕权限隔离、材料快照、异步任务、并发作答和可靠通知实现业务闭环。AI 负责分析、出题与辅助评估；题目下发和反馈发布由企业人员确认。
+
+## 业务流程与入口
+
+```mermaid
+flowchart LR
+    A[企业发布岗位与 JD] --> B[候选人投递简历]
+    B --> C[岗位证据分析与面试方案]
+    C --> D[批次逐人准备题卡]
+    D --> E[企业审核并下发邀请]
+    E --> F[候选人安排日程与参加面试]
+    F --> G[AI 报告与人工评审]
+    G --> H[预览并发布公开反馈]
+    H --> I[下一轮或结束流程]
+```
+
+| 使用者 | 页面入口 | 主要功能 |
+|---|---|---|
+| 企业管理员 / 招聘人员 | `/enterprise` | 岗位、投递、面试方案、批次、评审、通知记录及团队权限 |
+| 被指派的面试官 | `/enterprise` → 面试与评审 | 查看授权面试的回答证据、保存草稿和提交评审 |
+| 求职者 | `/jobs`、`/candidate/applications` | 浏览开放岗位、投递简历、查看投递状态 |
+| 求职者 | `/candidate/invitations` | 安排面试、下载 ICS 日程、开始或恢复作答、查看公开反馈 |
+| 登录用户 | `/notifications` | 站内通知与已读状态 |
+| 个人练习用户 | `/resumes`、`/interviews/new` | 简历分析、模拟面试及个人报告 |
+
+企业招聘与个人练习使用不同的执行规则和报告可见范围。企业面试按确认后的冻结题卡执行，不追加动态追问；候选人不能直接查看企业内部 AI 报告，只能查看企业明确发布的反馈。
 
 ## 整体架构
 
@@ -11,6 +38,7 @@ flowchart TB
     subgraph L1["接入层"]
         direction LR
         WEB["Web 面试端 · REST/SSE"]
+        HIRING["企业工作台 / 候选人门户"]
         VOICE["语音面试 · WebSocket / MediaRecorder"]
     end
 
@@ -25,6 +53,12 @@ flowchart TB
     subgraph L3["面试核心链路"]
         direction LR
         KB["① 知识库构建"] --> GEN["② 骨架→逐题检索→Rubric 冻结"] --> FLOW["③ 状态机推进"] --> EVAL["④ 答案评估"] --> RPT["⑤ Barrier 聚合报告"]
+    end
+
+    subgraph HR["企业招聘业务"]
+        direction LR
+        JOB["岗位 / 投递快照"] --> BATCH["方案 / 批次 / 人工确认"] --> INVITE["邀请 / 日程 / 冻结执行"] --> REVIEW["人工评审 / 公开反馈"]
+        NOTICE["通知台账 / 租约投递 / SMTP"]
     end
 
     subgraph L4["异步任务总线"]
@@ -43,6 +77,10 @@ flowchart TB
     end
 
     L1 --> L2 --> L3
+    L2 --> HR
+    HR --> L3
+    HR --> L4
+    HR --> L5
     L3 <-->|"Outbox 登记 / 异步回写"| L4
     L3 --> L5
     L4 --> L5
@@ -53,55 +91,101 @@ flowchart TB
 
 ## 项目展示
 
-### 开始面试
+以下企业招聘截图来自本地实际运行页面，使用「星程科技（演示）」和合成候选人数据。截图日期：2026-09-09。操作步骤见[评审与通知指南](docs/hiring-review-notification-guide.md)。
 
-可选择候选人简历、面试方向、岗位要求、难度、面试规模（Quick/Standard/Deep）、模型和知识库，创建一场可追溯的结构化面试。
+### 开放岗位
 
-![开始面试：配置岗位、模型和知识库](assets/images/interview-create.png)
+岗位以卡片呈现，集中展示公司、岗位名称、地点与工作类型；通过明确的「查看岗位」按钮进入详情和投递流程。
 
-### 简历分析
+![开放岗位：岗位卡片、信息分区与查看岗位按钮](assets/images/hiring-jobs.png)
 
-对上传的简历进行多维度评分，并给出内容、技能和项目经历等高优先级优化建议。
+### 企业招聘工作台
+
+在企业空间内管理岗位及发布版本，并进入投递、面试方案、批次和岗位授权；评审、通知与团队管理集中在同一工作区。
+
+![企业招聘工作台：岗位管理与业务导航](assets/images/hiring-enterprise.png)
+
+### 面试批次与逐人准备
+
+按已发布方案为候选人准备题目，查看准备与确认数量，逐人预览题卡。企业确认后下发邀请，并查看候选人的日程状态。
+
+![面试批次：三名候选人的题目准备、确认与邀请状态](assets/images/hiring-campaign.png)
+
+### AI 辅助评估
+
+企业查看面试总结、参考分数、优势与待核实问题，并结合逐题回答证据开展评审。AI 结果作为人工判断的参考。
+
+![AI 评估参考：面试总结、优势与待核实问题](assets/images/hiring-ai-review.png)
+
+### 人工评审
+
+评审人员按维度填写评价、引用回答证据并记录内部评语。草稿可继续编辑，正式提交保留历史修订；候选人反馈在独立区域预览和发布。
+
+![人工评审：评价维度、回答证据引用与内部评语](assets/images/hiring-human-review.png)
+
+### 候选人日程与公开反馈
+
+候选人在面试邀请中查看安排、下载日历和回看作答记录。企业发布反馈后，这里展示公开内容、下一步决定和发布版本。
+
+![候选人面试邀请：日历入口与企业已发布反馈](assets/images/hiring-candidate-feedback.png)
+
+### 通知与邮件记录
+
+企业查看日程更新及面试提醒的投递状态与尝试次数。本地截图中的「邮件服务商已接收」来自测试 SMTP 接收器，不代表外部邮箱已送达。
+
+![通知投递记录：待发送提醒与邮件接收状态](assets/images/hiring-notifications.png)
+
+<details>
+<summary>展开个人练习与通用能力截图</summary>
+
+以下为此前版本的个人练习界面截图。
+
+#### 简历分析
+
+对简历进行结构化分析，展示评分与内容、技能、项目经历方面的改进建议。
 
 ![简历分析：评分与优化建议](assets/images/resume-analysis.png)
 
-### 面试记录
+#### 创建个人模拟面试
 
-集中展示每场面试的方向、模型、难度、当前进度与创建时间，并支持继续未完成的面试。
+选择简历、面试方向、岗位要求、难度、模型和知识库，创建结构化练习。
 
-![面试记录：会话列表与进度](assets/images/interview-history.png)
+![开始面试：配置岗位、模型和知识库](assets/images/interview-create.png)
 
-### 知识库
+#### 知识库
 
-支持创建知识库、上传 PDF/TXT/Markdown 文档、查看索引状态和分段数量，并可对文档重建索引或删除。
+上传文档、查看索引状态和分段数量，并支持重建索引。
 
 ![知识库：文档上传与索引管理](assets/images/knowledge-base.png)
 
-### 模型设置
+#### 实时语音
 
-统一管理可用大模型 Provider，查看启用状态、测试连接，并切换后续面试使用的默认模型。
+流式转写实时回显，用户手动确认后提交回答；支持语音播报和录音转写兜底。
 
-![模型设置：Provider 管理与默认模型切换](assets/images/model-settings.png)
+![语音面试：实时对话与手动确认提交](assets/images/interview-voice-realtime.png)
 
-### 面试过程
+#### 个人面试报告
 
-面试官按题卡依次提出主问题，并结合候选人回答与 RAG 上下文动态生成追问；固定流程策略依据主问题数量与每卡追问配额决定继续追问、进入下一主问题或结束面试。
+练习结束后查看综合评分、能力维度、优势与改进方向。企业内部报告采用独立的可见范围。
 
-![面试过程：问题、回答与动态反馈](assets/images/interview-session.png)
+![个人面试报告：综合评分与能力评估](assets/images/interview-report.png)
 
-### 语音面试
-
-实时语音对话保持一条 WebSocket：流式识别内容实时回显但不会自动发送，候选人说完点「提交回答」手动确认；面试官以语音播报下一题，中央状态球用动态话筒/声波呈现聆听、思考与播报状态，并可随时回退到录音转写模式。
-
-![语音面试：实时对话、状态动效与手动确认提交](assets/images/interview-voice-realtime.png)
-
-### 面试报告
-
-面试结束后生成综合评分、能力维度、优势与改进方向，帮助候选人定位后续学习重点。
-
-![面试报告：综合评分与能力评估](assets/images/interview-report.png)
+</details>
 
 ## 功能特性
+
+### 企业招聘
+
+- 企业、成员角色与岗位授权；企业知识库和业务数据按归属隔离。
+- 岗位发布版本、简历投递快照、撤回与显式重新投递；历史材料不随后续修改改变。
+- 基于 JD 和简历的异步岗位证据分析，面试方案发布后保留不可变版本。
+- 面试批次逐人准备公共题与定制题，保留评分依据和知识引用，支持人工调整、逐人确认及部分下发。
+- 邀请确认、拒绝、取消、窗口内安排和改期，支持 ICS 日程下载；变更后需重新导入日历。
+- 邀请绑定唯一面试会话，按冻结题卡作答，支持断线恢复、截止时间与超时收尾。
+- 人工评审指派、不完整草稿、不可变提交修订及历史查询；公开反馈独立预览和版本化发布。
+- 站内通知、SMTP 邮件及默认提前 24 小时 / 1 小时提醒；支持过时提醒跳过、发送记录和有限重试。
+
+### 个人练习与通用能力
 
 - 支持 TXT、PDF、DOCX 简历上传、文本提取和结构化分析。
 - 内置 Java 后端、Python 后端、前端、AI Agent、测试开发、算法、系统设计和自定义岗位 8 个面试 Skill。
@@ -114,13 +198,16 @@ flowchart TB
 - 语音面试支持实时对话（单条 WebSocket、流式 ASR、服务端 VAD 自动断句、实时字幕、候选人手动确认提交、实时 TTS）与 MediaRecorder 录音转写两种模式，实时作答复用同一套回合引擎与幂等控制。
 - 提供面试历史、报告查询、模型切换、健康检查、指标和 Trace ID。
 
-当前未实现计费、面试预约和导出。知识库/RAG 需要显式开启 `KNOWLEDGE_ENABLED=true` 并配置 Embedding API Key；语音面试通过 `VOICE_ENABLED=true` 开启（实时 WebSocket 对话默认随之一并启用，录音转写作为兜底）。
+知识库/RAG 需要显式开启 `KNOWLEDGE_ENABLED=true` 并配置 Embedding API Key；混合检索使用 `KNOWLEDGE_RETRIEVAL=hybrid`。语音面试通过 `VOICE_ENABLED=true` 开启，实时对话与录音转写均要求候选人确认答案。
+
+当前企业招聘主流程已接通，完整 V1 仍有独立题库、超出窗口的改期审批、配额及运维压测等待办；计费和通用报告导出未实现。范围与进度见[实施方案](docs/enterprise-interview-v1-plan.md)和[实施进度](docs/enterprise-interview-v1-progress.md)。
 
 ## 技术栈
 
 - 后端：Java 21、Spring Boot 4、Spring MVC、WebSocket、Spring Data JPA、Hibernate、Flyway、Spring AI
 - 数据库：MySQL 8.4
 - 消息队列：RabbitMQ 4
+- 邮件：Spring Boot Mail、SMTP，MySQL 通知台账与发送租约
 - 向量库：Qdrant
 - 语音：DashScope 实时 ASR/TTS（Qwen3-Realtime，WebSocket），MediaRecorder 非实时转写兜底
 - 缓存与并发协调：Redis 7.4、Redisson
@@ -133,11 +220,11 @@ flowchart TB
 
 ### MySQL 作为业务事实来源
 
-MySQL 持久化简历、分析结果、岗位要求、Skill 快照、面试计划、会话、轮次、回答尝试、报告和异步任务状态。Redis 标记和 RabbitMQ 消息只承担协调职责，消费者处理任务前始终重新检查 MySQL 状态。
+MySQL 持久化简历、分析结果、岗位要求、Skill 快照、面试计划、会话、轮次、回答尝试、报告和异步任务状态，同时保存企业、投递、批次邀请、评审修订、公开反馈和通知台账。Redis 标记和 RabbitMQ 消息只承担协调职责，消费者处理任务前始终重新检查 MySQL 状态。
 
 Skill、Provider、Model 和 InterviewPlan 都会在创建面试时生成不可变快照。即使之后修改默认模型或 Skill 文件，已经开始的面试仍使用创建时的版本。
 
-### 固定面试流程与受控的 AI 输出
+### 个人练习流程与受控的 AI 输出
 
 题卡在出题阶段由结构化模型一次性生成；运行期的题目推进不交给模型，而由纯 Java 的 `FixedInterviewFlowPolicy` 决策，模型不直接改写业务状态。其规则如下：
 
@@ -157,6 +244,16 @@ Skill、Provider、Model 和 InterviewPlan 都会在创建面试时生成不可�
 - 只有持有当前版本的处理者能够完成轮次、创建下一题或触发报告任务。
 - SSE 连接断开不会自动重复提交；前端先通过 GET 恢复持久化状态，再由用户显式发起新的重试。
 
+企业面试的新作答请求还必须携带 `expectedTurnNo` 和 `sessionVersion`，并纳入幂等指纹，防止旧标签页把回答写入新题。实时语音绑定实际下发的题目版本，在处理队列中再次校验识别代次，丢弃重复确认及迟到转写。
+
+企业写操作按统一顺序加锁，评审草稿和反馈发布分别校验版本；同一版本并发发布只允许一个请求成功，旧轮次不能覆盖已进入后续轮次的流程结果。
+
+### 人工评审与可靠通知
+
+企业内部回答、AI 评估、冻结评分依据及知识证据仅向授权人员开放。面试官需要逐场指派；管理员或授权招聘人员才能选择已提交的评审修订，另行填写并发布候选人反馈。评审历史与公开反馈分别存储，候选人接口不返回内部评语和评分依据。
+
+通知与业务变更在同一事务写入 MySQL。邮件在独立后台线程中发送，以唯一事件键去重，并通过领取令牌和租约协调多实例。旧日程或已结束邀请的提醒会被跳过；明确连接失败有限重试，超时或发送中断标记为 `UNKNOWN`，不自动重发。SMTP 接受不等于邮件已被阅读，站内已读独立记录。
+
 ### 事务与模型调用边界
 
 耗时的大模型调用不会占用数据库事务：
@@ -173,7 +270,13 @@ Skill、Provider、Model 和 InterviewPlan 都会在创建面试时生成不可�
 
 ### 知识库与 RAG
 
-知识库文档上传后会先进入 `PROCESSING`，后台任务负责解析文件、切分文本、写入 Qdrant，并在成功后标记为 `READY`。文档列表会返回 `PENDING`、`PROCESSING`、`READY`、`FAILED`、`DELETING` 等可见状态，前端会对索引中的文档轮询刷新。
+知识库文档上传后会先进入 `PROCESSING`，后台任务负责解析文件、切分文本，先将分块写入 MySQL 的 `knowledge_chunk` 表，再向量化写入 Qdrant，并在成功后标记为 `READY`。两路使用相同的确定性分块 ID，失败重试可以幂等重放。文档列表会返回 `PENDING`、`PROCESSING`、`READY`、`FAILED`、`DELETING` 等可见状态，前端会对索引中的文档轮询刷新。
+
+检索默认使用 `KNOWLEDGE_RETRIEVAL=vector`，保持原有单路向量检索行为。设为 `hybrid` 后，增加 MySQL 原生 ngram FULLTEXT 词法召回：优先使用题目检索关键词，没有有效关键词时使用查询文本；两路结果按分块 ID 通过 RRF（`k=60`）融合，再统一做近似去重、Top-K 和字符预算裁剪。不引入 ES、重排模型或新中间件。
+
+混合检索只比较各路候选排名，不直接比较 FULLTEXT 与向量原始分数。返回的融合分数按理论最大值归一到 `[0,1]`，仅用于排序；向量相似度阈值仍只约束向量候选，不过滤词法候选或融合结果。任一路失败时仍可使用另一路的命中；没有命中且存在失败时返回 `UNAVAILABLE`。
+
+升级后，已有文档不会自动生成 MySQL 分块镜像。需要词法召回的历史文档应在知识库页面执行「重建索引」，完成后创建新面试使用新版本；已有面试继续使用冻结的文档版本，未有镜像的旧版本仍可走向量召回。切回 `vector` 只需修改配置并重启应用，分块双写会继续保留。
 
 创建面试时如果选择知识库，系统只会把当前 `READY` 文档纳入召回范围；每轮生成题目或评估答案前都会按用户、知识库、文档和索引版本过滤召回结果，避免跨用户、跨知识库或旧版本内容进入上下文。删除文档会清理文件和向量，并把旧索引消息视为终态，避免晚到消息反复重试。
 
@@ -206,6 +309,8 @@ Redis 不保存面试业务事实。即使锁或标记因异常丢失，MySQL �
 项目已经包含 Gradle Wrapper，不需要全局安装 Gradle。
 
 ### 使用 Docker Compose 启动
+
+先按下方[配置说明](#配置说明)创建 `.env`，设置数据库凭据、JWT 密钥和至少一个模型 Provider，再启动：
 
 ```bash
 docker compose up -d --build
@@ -271,7 +376,7 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-Vite 会将 `/api` 代理到 `localhost:8080`。Spring Boot 会读取项目根目录中可选的 `.env` 文件。
+前端默认访问 `http://localhost:5173`，Vite 会将 `/api` 代理到 `localhost:8080`。Spring Boot 会读取项目根目录中可选的 `.env` 文件。本地启用知识库时，还需启动并向宿主机映射 Qdrant 的 gRPC 端口（默认 `6334`）；Compose 中的 Qdrant 默认仅在容器网络内开放。
 
 ## 配置说明
 
@@ -287,7 +392,7 @@ Windows PowerShell 可以使用：
 Copy-Item .env.example .env
 ```
 
-修改 `.env` 中的数据库、RabbitMQ 密码，并至少启用一个模型 Provider。不要提交 `.env`。
+修改 `.env` 中的数据库、RabbitMQ 密码，生成并填写 `JWT_HMAC_SECRET`，并至少启用一个模型 Provider。不要提交 `.env`，也不要覆盖已有配置。
 
 每个 Provider 都有以下配置：
 
@@ -315,13 +420,33 @@ Compose 使用非 `guest` RabbitMQ 用户 `interview_pilot`。RabbitMQ 默认限
 - `DASHSCOPE_EMBEDDING_API_KEY=你的 DashScope Key`
 - Qdrant 连接配置，Docker Compose 默认使用内置 `qdrant` 服务
 
+### 企业面试与邮件配置
+
+企业招聘接口随应用启用；邮件通道默认关闭，站内通知仍可使用。数据库通过 Flyway 自动迁移，当前包含 V33 的评审与通知表；升级现有数据库应追加迁移，不修改已应用的脚本。
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `HIRING_MAX_BATCH_MEMBERS` | `200` | 单个批次成员上限 |
+| `HIRING_EVIDENCE_RETENTION_DAYS` | `90` | 硬截止后冻结知识证据保留天数 |
+| `HIRING_MAIL_ENABLED` | `false` | 是否启用邮件发送 |
+| `HIRING_MAIL_FROM` | `interview-pilot@example.test` | 发件地址，实际发送时按 SMTP 服务配置 |
+| `HIRING_PUBLIC_BASE_URL` | `http://localhost:5173` | 邮件中的页面入口，需与访问地址一致 |
+| `HIRING_REMINDER_HOURS` | `24,1` | 面试开始前的提醒时间，单位小时 |
+| `SMTP_HOST` / `SMTP_PORT` | `localhost` / `1025` | SMTP 服务器地址与端口 |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | 空 | SMTP 认证凭据 |
+| `SMTP_AUTH` / `SMTP_STARTTLS` | `false` | 认证与 STARTTLS 开关，按服务商要求设置 |
+
+本地联调可先运行 `node scripts/local-mail-sink.mjs`，再将 `HIRING_MAIL_ENABLED=true` 后启动后端。接收器仅监听 `127.0.0.1:1025`，仅接受 `.test` 测试邮箱，邮件写入 `.codex-local/mail`，不向外转发。
+
+上述变量可由本地 `bootRun` 读取 `.env`。当前 Compose 的 `app.environment` 尚未枚举 `HIRING_*` 和 `SMTP_*`；容器部署启用邮件时，需要在 Compose 配置或覆盖文件中显式传入这些变量，并使用容器可访问的 SMTP 地址。仅修改宿主机 `.env` 不会自动传入这些新增变量。详细步骤与投递状态说明见[评审与通知指南](docs/hiring-review-notification-guide.md)。
+
 ## 语音面试（Voice Interview）
 
 语音面试提供两种模式，均由 `VOICE_ENABLED` 总开关控制，关闭时文字面试完全不受影响。
 
 ### 实时对话模式（默认）
 
-开启语音后默认使用实时对话：浏览器与后端保持**一条 WebSocket**（`/ws/voice-interview/{sessionId}`，握手通过 `?token=` 携带 JWT 并校验会话归属）。麦克风采集 16kHz/16bit 单声道 PCM，以 100ms 一帧持续上行；后端转发 DashScope 实时 ASR（`qwen3-asr-flash-realtime`，服务端 VAD 静音 800ms 仅用于自动断句），partial/final 文本作为实时字幕持续回显并在服务端累积，**默认不会自动提交**——候选人确认内容后点「提交回答」（前端发送 `submit` 控制帧，并可携带最后尚未落定的半句），后端才以 `VOICE_REALTIME` 模式交给同一套回合引擎（claim/process），再由实时 TTS（`qwen3-tts-flash-realtime`）整段合成 24kHz PCM、封 WAV 经同一连接回推播放。如需「停顿后自动发送」，可设 `app.voice.realtime.conversation.auto-submit=true` 恢复。
+开启语音后默认使用实时对话：浏览器与后端保持**一条 WebSocket**（`/ws/voice-interview/{sessionId}`，握手通过 `?token=` 携带 JWT 并校验会话归属）。麦克风采集 16kHz/16bit 单声道 PCM，以 100ms 一帧持续上行；后端转发 DashScope 实时 ASR（`qwen3-asr-flash-realtime`，服务端 VAD 静音 800ms 仅用于自动断句），partial/final 文本作为实时字幕持续回显并在服务端累积，**默认不会自动提交**——候选人确认内容后点「提交回答」（前端发送 `submit` 控制帧，并可携带最后尚未落定的半句），后端才以 `VOICE_REALTIME` 模式交给同一套回合引擎（claim/process），再由实时 TTS（`qwen3-tts-flash-realtime`）整段合成 24kHz PCM、封 WAV 经同一连接回推播放。个人练习如需「停顿后自动发送」，可设 `app.voice.realtime.conversation.auto-submit=true`；企业面试始终要求手动确认。
 
 实时链路为**半双工**：AI 播报期间抑制麦克风上行并设置冷却时间以避免回声；连接空闲 4 分 30 秒提醒、5 分钟关闭。实时模式复用录音模式的总开关与同一把 `DASHSCOPE_SPEECH_API_KEY`，不引入独立凭据；细项通过 `app.voice.realtime.*` 配置且均有默认值（路径、ASR/TTS 模型、VAD、提交方式、空闲时长、单帧上限等），一般无需调整，其中 `conversation.auto-submit` 默认 `false`（手动确认提交），`conversation.debounce-ms` 仅在自动提交模式下生效。
 
@@ -372,6 +497,8 @@ RabbitMQ worker 内执行；确认后的文本才是领域事实，报告只使�
 4. `GET /api/interviews/{sessionId}/voice-recordings/{recordingId}` 轮询：`READY` 后返回 `rawTranscript`（可编辑）与 `retryable` 标志。
 5. `POST /api/interviews/{sessionId}/answers/stream` 提交 `{requestId, answer, inputMode: "VOICE", recordingId}`，SSE 流程与文字一致；转写确认/修改后的文本就是答案正文。
 6. `GET /api/interviews/{sessionId}/speech/{speechId}/media` 支持 HTTP Range（206/416），供浏览器音频播放；`POST .../speech/retry` 手动重试合成。
+
+企业邀请创建的面试在第 5 步还需提交 `expectedTurnNo` 和 `sessionVersion`。实时语音控制消息携带实际收到的题目 `turnNo`；企业面试始终要求手动确认转写。
 
 ### 失败与降级
 
@@ -457,6 +584,28 @@ curl -sS -X POST https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-
 
 ## 使用与 API 流程
 
+### 企业招聘流程
+
+1. 企业在 `/enterprise` 创建岗位并发布；求职者在 `/jobs` 选择岗位，上传或选择简历后投递。
+2. 企业查看冻结的投递材料，发起岗位证据分析，编辑并发布面试方案。
+3. 在岗位下创建面试批次，逐人等待题卡准备完成，查看题目、评分依据和来源，人工确认后下发邀请。
+4. 求职者在 `/candidate/invitations` 安排时间、下载 ICS，在允许的时间范围内开始或恢复面试。
+5. 面试结束生成内部 AI 报告，企业在“面试与评审”中指派评审、保存草稿并提交评审修订。
+6. 授权人员单独填写、预览并发布反馈；求职者通过通知中心或邀请详情查看公开内容。进入下一轮时，由企业创建新的面试批次。
+
+主要接口按企业及邀请归属鉴权，入口代码：
+
+- [企业与团队](src/main/java/interview/pilot/recruitment/api/OrganizationController.java)
+- [岗位与投递管理](src/main/java/interview/pilot/recruitment/api/RecruitmentController.java)
+- [公开岗位与候选人投递](src/main/java/interview/pilot/recruitment/api/CandidateRecruitmentController.java)
+- [岗位分析与面试方案](src/main/java/interview/pilot/recruitment/api/HiringAssessmentController.java)
+- [批次准备与下发](src/main/java/interview/pilot/recruitment/api/HiringCampaignController.java)
+- [邀请、日程与执行](src/main/java/interview/pilot/recruitment/api/HiringInvitationController.java)
+- [人工评审与反馈](src/main/java/interview/pilot/recruitment/api/HiringReviewController.java)
+- [通知与邮件重试](src/main/java/interview/pilot/recruitment/api/HiringNotificationController.java)
+
+### 个人练习流程
+
 1. 调用 `POST /api/resumes` 上传 TXT、PDF 或 DOCX 简历。响应包含持久化分析任务 ID；标准化内容相同的重复简历会返回已有简历和任务。
 2. 轮询 `GET /api/tasks/{taskId}`，或查询 `GET /api/resumes/{id}`，直到简历状态变为 `READY`。
 3. 可选：调用 `POST /api/knowledge-bases` 创建知识库，`POST /api/knowledge-bases/{id}/documents` 上传文档，再轮询 `GET /api/knowledge-bases/{id}/documents`，直到需要使用的文档变为 `READY`。
@@ -485,14 +634,14 @@ curl -sS -X POST https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-
 
 ```bash
 ./gradlew test
-./gradlew test --tests interview.pilot.e2e.InterviewJourneyIT
+./gradlew test --tests interview.pilot.recruitment.HiringCampaignIT
 ```
 
 Windows PowerShell：
 
 ```powershell
 .\gradlew.bat test
-.\gradlew.bat test --tests interview.pilot.e2e.InterviewJourneyIT
+.\gradlew.bat test --tests interview.pilot.recruitment.HiringCampaignIT
 ```
 
 前端测试与构建：
@@ -511,33 +660,42 @@ docker compose config
 git diff --check
 ```
 
-当前已验证：
+最近一次完整回归（2026-09-09）：
+
+- 后端 149 个测试套件、806 项：796 通过、10 跳过，0 失败 / 错误。
+- 前端 19 个测试文件、156 项全部通过，TypeScript 编译和生产构建通过。
+- 本地实际走通岗位投递、批次确认下发、候选人作答、真实模型报告、人工评审、公开反馈和测试 SMTP 接收。候选人访问企业内部报告仍返回 403。
+- 邮件仅在本地接收器验证，未发送外部邮件；本轮语音并发由自动化模拟验证，未额外调用真实 ASR。
+
+其他已有验证：
 
 - 前端组件与自定义 Hook（含实时语音面板、录音、SSE）测试通过，TypeScript 编译和生产构建成功。
 - Skill Catalog、中文 Prompt、面试创建和 AI Gateway 等相关单元测试通过。
 - 基于 Testcontainers 的面试创建持久化、并发答题和 RabbitMQ 报告处理集成测试通过。
 - `bootJar` 构建、`docker compose config` 和 `git diff --check` 通过。
 
-核心业务旅程测试使用 WireMock 支撑的测试 Gateway 替代真实模型，能够在没有 API Key 的情况下验证 Prompt 分类、服务编排、状态流转和持久化：
-
-[InterviewJourneyIT](src/test/java/interview/pilot/e2e/InterviewJourneyIT.java)
-
-该测试不覆盖 HTTP Controller、SSE 传输、RabbitMQ Listener/Dispatcher 和真实 `SpringAiGateway`，这些边界由独立测试覆盖。
+自动化测试使用模型替身或 WireMock 验证服务编排与外部调用边界；企业招聘集成测试使用真实 MySQL 容器验证事务、权限、状态流转及并发行为。运行 Testcontainers 测试需要可用的 Docker 环境。测试通过不代表真实模型质量、外部邮件送达率或生产负载已经验收。
 
 项目不对 QPS、延迟、用户量、成本节省或生产使用情况作未经测量的声明。
 
 重点测试：
 
-- [回答并发与幂等](src/test/java/interview/pilot/interview/application/SubmitAnswerConcurrencyIT.java)
+- [回答并发与幂等](src/test/java/interview/pilot/interview/application/FixedAnswerBindingIT.java)
 - [RabbitMQ 重试与死信](src/test/java/interview/pilot/async/messaging/RabbitRetryIT.java)
-- [知识库上传、索引与召回](src/test/java/interview/pilot/knowledge/retrieval/QdrantKnowledgeRetrieverIT.java)
+- [Qdrant 向量召回与范围隔离](src/test/java/interview/pilot/knowledge/retrieval/QdrantVectorRetrievalSourceIT.java)
 - [简历分析 Listener](src/test/java/interview/pilot/async/resume/ResumeAnalysisListenerIT.java)
-- [报告 Listener](src/test/java/interview/pilot/async/report/InterviewReportListenerIT.java)
+- [报告 Listener](src/test/java/interview/pilot/async/report/InterviewReportListenerTest.java)
 - [固定流程策略](src/test/java/interview/pilot/interview/domain/FixedInterviewFlowPolicyTest.java)
 - [回答服务与 SSE 编排](src/test/java/interview/pilot/interview/application/FixedAnswerServiceTest.java)
+- [企业权限、投递快照与并发](src/test/java/interview/pilot/recruitment/RecruitmentFoundationIT.java)
+- [批次、邀请执行、评审与通知](src/test/java/interview/pilot/recruitment/HiringCampaignIT.java)
+- [邮件异常与重试分类](src/test/java/interview/pilot/recruitment/HiringNotificationWorkerTest.java)
 
 ## 常见问题
 
+- **候选人看不到企业面试报告：** 企业内部 AI 报告按权限隔离。授权招聘人员需在“面试与评审”单独发布反馈，候选人才可在邀请详情查看。
+- **邮件没有发送：** 检查邮件通道开关和企业“通知记录”。`DISABLED` 表示通道未启用；`UNKNOWN` 表示结果不确定，人工确认后才重试。容器运行时还需确认 SMTP 配置已显式传入 `app`。
+- **改期后日历没有更新：** ICS 是下载导入方式，需要重新下载并导入；不是日历账号实时同步。
 - **没有可用模型：** 为至少一个 Provider 设置非空 API Key 和 `*_ENABLED=true`，并让 `AI_DEFAULT_PROVIDER` 使用相同 ID。Provider Client 在启动时组装，修改后需要重启 App。
 - **启动时提示 LLM Lease 无效：** 增大 `LLM_LEASE`，或降低已启用 Provider 的超时时间。Lease 必须大于最长超时时间的两倍。
 - **App 一直处于 unhealthy：** 查看 `docker compose logs app mysql redis rabbitmq`。Actuator 会检查基础设施健康状态，凭据错误或依赖不可用都会让 App 保持不健康。

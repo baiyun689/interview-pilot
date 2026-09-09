@@ -33,8 +33,11 @@ public class KnowledgeBaseEntity {
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
 
-  @Column(name = "user_account_id", nullable = false)
+  @Column(name = "user_account_id")
   private Long userAccountId;
+
+  @Column(name = "organization_id")
+  private Long organizationId;
 
   @UuidGenerator
   @JdbcTypeCode(SqlTypes.CHAR)
@@ -70,6 +73,13 @@ public class KnowledgeBaseEntity {
 
   public void beginDeletion() {
     status = KnowledgeBaseStatus.DELETING;
+  }
+
+  public static KnowledgeBaseEntity forOrganization(Long organizationId, String name) {
+    var base = new KnowledgeBaseEntity();
+    base.organizationId = Objects.requireNonNull(organizationId, "organizationId");
+    base.name = requireText(name, "name"); base.status = KnowledgeBaseStatus.ACTIVE;
+    return base;
   }
 
   private static String requireText(String value, String field) {

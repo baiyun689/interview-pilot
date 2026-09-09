@@ -25,6 +25,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import interview.pilot.auth.infrastructure.UserAccountEntity;
 import interview.pilot.auth.infrastructure.UserAccountRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeBaseEntity;
+import interview.pilot.knowledge.infrastructure.KnowledgeChunkRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentEntity;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentRepository;
 import interview.pilot.knowledge.storage.KnowledgeDocumentStore;
@@ -38,6 +39,7 @@ class KnowledgeIndexerTest {
     RecursiveTextSplitter splitter = mock(RecursiveTextSplitter.class);
     UserAccountRepository users = mock(UserAccountRepository.class);
     VectorStore vectorStore = mock(VectorStore.class);
+    KnowledgeChunkRepository chunkRepository = mock(KnowledgeChunkRepository.class);
 
     Long accountId = 42L;
     UserAccountEntity account = UserAccountEntity.register(
@@ -62,6 +64,7 @@ class KnowledgeIndexerTest {
 
     KnowledgeIndexer indexer = new KnowledgeIndexer(
         documents, store, parser, splitter, users, Optional.of(vectorStore),
+        chunkRepository,
         "text-embedding-v3");
 
     int chunks = indexer.index(documentId, 1);
@@ -69,6 +72,7 @@ class KnowledgeIndexerTest {
     org.mockito.ArgumentCaptor<List<Document>> captured =
         org.mockito.ArgumentCaptor.forClass(List.class);
     verify(vectorStore).add(captured.capture());
+    verify(chunkRepository).replaceRevision(eq(documentId), eq(1), any());
     assertThat(chunks).isEqualTo(2);
     assertThat(captured.getValue()).hasSize(2);
     assertThat(captured.getValue()).allSatisfy(chunk -> {
@@ -102,7 +106,8 @@ class KnowledgeIndexerTest {
         .orElseThrow();
     document.beginReindex();
     KnowledgeIndexer indexer = new KnowledgeIndexer(
-        documents, store, parser, splitter, users, Optional.empty(), "text-embedding-v3");
+        documents, store, parser, splitter, users, Optional.empty(),
+        mock(KnowledgeChunkRepository.class), "text-embedding-v3");
 
     assertThatThrownBy(() -> indexer.index(documentId, 1))
         .isInstanceOf(IllegalStateException.class)

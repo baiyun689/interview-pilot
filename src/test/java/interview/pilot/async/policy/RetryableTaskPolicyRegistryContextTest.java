@@ -31,7 +31,7 @@ class RetryableTaskPolicyRegistryContextTest {
       var registry = context.getBean(RetryableTaskPolicyRegistry.class);
       assertThat(registry.registeredTypes())
           .containsExactlyInAnyOrder(AsyncTaskType.values());
-      assertThat(context.getBeansOfType(RetryableTaskPolicy.class)).hasSize(8);
+      assertThat(context.getBeansOfType(RetryableTaskPolicy.class)).hasSize(AsyncTaskType.values().length);
     });
   }
 

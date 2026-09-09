@@ -2,6 +2,7 @@ package interview.pilot.async.domain;
 
 public enum AsyncTaskType {
   RESUME_ANALYSIS,
+  HIRING_WORK,
   INTERVIEW_QUESTION_PREPARATION,
   INTERVIEW_EVALUATION,
   ANSWER_EVALUATION,

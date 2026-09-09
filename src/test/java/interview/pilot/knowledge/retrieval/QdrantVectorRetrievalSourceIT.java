@@ -126,6 +126,12 @@ class QdrantVectorRetrievalSourceIT {
   private KnowledgeIndexHandler indexHandler;
 
   @Autowired
+  private interview.pilot.knowledge.infrastructure.KnowledgeChunkJpaRepository chunkJpa;
+
+  @Autowired
+  private interview.pilot.knowledge.infrastructure.KnowledgeChunkRepository chunks;
+
+  @Autowired
   private KnowledgeDocumentRepository documents;
 
   @Autowired
@@ -224,12 +230,47 @@ class QdrantVectorRetrievalSourceIT {
     assertThat(outcome).isEqualTo(KnowledgeIndexHandler.Outcome.TERMINAL);
     assertThat(indexed.getStatus()).isEqualTo(KnowledgeDocumentStatus.READY);
     assertThat(indexed.getChunkCount()).isPositive();
+    assertThat(chunkJpa.countByDocumentIdAndIndexRevision(
+        uploaded.documentId(), indexed.getActiveIndexRevision()))
+        .as("lexical chunks are double-written alongside Qdrant for the active revision")
+        .isEqualTo(indexed.getChunkCount());
     assertThat(result.status()).isEqualTo(RetrievalStatus.RETRIEVED);
     assertThat(result.chunks())
         .anySatisfy(chunk -> {
           assertThat(chunk.documentId()).isEqualTo(uploaded.documentId());
           assertThat(chunk.content()).contains("REQUIRES_NEW");
         });
+
+    var intent = new RetrievalIntent("REQUIRES_NEW transaction propagation", "backend", "MEDIUM",
+        List.of("REQUIRES_NEW"), List.of(), 5, 0.5);
+    var keyword = new KeywordRetrievalSource(chunks);
+    var lexical = keyword.retrieve(scope, intent);
+    assertThat(lexical.status()).isEqualTo(RetrievalStatus.RETRIEVED);
+    assertThat(lexical.chunks()).extracting(KnowledgeChunk::pointId)
+        .containsAnyElementsOf(result.chunks().stream().map(KnowledgeChunk::pointId).toList());
+    var hybrid = new HybridKnowledgeRetriever(
+        List.of((validated, request) -> retrieve(validated, request.query()), keyword),
+        new DefaultKnowledgeRanker()).retrieve(scope, intent);
+    assertThat(hybrid.status()).isEqualTo(RetrievalStatus.RETRIEVED);
+    assertThat(hybrid.chunks()).extracting(KnowledgeChunk::pointId).doesNotHaveDuplicates();
+
+    // Replay the SQL half of an interrupted double-write with the same deterministic IDs.
+    for (int replay = 0; replay < 2; replay++) {
+      var mirrored = lexical.chunks().stream().map(chunk ->
+          interview.pilot.knowledge.infrastructure.KnowledgeChunkEntity.of(
+              UUID.fromString(chunk.pointId()), user.userId(), base.knowledgeBaseId(),
+              chunk.documentId(), chunk.documentRevision(), chunk.chunkIndex(), chunk.section(),
+              chunk.filename(), chunk.content())).toList();
+      chunks.replaceRevision(uploaded.documentId(), indexed.getActiveIndexRevision(), mirrored);
+    }
+    assertThat(chunks.search(scope, "REQUIRES_NEW", 15))
+        .extracting(interview.pilot.knowledge.infrastructure.KnowledgeChunkEntity::getPointId)
+        .containsExactlyInAnyOrderElementsOf(lexical.chunks().stream()
+            .map(chunk -> UUID.fromString(chunk.pointId())).toList());
+
+    uploads.delete(user, base.knowledgeBaseId(), uploaded.documentId());
+    assertThat(chunks.search(scope, "REQUIRES_NEW", 15)).isEmpty();
+    assertThat(retrieve(scope, "REQUIRES_NEW").status()).isEqualTo(RetrievalStatus.NO_MATCH);
   }
 
   @Test

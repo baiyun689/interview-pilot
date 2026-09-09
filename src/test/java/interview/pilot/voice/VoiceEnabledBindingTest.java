@@ -22,6 +22,7 @@ import interview.pilot.interview.infrastructure.InterviewSessionRepository;
 import interview.pilot.interview.infrastructure.InterviewTurnRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeBaseJpaRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentJpaRepository;
+import interview.pilot.knowledge.infrastructure.KnowledgeChunkJpaRepository;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 import interview.pilot.voice.application.SpeechRecognizer;
 import interview.pilot.voice.config.VoiceProperties;
@@ -53,6 +54,7 @@ import interview.pilot.voice.storage.VoiceMediaStore;
         + "org.redisson.spring.starter.RedissonAutoConfigurationV4"
 })
 class VoiceEnabledBindingTest {
+  @MockitoBean private interview.pilot.recruitment.infrastructure.HiringStore hiringStore;
   @MockitoBean
   private RedissonClient redissonClient;
 
@@ -94,6 +96,9 @@ class VoiceEnabledBindingTest {
 
   @MockitoBean
   private KnowledgeDocumentJpaRepository knowledgeDocumentJpaRepository;
+
+  @MockitoBean
+  private KnowledgeChunkJpaRepository knowledgeChunkJpaRepository;
 
   @MockitoBean
   private VoiceRecordingRepository voiceRecordingRepository;

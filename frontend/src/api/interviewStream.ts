@@ -7,6 +7,8 @@ export interface AnswerStreamInput {
   answer: string
   inputMode?: InputMode
   recordingId?: string
+  expectedTurnNo?: number
+  sessionVersion?: number
 }
 
 interface StreamOptions {

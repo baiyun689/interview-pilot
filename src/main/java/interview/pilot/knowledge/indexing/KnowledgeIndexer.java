@@ -20,6 +20,8 @@ import org.springframework.stereotype.Component;
 import interview.pilot.auth.infrastructure.UserAccountRepository;
 import interview.pilot.knowledge.domain.KnowledgeDocumentStatus;
 import interview.pilot.knowledge.infrastructure.KnowledgeBaseEntity;
+import interview.pilot.knowledge.infrastructure.KnowledgeChunkEntity;
+import interview.pilot.knowledge.infrastructure.KnowledgeChunkRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentEntity;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentRepository;
 import interview.pilot.knowledge.storage.KnowledgeDocumentStore;
@@ -34,6 +36,7 @@ public class KnowledgeIndexer {
   private final RecursiveTextSplitter splitter;
   private final UserAccountRepository userAccountRepository;
   private final VectorStore vectorStore;
+  private final KnowledgeChunkRepository chunkRepository;
   private final String embeddingModel;
 
   public KnowledgeIndexer(
@@ -43,6 +46,7 @@ public class KnowledgeIndexer {
       RecursiveTextSplitter splitter,
       UserAccountRepository userAccountRepository,
       Optional<VectorStore> vectorStore,
+      KnowledgeChunkRepository chunkRepository,
       @Value("${app.knowledge.embedding.model:text-embedding-v3}") String embeddingModel) {
     this.documentRepository = documentRepository;
     this.store = store;
@@ -50,6 +54,7 @@ public class KnowledgeIndexer {
     this.splitter = splitter;
     this.userAccountRepository = userAccountRepository;
     this.vectorStore = vectorStore.orElse(null);
+    this.chunkRepository = chunkRepository;
     this.embeddingModel = embeddingModel;
   }
 
@@ -106,31 +111,43 @@ public class KnowledgeIndexer {
   private void embedAndUpsert(
       KnowledgeDocumentEntity document, List<String> chunks, int expectedRevision) {
     KnowledgeBaseEntity kb = document.getKnowledgeBase();
-    UUID userId = userAccountRepository.findById(kb.getUserAccountId())
+    UUID userId = kb.getOrganizationId() != null ? null : userAccountRepository.findById(kb.getUserAccountId())
         .orElseThrow(() -> new IllegalArgumentException(
             "User account " + kb.getUserAccountId() + " not found"))
         .getUserId();
-    String kbId = kb.getKnowledgeBaseId().toString();
-    String docId = document.getDocumentId().toString();
+    UUID kbUuid = kb.getKnowledgeBaseId();
+    String kbId = kbUuid.toString();
+    UUID docUuid = document.getDocumentId();
+    String docId = docUuid.toString();
     String filename = document.getOriginalFilename();
     String revision = String.valueOf(expectedRevision);
 
     List<org.springframework.ai.document.Document> docs = new ArrayList<>(chunks.size());
+    List<KnowledgeChunkEntity> storedChunks = new ArrayList<>(chunks.size());
     for (int i = 0; i < chunks.size(); i++) {
       Map<String, Object> metadata = new HashMap<>();
-      metadata.put("user_id", userId.toString());
+      if (kb.getOrganizationId() == null) metadata.put("user_id", userId.toString());
+      else metadata.put("organization_id", kb.getOrganizationId().toString());
       metadata.put("knowledge_base_id", kbId);
       metadata.put("document_id", docId);
       metadata.put("filename", filename);
       metadata.put("chunk_index", String.valueOf(i));
       metadata.put("index_revision", revision);
       metadata.put("section", "chunk:" + i);
-      String pointId = UUID.nameUUIDFromBytes(
-          (docId + ":" + expectedRevision + ":" + i).getBytes(StandardCharsets.UTF_8)).toString();
+      UUID pointUuid = UUID.nameUUIDFromBytes(
+          (docId + ":" + expectedRevision + ":" + i).getBytes(StandardCharsets.UTF_8));
+      String pointId = pointUuid.toString();
+      storedChunks.add(KnowledgeChunkEntity.of(
+          pointUuid, userId, kbUuid, docUuid, expectedRevision, i,
+          "chunk:" + i, filename, chunks.get(i)));
+      storedChunks.getLast().setOrganizationId(kb.getOrganizationId());
       docs.add(org.springframework.ai.document.Document.builder()
           .id(pointId).text(chunks.get(i)).metadata(metadata).build());
     }
 
+    // Persist the lexical mirror first (idempotent replace of this revision), then Qdrant.
+    // Both stores key on deterministic ids, so a failed Qdrant write can safely retry.
+    chunkRepository.replaceRevision(docUuid, expectedRevision, storedChunks);
     vectorStore.add(docs);
     log.info("Indexed {} chunks for document {} (user={}, kb={})",
         chunks.size(), docId, userId, kbId);
