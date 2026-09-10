@@ -141,6 +141,7 @@ public class RecruitmentService {
     application.submissionNo++; application.submittedAt = Instant.now();
     if (application.id == null) store.add(application);
     event(user, application, existing.isPresent() ? "RESUBMITTED" : "SUBMITTED");
+    HiringNotifications.applicationSubmitted(store, application);
     store.flush(); return applicationView(application);
   }
 
@@ -154,6 +155,7 @@ public class RecruitmentService {
     version(expectedVersion, application.version);
     if (application.status.equals("FINISHED")) throw conflict("招聘流程已结束");
     application.status = "WITHDRAWN"; event(user, application, "WITHDRAWN");
+    HiringNotifications.applicationWithdrawn(store, application);
     for (var invitation : store.list(interview.pilot.recruitment.infrastructure.CampaignEntities.Invitation.class,
         "from HiringInterviewInvitation where applicationId=?1 and status in ('CREATED','ISSUED','ACCEPTED','STARTED')", 0, 200, applicationId)) {
       HiringInterviewLifecycle.cancel(store, invitation.id);

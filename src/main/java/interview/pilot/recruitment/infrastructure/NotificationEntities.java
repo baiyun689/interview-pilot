@@ -9,6 +9,7 @@ public final class NotificationEntities {
   public static class Notification {
     @Id @GeneratedValue(strategy=GenerationType.IDENTITY) public Long id;
     @Column(name="invitation_id") public Long invitationId;
+    @Column(name="application_id", nullable=false) public Long applicationId;
     @Column(name="recipient_id") public Long recipientId;
     @Column(name="event_key") public String eventKey;
     public String kind;

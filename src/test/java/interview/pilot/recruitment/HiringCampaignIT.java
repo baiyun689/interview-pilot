@@ -90,6 +90,26 @@ class HiringCampaignIT {
     assertThat(campaigns.detail(admin,org.id(),batch.batch().id()).members().getFirst().status()).isEqualTo("CANCELLED");
     assertThat(campaigns.create(admin,org.id(),job.id(),input("request-005")).batch().id()).isNotEqualTo(batch.batch().id());
   }
+
+  @Test void candidateSchedulingCreatesACompanyNotificationForTheCurrentInterview() {
+    var invite = issuedInterview();
+    var scheduled = invitations.schedule(candidate, invite.id(),
+        new ScheduleInput(Instant.now().plusSeconds(5000), invite.version()));
+
+    assertThat(notifications.company(admin, org.id(), 0).items())
+        .anyMatch(notification -> notification.title().equals("候选人已确认面试安排")
+            && notification.message().contains("Candidate"));
+    assertThat(scheduled.status()).isEqualTo("ACCEPTED");
+  }
+
+  @Test void candidateDecliningCreatesACompanyNotification() {
+    var invite = issuedInterview();
+    invitations.decline(candidate, invite.id(), invite.version());
+
+    assertThat(notifications.company(admin, org.id(), 0).items())
+        .anyMatch(notification -> notification.title().equals("候选人拒绝了面试邀请")
+            && notification.message().contains("Candidate"));
+  }
   @Test void withdrawalCancelsIssuedInvitationAndPreventsScheduling() {
     var batch=campaigns.create(admin,org.id(),job.id(),input("request-006"));var member=batch.members().getFirst();complete(member.id());
     campaigns.approve(admin,org.id(),batch.batch().id(),member.id(),new ApprovalInput(member.version(),deck()));campaigns.publish(admin,org.id(),batch.batch().id());

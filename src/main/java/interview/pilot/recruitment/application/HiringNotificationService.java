@@ -34,15 +34,16 @@ public class HiringNotificationService {
   @Transactional(readOnly=true)
   public HiringModels.Page<View> company(CurrentUser user,Long orgId,int page) {
     checkPage(page);var member=access.member(user,orgId,false);if(member.role.equals("INTERVIEWER")) throw forbidden();
-    String permission=member.role.equals("ADMIN")?"":" and exists (select j.id from HiringJobAssignment j where j.jobId=a.jobId and j.userAccountId=?2)";
-    Object[] params=member.role.equals("ADMIN")?new Object[]{orgId}:new Object[]{orgId,user.databaseId()};
-    var rows=store.list(Notification.class,"select n from HiringNotification n, HiringInterviewInvitation i, HiringApplication a where n.invitationId=i.id and i.applicationId=a.id and a.organizationId=?1"+permission+" order by n.id desc",page*25,26,params);
+    var rows=store.list(Notification.class,
+        "select n from HiringNotification n, HiringApplication a "
+            + "where n.applicationId=a.id and a.organizationId=?1 and n.recipientId=?2 "
+            + "order by n.id desc",
+        page*25,26,orgId,user.databaseId());
     return new HiringModels.Page<>(rows.stream().limit(25).map(this::view).toList(),page,rows.size()>25);
   }
   public void retry(CurrentUser user,Long orgId,Long id,long expectedVersion) {
     var ref=store.find(Notification.class,id,false).orElseThrow(HiringAccess::notFound);
-    var invite=store.find(Invitation.class,ref.invitationId,false).orElseThrow();
-    var app=store.find(Application.class,invite.applicationId,false).filter(a->a.organizationId.equals(orgId)).orElseThrow(HiringAccess::notFound);
+    var app=store.find(Application.class,ref.applicationId,false).filter(a->a.organizationId.equals(orgId)).orElseThrow(HiringAccess::notFound);
     access.job(user,orgId,app.jobId,true);
     var n=store.find(Notification.class,id,true).orElseThrow();version(expectedVersion,n.version);
     if(!List.of("FAILED","UNKNOWN","DISABLED").contains(n.mailStatus)) throw conflict("当前通知不能重试");
@@ -76,10 +77,14 @@ public class HiringNotificationService {
     store.one(Attempt.class,"from HiringDeliveryAttempt where notificationId=?1 and attemptNo=?2",n.id,n.attempts).ifPresent(a->{a.status=status;a.finishedAt=now;});
   }
   private boolean eligible(Notification n,Instant now) {
-    var i=store.find(Invitation.class,n.invitationId,false).orElseThrow();var app=store.find(Application.class,i.applicationId,false).orElseThrow();
+    var app=store.find(Application.class,n.applicationId,false).orElseThrow();
     if(!store.find(Organization.class,app.organizationId,false).orElseThrow().active) return false;
+    if(n.invitationId==null) return true;
+    var i=store.find(Invitation.class,n.invitationId,false).orElseThrow();
     if(n.kind.equals("FEEDBACK")) return true;
     if(n.kind.equals("CANCELLED")) return i.status.equals("CANCELLED");
+    if(n.kind.equals("INTERVIEW_DECLINED")) return i.status.equals("DECLINED")
+        && i.scheduleRevision==n.scheduleRevision;
     if(!List.of("ISSUED","ACCEPTED").contains(i.status)) return false;
     var batch=store.find(Batch.class,store.find(BatchMember.class,i.batchMemberId,false).orElseThrow().batchId,false).orElseThrow();
     if(!batch.latestStartAt.isAfter(now)) return false;
@@ -87,6 +92,8 @@ public class HiringNotificationService {
         && now.isBefore(n.dueAt.plusSeconds(300));
     return i.scheduleRevision==n.scheduleRevision;
   }
-  private View view(Notification n) {return new View(n.id,n.title,n.message,store.find(Invitation.class,n.invitationId,false).orElseThrow().publicId,n.visibleAt,n.readAt,n.mailStatus,n.error,n.attempts,n.version);}
+  private View view(Notification n) {return new View(n.id,n.title,n.message,
+      n.invitationId==null?null:store.find(Invitation.class,n.invitationId,false).orElseThrow().publicId,
+      n.visibleAt,n.readAt,n.mailStatus,n.error,n.attempts,n.version);}
   private void checkPage(int page) {if(page<0 || page>10000) throw conflict("无效页码");}
 }

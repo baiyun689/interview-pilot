@@ -74,6 +74,7 @@ class RecruitmentFoundationIT {
 
   @Autowired OrganizationService organizations;
   @Autowired RecruitmentService recruitment;
+  @Autowired HiringNotificationService notifications;
   @Autowired HiringPlatformService platform;
   @Autowired HiringStore store;
   @Autowired PlatformTransactionManager manager;
@@ -105,6 +106,12 @@ class RecruitmentFoundationIT {
     assertThat(detail.application().jobTitle()).isEqualTo("Java 后端实习");
     assertThat(detail.resumeText()).contains("延迟双删");
     assertThat(detail.jobDescription()).contains("Redis");
+  }
+
+  @Test void submittedApplicationCreatesAnInboxNotificationForTheCompany() {
+    assertThat(notifications.company(admin, company.id(), 0).items())
+        .anyMatch(notification -> notification.title().equals("收到新的候选人投递")
+            && notification.message().contains("Candidate"));
   }
 
   @Test void rejectsCrossTenantAndCrossCandidateReadsAndForeignResumeSubmission() {

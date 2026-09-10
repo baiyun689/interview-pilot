@@ -4,7 +4,7 @@ import { hiringWrite, type Page } from '../api/hiring'
 import { HiringError, HiringPager, useHiringLoad } from '../components/HiringUi'
 import './hiring.css'
 
-interface Notice {id:number;title:string;message:string;invitationId:string;visibleAt:string|null;readAt:string|null;mailStatus:string;error:string|null;attempts:number;version:number}
+interface Notice {id:number;title:string;message:string;invitationId:string|null;visibleAt:string|null;readAt:string|null;mailStatus:string;error:string|null;attempts:number;version:number}
 const labels:Record<string,string>={PENDING:'等待发送',SENDING:'正在发送',ACCEPTED_BY_PROVIDER:'邮件服务商已接收',FAILED:'发送失败',UNKNOWN:'接收情况未知',DISABLED:'邮件通道未启用',SKIPPED:'安排失效，已跳过'}
 export function NotificationsPage({orgId}:{orgId?:number}) {
   const [page,setPage]=useState(0),[busy,setBusy]=useState(false),[error,setError]=useState(''),[confirm,setConfirm]=useState<number|null>(null)

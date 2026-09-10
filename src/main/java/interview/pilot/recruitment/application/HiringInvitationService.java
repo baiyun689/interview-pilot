@@ -57,6 +57,7 @@ public class HiringInvitationService {
     version(expectedVersion, invite.version);
     if (!invite.status.equals("ISSUED") && !invite.status.equals("ACCEPTED")) throw conflict("已开始或已结束的邀请不能拒绝");
     invite.status="DECLINED"; invite.scheduleRevision++;
+    HiringNotifications.interviewDeclined(store, invite);
     organizations.audit(user, batch(invite).organizationId, "INVITATION_DECLINED", invite.id); store.flush(); return view(invite);
   }
   public void cancel(CurrentUser user, Long orgId, Long memberId) {
