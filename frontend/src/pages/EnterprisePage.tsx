@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { ArrowUpRight, BriefcaseBusiness, ClipboardList, FileSearch, Layers3, Plus, Settings2, Users } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { hiringWrite, roleLabels, statusLabels, type Application, type Job, type Member, type Organization, type Page, type Role } from '../api/hiring'
 import { ApplicationSnapshot, HiringError, HiringPager, useHiringLoad } from '../components/HiringUi'
@@ -25,7 +26,7 @@ export function EnterprisePage() {
       setSelected(org.id); setName(''); setToken(''); organizations.refresh()
     } catch (e) { setError(message(e)) } finally { setBusy(false) }
   }
-  return <div className="hiring-page hiring-workspace"><header><p className="hiring-eyebrow">WORKSPACE / RECRUITMENT</p><h1>企业招聘空间</h1><p>管理岗位、投递与团队权限。</p></header>
+  return <div className="hiring-page hiring-workspace"><header className="enterprise-page-header"><div><p className="hiring-eyebrow">WORKSPACE / RECRUITMENT</p><h1>企业招聘空间</h1><p>从岗位发布到面试评审，在一个清晰的工作台里推进招聘流程。</p></div><div className="enterprise-header-visual" aria-hidden="true"><BriefcaseBusiness size={28} /><span>Recruitment<br />workspace</span></div></header>
     <HiringError message={error || organizations.error} />
     {organizations.loading && <p>正在读取企业空间…</p>}
     {organizations.data && <>{organizations.data.length > 1 && <div className="hiring-actions">{organizations.data.map(org => <button className={active?.id === org.id ? 'hiring-primary' : ''} key={org.id} onClick={() => setSelected(org.id)}>{org.name}</button>)}</div>}
@@ -48,15 +49,15 @@ function EnterpriseWorkspace({ organization, onMembershipChanged }: { organizati
     try { await hiringWrite(`/api/organizations/${organization.id}`, { name }, 'PUT'); onMembershipChanged() }
     catch (e) { setError(message(e)) } finally { setBusy(false) }
   }
-  return <><div className="hiring-row"><h2>{organization.name}</h2><span className="hiring-badge">{roleLabels[organization.role]}</span></div>
+  return <><div className="enterprise-org-header"><div><p className="hiring-eyebrow">CURRENT ORGANIZATION</p><div className="hiring-row"><h2>{organization.name}</h2><span className="hiring-badge">{roleLabels[organization.role]}</span></div></div><p className="enterprise-org-tip">当前身份决定可见的操作范围</p></div>
     <nav className="hiring-tabs" aria-label="企业工作区">
-      <button aria-pressed={tab === 'jobs'} onClick={() => setTab('jobs')}>岗位与投递</button>
-      <button aria-pressed={tab === 'reviews'} onClick={() => setTab('reviews')}>面试与评审</button>
+      <button aria-pressed={tab === 'jobs'} onClick={() => setTab('jobs')}><BriefcaseBusiness size={16} aria-hidden />招聘工作台</button>
+      <button aria-pressed={tab === 'reviews'} onClick={() => setTab('reviews')}><ClipboardList size={16} aria-hidden />面试与评审</button>
       {organization.role !== 'INTERVIEWER' && <button aria-pressed={tab === 'notifications'} onClick={() => setTab('notifications')}>通知记录</button>}
-      {organization.role !== 'INTERVIEWER' && <button aria-pressed={tab === 'knowledge'} onClick={() => setTab('knowledge')}>企业知识库</button>}
-      {organization.role === 'ADMIN' && <><button aria-pressed={tab === 'members'} onClick={() => setTab('members')}>团队成员</button>
+      {organization.role !== 'INTERVIEWER' && <button aria-pressed={tab === 'knowledge'} onClick={() => setTab('knowledge')}><FileSearch size={16} aria-hidden />企业知识库</button>}
+      {organization.role === 'ADMIN' && <><button aria-pressed={tab === 'members'} onClick={() => setTab('members')}><Users size={16} aria-hidden />团队成员</button>
         <button aria-pressed={tab === 'audit'} onClick={() => setTab('audit')}>操作记录</button>
-        <button aria-pressed={tab === 'settings'} onClick={() => setTab('settings')}>企业设置</button></>}
+        <button aria-pressed={tab === 'settings'} onClick={() => setTab('settings')}><Settings2 size={16} aria-hidden />企业设置</button></>}
     </nav>
     {tab === 'settings' && organization.role === 'ADMIN' && <section className="hiring-card"><h3>企业信息</h3><form onSubmit={e => void rename(e)}>
       <HiringError message={error} /><label>企业名称<input required maxLength={120} value={name} onChange={e => setName(e.target.value)} /></label><button className="hiring-primary" disabled={busy}>{busy ? '正在保存…' : '保存企业名称'}</button></form></section>}
@@ -73,37 +74,36 @@ function EnterpriseJobs({ organization }: { organization: Organization }) {
   const [page, setPage] = useState(0)
   const jobs = useHiringLoad<Page<Job>>(`/api/organizations/${organization.id}/jobs?page=${page}`)
   const [editing, setEditing] = useState<Job | 'new' | null>(null)
-  const [selected, setSelected] = useState<number | null>(null)
-  const [schemeJob, setSchemeJob] = useState<number | null>(null)
-  const [batchJob, setBatchJob] = useState<number | null>(null)
+  const [selectedJobId, setSelectedJobId] = useState<number | null>(null)
+  const [activePanel, setActivePanel] = useState<'applications' | 'schemes' | 'campaign'>('applications')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const activeJob = jobs.data?.items.find(job => job.id === selectedJobId) ?? jobs.data?.items[0] ?? null
+  useEffect(() => {
+    if (jobs.data?.items.length && !jobs.data.items.some(job => job.id === selectedJobId)) setSelectedJobId(jobs.data.items[0].id)
+  }, [jobs.data, selectedJobId])
   async function transition(job: Job, action: string) {
     setError(''); setBusy(true)
     try { await hiringWrite(`/api/organizations/${organization.id}/jobs/${job.id}/${action}`, { version: job.version }); jobs.refresh() }
     catch (e) { setError(message(e)) } finally { setBusy(false) }
   }
-  return <><HiringError message={error || jobs.error} />{organization.role !== 'INTERVIEWER' && <button className="hiring-primary" onClick={() => setEditing('new')}>创建岗位</button>}
+  const publishedCount = jobs.data?.items.filter(job => job.status === 'PUBLISHED').length ?? 0
+  const draftCount = jobs.data?.items.filter(job => job.status === 'DRAFT').length ?? 0
+  const closedCount = jobs.data?.items.filter(job => job.status === 'CLOSED').length ?? 0
+  return <section className="enterprise-jobs"><div className="enterprise-section-header"><div><p className="hiring-eyebrow">RECRUITMENT WORKSPACE</p><h2>岗位管理</h2><p>选择一个岗位，集中处理投递、面试方案和面试批次。</p></div>{organization.role !== 'INTERVIEWER' && <button className="hiring-primary enterprise-create-button" onClick={() => setEditing('new')}><Plus size={17} aria-hidden />创建岗位</button>}</div>
+    <HiringError message={error || jobs.error} />
+    <div className="enterprise-stat-grid" aria-label="岗位概览"><div className="enterprise-stat-card"><span>全部岗位</span><strong>{jobs.data?.items.length ?? '—'}</strong><small>当前可访问岗位</small></div><div className="enterprise-stat-card enterprise-stat-card-active"><span>招聘中</span><strong>{jobs.data ? publishedCount : '—'}</strong><small>对外接受投递</small></div><div className="enterprise-stat-card"><span>草稿</span><strong>{jobs.data ? draftCount : '—'}</strong><small>待发布版本</small></div><div className="enterprise-stat-card"><span>已关闭</span><strong>{jobs.data ? closedCount : '—'}</strong><small>暂停新投递</small></div></div>
     {editing && <JobEditor key={editing === 'new' ? 'new' : editing.id} orgId={organization.id} job={editing === 'new' ? null : editing} done={() => { setEditing(null); jobs.refresh() }} cancel={() => setEditing(null)} />}
-    {jobs.loading && <p>正在读取岗位…</p>}
-    {jobs.data?.items.length === 0 && <p className="hiring-card">还没有可访问的岗位。创建岗位或联系管理员授权。</p>}
-    {jobs.data?.items.map(job => <article className="hiring-card" key={job.id}>
-      <div className="hiring-row"><h3>{job.title}</h3><span className="hiring-badge">{statusLabels[job.status]}</span></div>
-      <p>{job.location} · {job.employmentType} · 已发布版本 {job.publishedRevision}</p>
-      <div className="hiring-actions">{job.canManage && <>{job.status !== 'CLOSED' && <><button disabled={busy} onClick={() => setEditing(job)}>编辑草稿</button>
-        <button disabled={busy} onClick={() => void transition(job, 'publish')}>{job.publishedRevision ? '发布新版本' : '发布岗位'}</button></>}
-        {job.status === 'PUBLISHED' && <button disabled={busy} onClick={() => void transition(job, 'close')}>关闭新投递</button>}
-        <button aria-expanded={selected === job.id} onClick={() => { setSelected(selected === job.id ? null : job.id); setSchemeJob(null); setBatchJob(null) }}>查看投递</button></>}
-        {job.canManage && <button aria-expanded={schemeJob === job.id} onClick={() => { setSchemeJob(schemeJob === job.id ? null : job.id); setSelected(null); setBatchJob(null) }}>面试方案</button>}
-        {job.canManage && <button aria-expanded={batchJob === job.id} onClick={() => { setBatchJob(batchJob === job.id ? null : job.id); setSelected(null); setSchemeJob(null) }}>面试批次</button>}
-        {job.status === 'PUBLISHED' && <Link to={`/jobs/${job.id}`}>公开岗位页面</Link>}</div>
-      {organization.role === 'ADMIN' && <JobAssignments orgId={organization.id} jobId={job.id} />}
-      {selected === job.id && <EnterpriseApplications key={selected} orgId={organization.id} jobId={selected} />}
-      {schemeJob === job.id && <HiringSchemes key={schemeJob} orgId={organization.id} jobId={schemeJob} />}
-      {batchJob === job.id && <HiringCampaign key={batchJob} orgId={organization.id} jobId={batchJob} />}
-    </article>)}
-    <HiringPager page={page} hasMore={!!jobs.data?.hasMore} change={n => { setPage(n); setSelected(null); setSchemeJob(null); setBatchJob(null) }} />
-  </>
+    {jobs.loading && <p className="enterprise-loading">正在读取岗位…</p>}
+    {jobs.data?.items.length === 0 && <div className="hiring-card enterprise-empty"><BriefcaseBusiness size={28} aria-hidden /><h3>还没有可访问的岗位</h3><p>还没有可访问的岗位。创建岗位或联系管理员授权。</p></div>}
+    {jobs.data && jobs.data.items.length > 0 && <div className="enterprise-jobs-layout"><aside className="enterprise-job-list" aria-label="岗位列表"><div className="enterprise-subheading"><h3>我的岗位</h3><span>{jobs.data.items.length} 个</span></div>{jobs.data.items.map(job => <button className={`enterprise-job-item${activeJob?.id === job.id ? ' is-active' : ''}`} key={job.id} aria-pressed={activeJob?.id === job.id} onClick={() => { setSelectedJobId(job.id); setActivePanel('applications') }}><span className="enterprise-job-item-main"><strong>{job.title}</strong><small>{job.location} · {job.employmentType}</small></span><span className={`enterprise-status enterprise-status-${job.status.toLowerCase()}`}>{statusLabels[job.status]}</span></button>)}</aside>
+      {activeJob && <article className="enterprise-job-workspace"><div className="enterprise-job-heading"><div><div className="enterprise-heading-line"><span className="enterprise-job-icon"><BriefcaseBusiness size={19} aria-hidden /></span><div><p className="hiring-eyebrow">JOB WORKSPACE</p><h3>岗位工作区</h3></div><span className={`enterprise-status enterprise-status-${activeJob.status.toLowerCase()}`}>{statusLabels[activeJob.status]}</span></div><p className="enterprise-job-meta">{activeJob.title} · {activeJob.location} · {activeJob.employmentType} · 已发布版本 {activeJob.publishedRevision || '未发布'}</p></div><div className="hiring-actions enterprise-job-actions">{activeJob.canManage && activeJob.status !== 'CLOSED' && <><button disabled={busy} onClick={() => setEditing(activeJob)}>编辑草稿</button><button className="hiring-primary" disabled={busy} onClick={() => void transition(activeJob, 'publish')}>{activeJob.publishedRevision ? '发布新版本' : '发布岗位'}</button></>}{activeJob.status === 'PUBLISHED' && <button disabled={busy} onClick={() => void transition(activeJob, 'close')}>关闭新投递</button>}{activeJob.status === 'PUBLISHED' && <Link className="enterprise-public-link" to={`/jobs/${activeJob.id}`} target="_blank" rel="noreferrer">公开岗位页面 <ArrowUpRight size={15} aria-hidden /></Link>}</div></div>
+        <div className="enterprise-job-tabs" role="tablist" aria-label={`${activeJob.title}工作区`}><button role="tab" aria-selected={activePanel === 'applications'} onClick={() => setActivePanel('applications')}><FileSearch size={17} aria-hidden /><span>投递管理</span><small>查看候选人材料</small></button><button role="tab" aria-selected={activePanel === 'schemes'} disabled={!activeJob.canManage} onClick={() => setActivePanel('schemes')}><Layers3 size={17} aria-hidden /><span>面试方案</span><small>配置题目与评分标准</small></button><button role="tab" aria-selected={activePanel === 'campaign'} disabled={!activeJob.canManage} onClick={() => setActivePanel('campaign')}><ClipboardList size={17} aria-hidden /><span>面试批次</span><small>准备题卡并发出邀请</small></button></div>
+        <div className="enterprise-panel-body">{activePanel === 'applications' && <EnterpriseApplications key={activeJob.id} orgId={organization.id} jobId={activeJob.id} />}{activePanel === 'schemes' && <HiringSchemes key={activeJob.id} orgId={organization.id} jobId={activeJob.id} />}{activePanel === 'campaign' && <HiringCampaign key={activeJob.id} orgId={organization.id} jobId={activeJob.id} />}</div>
+        {organization.role === 'ADMIN' && <div className="enterprise-permissions"><JobAssignments orgId={organization.id} jobId={activeJob.id} /></div>}
+      </article>}</div>}
+    <HiringPager page={page} hasMore={!!jobs.data?.hasMore} change={n => { setPage(n); setSelectedJobId(null); setActivePanel('applications') }} />
+  </section>
 }
 
 function JobEditor({ orgId, job, done, cancel }: { orgId: number; job: Job | null; done: () => void; cancel: () => void }) {
