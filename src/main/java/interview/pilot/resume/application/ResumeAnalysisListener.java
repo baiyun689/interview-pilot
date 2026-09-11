@@ -1,4 +1,4 @@
-package interview.pilot.async.resume;
+package interview.pilot.resume.application;
 
 import java.time.Duration;
 import java.util.function.BooleanSupplier;
@@ -13,8 +13,6 @@ import interview.pilot.async.messaging.RabbitTopologyConfig;
 import interview.pilot.async.messaging.TaskMessage;
 import interview.pilot.async.messaging.TaskRetryPolicy;
 import interview.pilot.async.policy.ResumeAnalysisRetryPolicy;
-import interview.pilot.resume.application.ResumeAnalysisHandler;
-import interview.pilot.resume.application.ResumeAnalysisRetryableException;
 
 @Component
 public class ResumeAnalysisListener {

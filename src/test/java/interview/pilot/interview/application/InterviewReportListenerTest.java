@@ -1,4 +1,4 @@
-package interview.pilot.async.report;
+package interview.pilot.interview.application;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -18,7 +18,6 @@ import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.async.messaging.TaskMessage;
 import interview.pilot.async.messaging.TaskRetryPolicy;
-import interview.pilot.interview.application.FixedInterviewReportHandler;
 
 class InterviewReportListenerTest {
   @Test

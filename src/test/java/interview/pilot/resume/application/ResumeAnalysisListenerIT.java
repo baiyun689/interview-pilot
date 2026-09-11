@@ -1,4 +1,4 @@
-package interview.pilot.async.resume;
+package interview.pilot.resume.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.never;

@@ -1,4 +1,4 @@
-package interview.pilot.async.preparation;
+package interview.pilot.interview.application;
 
 import java.time.Duration;
 
@@ -13,8 +13,6 @@ import interview.pilot.async.messaging.RabbitTopologyConfig;
 import interview.pilot.async.messaging.TaskMessage;
 import interview.pilot.async.messaging.TaskRetryPolicy;
 import interview.pilot.async.policy.InterviewPreparationRetryPolicy;
-import interview.pilot.interview.application.InvalidQuestionDeckException;
-import interview.pilot.interview.application.QuestionPreparationHandler;
 
 @Component
 public class QuestionPreparationListener {

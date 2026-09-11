@@ -1,4 +1,4 @@
-package interview.pilot.async.resume;
+package interview.pilot.resume.application;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -19,8 +19,6 @@ import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.async.messaging.TaskMessage;
 import interview.pilot.async.messaging.TaskRetryPolicy;
-import interview.pilot.resume.application.ResumeAnalysisHandler;
-import interview.pilot.resume.application.ResumeAnalysisRetryableException;
 
 class ResumeAnalysisListenerTest {
   @Test
