@@ -1,4 +1,4 @@
-services:
+﻿services:
   mysql:
     image: mysql:8.4
     environment:
@@ -75,6 +75,9 @@ services:
       RABBITMQ_USER: ${RABBITMQ_USER:-interview_pilot}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-interview_pilot}
       JWT_HMAC_SECRET: ${JWT_HMAC_SECRET:-}
+      # Mail channel is disabled by default (HIRING_MAIL_ENABLED=false) and SMTP is not a
+      # Compose dependency; exclude it from the health check so /actuator/health stays UP.
+      MANAGEMENT_HEALTH_MAIL_ENABLED: "false"
       AI_DEFAULT_PROVIDER: ${AI_DEFAULT_PROVIDER:-dashscope}
       AI_STRUCTURED_MAX_ATTEMPTS: ${AI_STRUCTURED_MAX_ATTEMPTS:-2}
       LLM_MAX_CONCURRENCY: ${LLM_MAX_CONCURRENCY:-4}
