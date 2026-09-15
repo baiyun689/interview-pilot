@@ -145,7 +145,9 @@ public class EnterpriseKnowledgeService {
   }
   public RetrievedKnowledge search(CurrentUser user, Long orgId, List<UUID> baseIds, String query) {
     var scope = scope(user, orgId, baseIds);
-    return retriever.retrieve(scope, new RetrievalIntent(query, "", "MEDIUM", List.of(query), List.of(), 5, 24, .2, 6000));
+    return retriever.retrieve(scope, new RetrievalIntent(query, "", "MEDIUM", List.of(query), List.of(),
+        properties.topK(), properties.candidateCount(), properties.similarityThreshold(),
+        properties.contextCharacterBudget()));
   }
   private KnowledgeBaseEntity base(CurrentUser user, Long orgId, UUID id, boolean write) {
     authorize(user, orgId, write);
