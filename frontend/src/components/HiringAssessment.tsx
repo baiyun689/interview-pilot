@@ -35,9 +35,9 @@ export function HiringApplicationAnalysis({ orgId, applicationId, status }: { or
       analysis.refresh()
     } catch (e) { setError(errorMessage(e)) } finally { setBusy(false) }
   }
-  return <section className="hiring-card"><div className="hiring-row"><div><p className="hiring-eyebrow">EVIDENCE / INTERVIEW PREPARATION</p><h3>岗位证据分析</h3></div>
+  return <section className="hiring-card"><div className="hiring-row"><h3>岗位证据分析</h3>
     {!analysis.data && !analysis.loading && !analysis.error && !['WITHDRAWN', 'FINISHED'].includes(status) && <button className="hiring-primary" disabled={busy} onClick={() => void start(false)}>生成分析</button>}</div>
-    <p>对照提交时的岗位要求，整理简历证据与面试中需要核实的问题。</p><HiringError message={error || analysis.error} />
+    <HiringError message={error || analysis.error} />
     {working && <div className="hiring-progress" role="status"><span className="hiring-pulse" />{analysis.data?.status === 'RUNNING' ? '正在逐项核对材料…' : '已加入分析队列，请稍候…'}{analysis.data?.error && <p>{analysis.data.error}</p>}</div>}
     {analysis.data?.status === 'FAILED' && <div><HiringError message={analysis.data.error ?? '分析失败'} /><button disabled={busy} onClick={() => void start(true)}>重试分析</button></div>}
     {analysis.data?.status === 'CANCELLED' && <p>{analysis.data.error}</p>}
@@ -47,7 +47,7 @@ export function HiringApplicationAnalysis({ orgId, applicationId, status }: { or
       {finding.evidenceIds.map(id => <blockquote key={id}>{analysis.data?.input.resumeEvidence.find(r => r.id === id)?.text}</blockquote>)}
       {finding.suggestedQuestions.length > 0 && <><h5>建议追问</h5><ul>{finding.suggestedQuestions.map((q, i) => <li key={i}>{q}</li>)}</ul></>}
     </article>)}
-    {analysis.data?.result && <p className="hiring-footnote">分析依据当前投递材料生成，简历描述仍需面试核实。模型：{analysis.data.input.modelName}</p>}
+    {analysis.data?.result && <p className="hiring-footnote">简历描述需在面试中核实。</p>}
   </section>
 }
 
@@ -62,14 +62,16 @@ export function HiringSchemes({ orgId, jobId }: { orgId: number; jobId: number }
     try { await hiringWrite(`/api/organizations/${orgId}/schemes/${scheme.id}/publish`, { version: scheme.version }); schemes.refresh(); setPreview(null) }
     catch (e) { setError(errorMessage(e)) } finally { setBusy(false) }
   }
-  return <section className="hiring-card"><div className="hiring-row"><h2>面试方案</h2><button onClick={() => setEditing('new')}>创建方案</button></div>
+  if (editing) return <section className="hiring-card hiring-schemes"><button onClick={() => setEditing(null)}>← 返回方案列表</button>
+    <SchemeEditor key={editing === 'new' ? 'new' : editing.id} orgId={orgId} jobId={jobId} scheme={editing === 'new' ? null : editing} close={() => setEditing(null)} saved={() => { setEditing(null); schemes.refresh() }} />
+  </section>
+  return <section className="hiring-card hiring-schemes">{!preview && <div className="hiring-row"><h2>面试方案</h2><button className="hiring-primary" onClick={() => setEditing('new')}>创建方案</button></div>}
     <HiringError message={error || schemes.error} />{schemes.loading && <p>正在读取方案…</p>}
-    {schemes.data?.length === 0 && <p>先定义考察阶段与公共题，再为候选人生成项目定制题。</p>}
-    {schemes.data?.map(scheme => <div className="hiring-list-row" key={scheme.id}><div className="hiring-row"><div><strong>{scheme.name}</strong><p>{scheme.definition.stages.reduce((sum, s) => sum + s.questionCount, 0)} 道主问题 · {scheme.definition.durationMinutes} 分钟 · 已发布版本 {scheme.publishedRevision}</p></div><div className="hiring-actions">
-      <button disabled={busy} onClick={() => setEditing(scheme)}>编辑</button><button disabled={busy} onClick={() => setPreview(scheme)}>预览并发布</button></div></div></div>)}
-    {schemes.data?.map(scheme => <SchemeHistory key={scheme.id} orgId={orgId} scheme={scheme} />)}
-    {editing && <SchemeEditor key={editing === 'new' ? 'new' : editing.id} orgId={orgId} jobId={jobId} scheme={editing === 'new' ? null : editing} close={() => setEditing(null)} saved={() => { setEditing(null); schemes.refresh() }} />}
-    {preview && <div className="hiring-preview"><h3>发布前确认：{preview.name}</h3><p>发布后会保留不可变版本，后续编辑不会修改已下发的面试。</p>
+    {!preview && schemes.data?.length === 0 && <p>暂无面试方案。</p>}
+    {!preview && schemes.data?.map(scheme => <article className="hiring-scheme-item" key={scheme.id}><div className="hiring-row"><div><strong>{scheme.name}</strong><p>{scheme.definition.stages.reduce((sum, s) => sum + s.questionCount, 0)} 道主问题 · {scheme.definition.durationMinutes} 分钟 · {scheme.publishedRevision ? `已发布 v${scheme.publishedRevision}` : '未发布'}</p></div><div className="hiring-actions">
+      <button disabled={busy} onClick={() => setEditing(scheme)}>编辑</button><button disabled={busy} onClick={() => setPreview(scheme)}>预览并发布</button></div></div>
+      <SchemeHistory orgId={orgId} scheme={scheme} /></article>)}
+    {preview && <div className="hiring-scheme-preview"><h3>发布前确认：{preview.name}</h3><p>后续编辑不影响已下发的面试。</p>
       <div className="hiring-stages">{preview.definition.stages.map((stage, i) => <div key={stage.phase}><span>{i + 1}</span><strong>{phases[stage.phase]}</strong><small>{stage.questionCount} 题 · 每题最多追问 {stage.followUpLimit} 次</small></div>)}</div>
       {preview.definition.commonQuestions.map((q, i) => <article key={q.id} className="hiring-evidence"><h4>公共题 {i + 1} · {phases[q.phase]}</h4><p>{q.question}</p>{q.rubric.map(r => <p key={r.id}><strong>{r.point}</strong>：{r.acceptance}</p>)}</article>)}
       <div className="hiring-actions"><button className="hiring-primary" disabled={busy} onClick={() => void publish(preview)}>确认发布此版本</button><button disabled={busy} onClick={() => setPreview(null)}>返回修改</button></div>
@@ -103,22 +105,29 @@ function SchemeEditor({ orgId, jobId, scheme, close, saved }: { orgId: number; j
     try { await hiringWrite(`/api/organizations/${orgId}/jobs/${jobId}/schemes${scheme ? `/${scheme.id}` : ''}`, { name, definition: { ...definition, providerId }, version: scheme?.version ?? 0 }, scheme ? 'PUT' : 'POST'); saved() }
     catch (e) { setError(errorMessage(e)) } finally { setBusy(false) }
   }
-  return <form className="hiring-editor" onSubmit={e => void save(e)}><h3>{scheme ? '编辑方案草稿' : '新建面试方案'}</h3><HiringError message={error || providers.error} />
+  return <form className="hiring-editor hiring-scheme-editor" onSubmit={e => void save(e)}><h3>{scheme ? '编辑方案草稿' : '新建面试方案'}</h3><HiringError message={error || providers.error} />
+    <section className="hiring-form-section" aria-labelledby="scheme-basic-heading"><h4 id="scheme-basic-heading">基本设置</h4>
     <label>方案名称<input required maxLength={120} value={name} onChange={e => setName(e.target.value)} /></label>
     <div className="hiring-grid"><label>难度<select value={definition.difficulty} onChange={e => setDefinition({ ...definition, difficulty: e.target.value as Definition['difficulty'] })}><option value="EASY">基础</option><option value="MEDIUM">标准</option><option value="HARD">深入</option></select></label>
       <label>作答方式<select value={definition.mode} onChange={e => setDefinition({ ...definition, mode: e.target.value as Definition['mode'] })}><option value="TEXT">文本</option><option value="VOICE">语音</option></select></label>
       <label>总时长（分钟）<input type="number" min={5} max={90} required value={definition.durationMinutes} onChange={e => setDefinition({ ...definition, durationMinutes: Number(e.target.value) })} /></label>
       <label>评估模型<select required value={providerId} onChange={e => setDefinition({ ...definition, providerId: e.target.value })}><option value="">请选择已配置模型</option>{providers.data?.filter(p => p.enabled).map(p => <option key={p.id} value={p.id}>{p.displayName}</option>)}</select></label></div>
-    <details><summary>关联企业知识库（可选）</summary><p>发布时固定可用资料版本，用于出题和评估。停用方案版本后释放对应资料引用。</p><HiringError message={knowledge.error} />
+    </section>
+    <details className="hiring-form-section hiring-knowledge-picker"><summary>企业知识库 <span className="hiring-section-meta">{definition.knowledgeBaseIds.length ? `已选 ${definition.knowledgeBaseIds.length} 个` : '可选'}</span></summary><HiringError message={knowledge.error} />
+      {knowledge.loading && <p>正在读取知识库…</p>}
+      {knowledge.data?.length === 0 && <p>暂无企业知识库。</p>}
       {knowledge.data?.map(base => <label className="hiring-checkbox" key={base.id}><input type="checkbox" checked={definition.knowledgeBaseIds.includes(base.id)} disabled={!definition.knowledgeBaseIds.includes(base.id) && definition.knowledgeBaseIds.length >= 5}
         onChange={e => setDefinition({ ...definition, knowledgeBaseIds: e.target.checked ? [...definition.knowledgeBaseIds, base.id] : definition.knowledgeBaseIds.filter(id => id !== base.id) })} />{base.name}</label>)}</details>
-    <h4>面试阶段</h4><p>按顺序执行，共 {total} 道主问题。未配置为公共题的名额用于生成简历定制题。</p>
+    <section className="hiring-form-section" aria-labelledby="scheme-stages-heading"><div className="hiring-section-title"><h4 id="scheme-stages-heading">面试阶段</h4><span className="hiring-section-meta">共 {total} 道主问题</span></div>
+    <div className="hiring-stage-grid">
     {definition.stages.map((stage, index) => <div className="hiring-stage-editor" key={stage.phase}><strong>{index + 1}. {phases[stage.phase]}</strong><div className="hiring-grid">
       <label>题数<input aria-label={`${phases[stage.phase]}题数`} type="number" min={1} max={stage.phase === 'SELF_INTRODUCTION' ? 1 : 8} value={stage.questionCount} onChange={e => changeStage(index, { questionCount: Number(e.target.value) })} /></label>
       <label>追问上限<input aria-label={`${phases[stage.phase]}追问上限`} type="number" min={0} max={stage.phase === 'SELF_INTRODUCTION' ? 0 : 2} value={stage.followUpLimit} onChange={e => changeStage(index, { followUpLimit: Number(e.target.value) })} /></label></div>
       <div className="hiring-actions"><button type="button" disabled={index === 0} onClick={() => reorder(index, -1)}>上移</button><button type="button" disabled={index === definition.stages.length - 1} onClick={() => reorder(index, 1)}>下移</button><button type="button" disabled={definition.commonQuestions.some(q => q.phase === stage.phase)} onClick={() => setDefinition({ ...definition, stages: definition.stages.filter(s => s.phase !== stage.phase) })}>移除阶段</button></div></div>)}
-    <div className="hiring-actions">{(Object.entries(phases) as [Phase, string][]).filter(([phase]) => !definition.stages.some(s => s.phase === phase)).map(([phase, label]) => <button type="button" key={phase} onClick={() => setDefinition({ ...definition, stages: [...definition.stages, { phase, questionCount: 1, followUpLimit: 0 }] })}>添加{label}</button>)}</div>
-    <h4>公共题与评分标准</h4><p>同一批次保留一致的公共题，便于按相同考察点复核回答。</p>
+    </div>
+    {definition.stages.length < Object.keys(phases).length && <div className="hiring-actions">{(Object.entries(phases) as [Phase, string][]).filter(([phase]) => !definition.stages.some(s => s.phase === phase)).map(([phase, label]) => <button type="button" key={phase} onClick={() => setDefinition({ ...definition, stages: [...definition.stages, { phase, questionCount: 1, followUpLimit: 0 }] })}>添加{label}</button>)}</div>}
+    </section>
+    <section className="hiring-form-section" aria-labelledby="scheme-questions-heading"><div className="hiring-section-title"><h4 id="scheme-questions-heading">公共题与评分标准</h4><span className="hiring-section-meta">{definition.commonQuestions.length} 道公共题</span></div><p className="hiring-section-note">剩余题目将按候选人简历生成。</p>
     {definition.commonQuestions.map((q, i) => <div className="hiring-stage-editor" key={q.id}><div className="hiring-row"><strong>公共题 {i + 1}</strong><button type="button" onClick={() => setDefinition({ ...definition, commonQuestions: definition.commonQuestions.filter(other => other.id !== q.id) })}>移除题目</button></div>
       <label>所属阶段<select value={q.phase} onChange={e => changeQuestion(q.id, { phase: e.target.value as Phase })}>{definition.stages.map(s => <option key={s.phase} value={s.phase}>{phases[s.phase]}</option>)}</select></label>
       <label>题目<textarea required rows={3} maxLength={3000} value={q.question} onChange={e => changeQuestion(q.id, { question: e.target.value })} /></label>
@@ -127,7 +136,8 @@ function SchemeEditor({ orgId, jobId, scheme, close, saved }: { orgId: number; j
       {q.rubric.length < 8 && <button type="button" onClick={() => changeQuestion(q.id, { rubric: [...q.rubric, { id: crypto.randomUUID(), point: '', acceptance: '' }] })}>添加考察点</button>}
     </div>)}
     <button type="button" disabled={definition.commonQuestions.length >= total || !definition.stages.length} onClick={addQuestion}>添加公共题</button>
-    <div className="hiring-actions"><button className="hiring-primary" disabled={busy || !providerId}>保存方案草稿</button><button type="button" disabled={busy} onClick={close}>取消</button></div>
+    </section>
+    <div className="hiring-actions hiring-form-footer"><button className="hiring-primary" disabled={busy || !providerId}>保存方案草稿</button><button type="button" disabled={busy} onClick={close}>取消</button></div>
   </form>
 }
 

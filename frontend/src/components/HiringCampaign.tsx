@@ -14,13 +14,13 @@ export function HiringCampaign({ orgId, jobId }: { orgId: number; jobId: number 
   const batches = useHiringLoad<Batch[]>(`/api/organizations/${orgId}/jobs/${jobId}/batches`)
   const [creating, setCreating] = useState(false)
   const [selected, setSelected] = useState<number | null>(null)
-  return <section className="hiring-card"><div className="hiring-row"><div><p className="hiring-eyebrow">INTERVIEW CAMPAIGNS</p><h2>面试批次</h2></div>
+  if (creating) return <section className="hiring-card"><BatchCreate orgId={orgId} jobId={jobId} cancel={() => setCreating(false)} done={id => { setCreating(false); setSelected(id); batches.refresh() }} /></section>
+  return <section className="hiring-card"><div className="hiring-row"><h2>面试批次</h2>
     <button className="hiring-primary" onClick={() => setCreating(true)}>新建批次</button></div>
-    <p>按已发布方案为候选人准备题目，确认后再发出邀请。</p><HiringError message={batches.error} />
-    {creating && <BatchCreate orgId={orgId} jobId={jobId} cancel={() => setCreating(false)} done={id => { setCreating(false); setSelected(id); batches.refresh() }} />}
+    <HiringError message={batches.error} />
     {batches.loading && <p role="status">正在读取批次…</p>}
     {batches.data?.length === 0 && !creating && <p>还没有面试批次。先发布一份面试方案，再选择候选人。</p>}
-    {batches.data?.map(b => <div className="hiring-list-row" key={b.id}><div className="hiring-row"><div><strong>{b.name}</strong><p>第 {b.roundNo} 轮 · {b.schemeName} · {b.members} 位候选人</p></div>
+    {batches.data?.map(b => <div className="hiring-scheme-item" key={b.id}><div className="hiring-row"><div><strong>{b.name}</strong><p>第 {b.roundNo} 轮 · {b.schemeName} · {b.members} 位候选人</p></div>
       <button aria-expanded={selected === b.id} onClick={() => setSelected(selected === b.id ? null : b.id)}>查看准备进度</button></div>
       {selected === b.id && <BatchDetail key={b.id} orgId={orgId} batchId={b.id} changed={batches.refresh} />}</div>)}
   </section>
@@ -53,17 +53,17 @@ function BatchCreate({ orgId, jobId, cancel, done }: { orgId: number; jobId: num
     try { const result = await hiringWrite<Detail>(`/api/organizations/${orgId}/jobs/${jobId}/batches`, {...payload,requestKey:key}); done(result.batch.id) }
     catch (e) { setError(errorText(e)) } finally { setBusy(false) }
   }
-  return <form className="hiring-stage-editor" onSubmit={e => void submit(e)}><h3>安排一批面试</h3><HiringError message={error || schemes.error || revisions.error || applications.error} />
-    <fieldset disabled={busy} className="hiring-fieldset"><label>批次名称<input required maxLength={120} value={name} onChange={e => setName(e.target.value)} /></label>
+  return <form className="hiring-batch-editor" onSubmit={e => void submit(e)}><h3>新建面试批次</h3><HiringError message={error || schemes.error || revisions.error || applications.error} />
+    <fieldset disabled={busy} className="hiring-fieldset"><section className="hiring-form-section"><h4>基本设置</h4><label>批次名称<input required maxLength={120} value={name} onChange={e => setName(e.target.value)} /></label>
       <div className="hiring-grid"><label>面试方案<select required value={scheme} onChange={e => { setScheme(e.target.value); setRevision('') }}><option value="">选择方案</option>{schemes.data?.filter(s => s.publishedRevision > 0).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
         <label>发布版本<select required value={revision} onChange={e => setRevision(e.target.value)}><option value="">选择版本</option>{revisions.data?.filter(r => !r.retired).map(r => <option key={r.id} value={r.id}>版本 {r.revision} · {r.definition.durationMinutes} 分钟</option>)}</select></label></div>
       <label>招聘轮次<input type="number" required min={1} max={20} value={round} onChange={e => setRound(Number(e.target.value))} /></label>
-      <div className="hiring-grid"><label>开放时间<input type="datetime-local" required value={opens} onChange={e => setOpens(e.target.value)} /></label><label>最晚开始时间<input type="datetime-local" required min={opens} value={latest} onChange={e => setLatest(e.target.value)} /></label></div>
-      <p className="hiring-footnote">时区：{Intl.DateTimeFormat().resolvedOptions().timeZone}。硬截止时间自动加上方案时长，确保最晚开始仍可完成面试。</p>
-      <h4>选择候选人 · 已选 {selected.length} 人</h4>
+      </section><section className="hiring-form-section"><h4>面试时间</h4><div className="hiring-grid"><label>开放时间<input type="datetime-local" required value={opens} onChange={e => setOpens(e.target.value)} /></label><label>最晚开始时间<input type="datetime-local" required min={opens} value={latest} onChange={e => setLatest(e.target.value)} /></label></div>
+      <p className="hiring-section-note">时区：{Intl.DateTimeFormat().resolvedOptions().timeZone} · 截止时间为最晚开始时间加面试时长。</p></section>
+      <section className="hiring-form-section"><h4>选择候选人 · 已选 {selected.length} 人</h4>
       {applications.data?.items.filter(a => !['WITHDRAWN','FINISHED'].includes(a.status)).map(a => <label className="hiring-checkbox" key={a.id}><input type="checkbox" checked={selected.includes(a.id)} onChange={e => setSelected(e.target.checked ? [...selected,a.id] : selected.filter(id => id !== a.id))} />{a.candidateName}</label>)}
       <HiringPager page={page} hasMore={!!applications.data?.hasMore} change={setPage} />
-      <div className="hiring-actions"><button className="hiring-primary" disabled={!selected.length}>{busy ? '正在创建…' : '创建并准备题目'}</button><button type="button" onClick={cancel}>取消</button></div>
+      </section><div className="hiring-actions hiring-form-footer"><button className="hiring-primary" disabled={!selected.length}>{busy ? '正在创建…' : '创建并准备题目'}</button><button type="button" onClick={cancel}>取消</button></div>
     </fieldset></form>
 }
 
@@ -80,7 +80,7 @@ function BatchDetail({ orgId, batchId, changed }: { orgId: number; batchId: numb
   async function action(path: string) {
     setBusy(true); setError(''); setResult('')
     try { const res = await hiringWrite<{ issued: number[]; skipped: number[] } | undefined>(path)
-      if (res?.issued) setResult(`已下发 ${res.issued.length} 人，未下发 ${res.skipped.length} 人。未完成准备或确认的成员会保留在当前批次。`)
+      if (res?.issued) setResult(`已下发 ${res.issued.length} 人，待处理 ${res.skipped.length} 人。`)
       detail.refresh(); changed()
     } catch (e) { setError(errorText(e)) } finally { setBusy(false) }
   }
@@ -109,7 +109,7 @@ function DeckPreview({member,orgId,batchId,done}:{member:BatchMember;orgId:numbe
     try { await hiringWrite(`/api/organizations/${orgId}/batches/${batchId}/members/${member.id}/approval`,{version:member.version,deck},'PUT');done() }
     catch(e){setError(errorText(e))}finally{setBusy(false)}
   }
-  return <form className="hiring-stage-editor" onSubmit={e=>void approve(e)}><HiringError message={error}/><p>公共题保持方案原文。修改定制题时请同时核对评分标准，保存后才可下发。</p>
+  return <form className="hiring-stage-editor" onSubmit={e=>void approve(e)}><HiringError message={error}/><p>公共题不可修改。定制题需确认题目及评分标准。</p>
     {deck.questions.map((q,i)=><article className="hiring-evidence" key={q.id}><span className="hiring-badge">第 {i+1} 题 · {q.common?'公共题':'定制题'}</span>
       <label>题目<textarea required maxLength={3000} value={q.question} disabled={busy || !editable || q.common} onChange={e=>setDeck({questions:deck.questions.map((v,n)=>n===i?{...v,question:e.target.value}:v)})}/></label>
       {!q.common && <details><summary>简历依据 · 已选 {q.resumeEvidenceIds.length} 段</summary>{member.resumeEvidence.map(fragment=><label className="hiring-checkbox" key={fragment.id}><input type="checkbox" disabled={busy || !editable} checked={q.resumeEvidenceIds.includes(fragment.id)} onChange={e=>setDeck({questions:deck.questions.map((v,n)=>n===i?{...v,resumeEvidenceIds:e.target.checked?[...v.resumeEvidenceIds,fragment.id]:v.resumeEvidenceIds.filter(id=>id!==fragment.id)}:v)})}/><span>{fragment.text}</span></label>)}</details>}
