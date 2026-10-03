@@ -42,6 +42,7 @@ import org.springframework.aop.support.AopUtils;
 @SpringBootTest(properties = {
     "spring.flyway.enabled=false",
     "management.health.rabbit.enabled=false",
+    "management.health.mail.enabled=false",
     "spring.autoconfigure.exclude="
         + "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,"
         + "org.springframework.boot.data.jpa.autoconfigure.DataJpaRepositoriesAutoConfiguration,"

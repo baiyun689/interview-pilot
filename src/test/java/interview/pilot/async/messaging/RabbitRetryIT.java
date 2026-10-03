@@ -131,6 +131,19 @@ class RabbitRetryIT {
   }
 
   @Test
+  void occupiedClaimIsDeferredWithoutConsumingTheExhaustedRetryBudget() {
+    TaskMessage task = task("resume:coordination");
+    var route = RabbitTopologyConfig.routeFor(task.taskType());
+    retryPolicy.defer(task, sourceWithRetryCount(3));
+    Message queued = rabbitTemplate.receive(route.retryQueue(2), 5_000);
+    assertThat(queued).isNotNull();
+    assertThat((Object) queued.getMessageProperties().getHeader(RabbitTopologyConfig.RETRY_COUNT_HEADER))
+        .isEqualTo(3);
+    assertThat(rabbitTemplate.getMessageConverter().fromMessage(queued)).isEqualTo(task);
+    assertThat(rabbitTemplate.receive(route.deadLetterQueue())).isNull();
+  }
+
+  @Test
   void allRetryQueuesDeadLetterExpiredMessagesBackToTheMainQueue() throws Exception {
     TaskMessage task = task("resume:short-expiration");
     var route = RabbitTopologyConfig.routeFor(task.taskType());

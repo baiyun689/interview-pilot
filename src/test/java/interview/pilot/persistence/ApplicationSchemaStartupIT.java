@@ -42,6 +42,15 @@ class ApplicationSchemaStartupIT {
   private JdbcTemplate jdbcTemplate;
 
   @Test
+  void answerRecoveryIndexIsInstalledInCursorOrder() {
+    assertThat(jdbcTemplate.queryForList(
+        "select column_name from information_schema.statistics "
+            + "where table_schema = database() and table_name = 'answer_attempt' "
+            + "and index_name = 'idx_answer_attempt_recovery' order by seq_in_index",
+        String.class)).containsExactly("status", "id", "created_at");
+  }
+
+  @Test
   void startsAfterAutomaticallyApplyingFlywayMigration() {
     assertThat(applicationContext.isActive()).isTrue();
     assertThat(jdbcTemplate.queryForObject(

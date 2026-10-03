@@ -111,12 +111,12 @@ class ResumeAnalysisListenerTest {
     when(fixture.claims.acquire(
         org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
         .thenReturn(Optional.empty());
-    when(fixture.retries.routeFailure(fixture.task, fixture.source))
-        .thenReturn(TaskRetryPolicy.RouteOutcome.DEAD_LETTER);
 
-    assertThatThrownBy(() -> fixture.listener.receive(fixture.task, fixture.source))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessage("Resume analysis dead-letter state could not be persisted");
+
+    fixture.source.getMessageProperties().setHeader(interview.pilot.async.messaging.RabbitTopologyConfig.RETRY_COUNT_HEADER, 3);
+    fixture.listener.receive(fixture.task, fixture.source);
+    verify(fixture.retries).defer(fixture.task, fixture.source);
+    verify(fixture.retries, org.mockito.Mockito.never()).routeFailure(fixture.task, fixture.source);
     verify(fixture.handler, org.mockito.Mockito.never())
         .markDead(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt());
   }
@@ -127,12 +127,12 @@ class ResumeAnalysisListenerTest {
     when(fixture.claims.acquire(
         org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
         .thenThrow(new IllegalStateException("redis unavailable"));
-    when(fixture.retries.routeFailure(fixture.task, fixture.source))
-        .thenReturn(TaskRetryPolicy.RouteOutcome.DEAD_LETTER);
 
-    assertThatThrownBy(() -> fixture.listener.receive(fixture.task, fixture.source))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessage("Resume analysis dead-letter state could not be persisted");
+
+    fixture.source.getMessageProperties().setHeader(interview.pilot.async.messaging.RabbitTopologyConfig.RETRY_COUNT_HEADER, 3);
+    fixture.listener.receive(fixture.task, fixture.source);
+    verify(fixture.retries).defer(fixture.task, fixture.source);
+    verify(fixture.retries, org.mockito.Mockito.never()).routeFailure(fixture.task, fixture.source);
     verify(fixture.handler, org.mockito.Mockito.never())
         .markDead(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt());
   }

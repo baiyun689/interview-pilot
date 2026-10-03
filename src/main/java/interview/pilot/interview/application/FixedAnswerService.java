@@ -1,6 +1,7 @@
 package interview.pilot.interview.application;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -159,9 +160,8 @@ public class FixedAnswerService {
   private FixedAnswerClaim claimInTransaction(
       CurrentUser user, UUID sessionId, SubmitAnswerRequest request) {
     long ownerId = owner(user);
-    var session = sessions.findBySessionIdAndUserAccountId(sessionId, ownerId)
+    var session = sessions.findForStart(sessionId, ownerId)
         .orElseThrow(() -> notFound());
-    if (session.isRecruitment()) session = sessions.findByIdForUpdate(session.getId()).orElseThrow(this::notFound);
     String hash = fingerprint(request);
     var existing = attempts.findByRequestId(request.requestId());
     if (existing.isPresent()) return replay(existing.get(), sessionId, request, hash);
@@ -341,17 +341,23 @@ public class FixedAnswerService {
   }
 
   private FixedAnswerResult completeInTransaction(Work work, String nextQuestion) {
-    var session = sessions.findBySessionId(work.sessionId()).orElseThrow();
+    var session = sessions.findByIdForUpdate(work.sessionDatabaseId()).orElseThrow();
     if (session.isRecruitment()) {
-      session = sessions.findByIdForUpdate(session.getId()).orElseThrow();
       session.requireAnswerWindow();
       if (sessions.countActiveHiringInvitation(session.getHiringInvitationId()) != 1)
         throw conflict("HIRING_INTERVIEW_UNAVAILABLE", "当前企业面试不可继续作答");
     }
-    var current = turns.findById(work.turnId()).orElseThrow();
+    if (session.getStatus() != SessionStatus.INTERVIEWING
+        || session.getCurrentTurnNo() != work.turnNo()) {
+      throw conflict("ANSWER_FINALIZATION_CONFLICT", "Interview has already advanced");
+    }
+    var current = turns.findBySessionIdAndTurnNoForUpdate(session.getId(), work.turnNo()).orElseThrow();
     var attempt = attempts.findById(work.attemptId()).orElseThrow();
     if (current.getStatus() != interview.pilot.interview.domain.TurnStatus.PROCESSING
+        || !current.getId().equals(work.turnId())
         || !work.requestId().equals(current.getRequestId())
+        || !work.requestId().equals(attempt.getRequestId())
+        || !current.getId().equals(attempt.getTurnId())
         || attempt.getStatus() != AnswerAttemptStatus.PROCESSING) {
       throw conflict("ANSWER_FINALIZATION_CONFLICT", "Answer finalization conflicted");
     }
@@ -415,18 +421,59 @@ public class FixedAnswerService {
   }
 
   private void failBestEffort(Work work) {
-    var session = sessions.findBySessionId(work.sessionId()).orElseThrow();
-    if (session.isRecruitment() && !java.time.Instant.now().isBefore(session.getAnswerDeadline())) {
+    var session = sessions.findByIdForUpdate(work.sessionDatabaseId()).orElseThrow();
+    if (session.isRecruitment() && !Instant.now().isBefore(session.getAnswerDeadline())) {
       return; // The deadline sweep owns completion of answers admitted before the cutoff.
     }
-    attempts.findById(work.attemptId()).ifPresent(attempt -> {
-      if (attempt.getStatus() == AnswerAttemptStatus.PROCESSING) attempt.fail("ANSWER_PROCESSING_FAILED");
-    });
-    turns.findById(work.turnId()).ifPresent(turn -> {
-      if (turn.getStatus() == interview.pilot.interview.domain.TurnStatus.PROCESSING) {
-        turn.failAnswer("ANSWER_PROCESSING_FAILED");
+    var turn = turns.findBySessionIdAndTurnNoForUpdate(session.getId(), work.turnNo()).orElse(null);
+    var attempt = attempts.findById(work.attemptId()).orElse(null);
+    if (attempt == null || attempt.getStatus() != AnswerAttemptStatus.PROCESSING
+        || !work.requestId().equals(attempt.getRequestId())) return;
+    attempt.fail("ANSWER_PROCESSING_FAILED");
+    if (turn != null && turn.getStatus() == interview.pilot.interview.domain.TurnStatus.PROCESSING
+        && work.requestId().equals(turn.getRequestId())) {
+      turn.failAnswer("ANSWER_PROCESSING_FAILED");
+    }
+  }
+
+  /** Recover admitted answers after a process exit, without making another model call. */
+  public boolean recoverExpired(Long attemptId, Long sessionId, Instant cutoff) {
+    return Boolean.TRUE.equals(transactions.execute(status -> {
+      // Use the same lock order as admission/finalization: session -> turn -> attempt.
+      var session = sessions.findByIdForUpdate(sessionId).orElse(null);
+      if (session == null) return false;
+      if (session.isRecruitment()
+          && !Instant.now().isBefore(session.getAnswerDeadline())) return false;
+      var current = turns.findBySessionIdAndTurnNoForUpdate(sessionId, session.getCurrentTurnNo()).orElse(null);
+      var attempt = attempts.findById(attemptId).orElse(null);
+      if (attempt == null || !sessionId.equals(attempt.getSessionId())
+          || attempt.getStatus() != AnswerAttemptStatus.PROCESSING
+          || !attempt.getCreatedAt().isBefore(cutoff)) return false;
+      if (session.getStatus() != SessionStatus.INTERVIEWING || current == null
+          || !current.getId().equals(attempt.getTurnId())
+          || current.getStatus() != interview.pilot.interview.domain.TurnStatus.PROCESSING
+          || !attempt.getRequestId().equals(current.getRequestId())
+          || (session.isRecruitment()
+              && sessions.countActiveHiringInvitation(session.getHiringInvitationId()) != 1)) {
+        attempt.fail("ANSWER_RECOVERY_STALE");
+        return false;
       }
-    });
+      Work work = buildWork(session, current, attemptId,
+          new SubmitAnswerRequest(attempt.getRequestId(), current.getAnswerText()));
+      String question = switch (work.next().kind()) {
+        case MAIN -> work.next().cardQuestion();
+        case FOLLOW_UP -> work.fallbackFollowUp();
+        case END -> null;
+      };
+      if (work.next().kind() != NextKind.END && (question == null || question.isBlank())) {
+        // Legacy cards may not contain a fallback. Keep the answer and allow an explicit retry.
+        attempt.fail("ANSWER_RECOVERY_MISSING_QUESTION");
+        current.failAnswer("ANSWER_RECOVERY_MISSING_QUESTION");
+        return false;
+      }
+      completeInTransaction(work, question);
+      return true;
+    }));
   }
 
   private InterviewTurnView view(InterviewTurnEntity turn) {

@@ -91,8 +91,12 @@ public class AnswerEvaluationHandler {
       return Outcome.STALE;
     }
     Work work = begin.work();
-    AnswerEvaluation evaluation = evaluator.evaluate(work.input());
-    return transactions.execute(status -> complete(work, evaluation));
+    try {
+      AnswerEvaluation evaluation = evaluator.evaluate(work.input());
+      return transactions.execute(status -> complete(work, evaluation));
+    } catch (RuntimeException exception) {
+      throw new AnswerEvaluationRetryableException(work.attemptGeneration(), exception);
+    }
   }
 
   public boolean markDead(TaskMessage message, int attemptGeneration) {

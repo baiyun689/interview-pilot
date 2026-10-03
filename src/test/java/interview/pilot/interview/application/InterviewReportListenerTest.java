@@ -38,5 +38,6 @@ class InterviewReportListenerTest {
 
     verify(handler, never()).handle(any(), anyInt());
     verify(retries, never()).routeFailure(any(), any());
+    verify(retries).defer(task, source);
   }
 }

@@ -16,8 +16,8 @@ import interview.pilot.async.messaging.TaskRetryPolicy;
  * acquire the per-turn processing claim (the bizKey, shared with the retry policy) → evaluate →
  * release/complete. Operational failures ride the shared 5s/30s/120s delayed-retry ladder; on
  * dead-letter the handler marks only eval_status FAILED, so neither the next question nor report
- * generation is blocked. A duplicate delivery while the owner runs is dropped without consuming
- * its retry budget.
+ * generation is blocked. A delivery while the owner runs is deferred without consuming
+ * its retry budget, so a crashed owner's message is not silently acknowledged and lost.
  */
 @Component
 public class AnswerEvaluationListener {
@@ -48,9 +48,11 @@ public class AnswerEvaluationListener {
     try {
       token = claims.acquire(claimKey, PROCESSING_TTL).orElse(null);
     } catch (RuntimeException exception) {
-      token = "";
+      retries.defer(message, source);
+      return;
     }
     if (token == null) {
+      retries.defer(message, source);
       return;
     }
     try {
@@ -60,6 +62,9 @@ public class AnswerEvaluationListener {
       } else {
         releaseBestEffort(claimKey, token);
       }
+    } catch (AnswerEvaluationRetryableException exception) {
+      releaseBestEffort(claimKey, token);
+      routeFailure(message, source, exception.attemptGeneration());
     } catch (RuntimeException exception) {
       releaseBestEffort(claimKey, token);
       routeFailure(message, source, target.attemptGeneration());

@@ -191,11 +191,12 @@ class VoiceTranscriptionListenerTest {
     when(claims.acquire(org.mockito.ArgumentMatchers.anyString(),
         org.mockito.ArgumentMatchers.any()))
         .thenReturn(Optional.empty());
-    when(retryPolicy.routeFailure(task, source))
-        .thenReturn(TaskRetryPolicy.RouteOutcome.DEAD_LETTER);
 
-    assertThatThrownBy(() -> listener.receive(task, source))
-        .isInstanceOf(IllegalStateException.class);
+
+    source.getMessageProperties().setHeader(interview.pilot.async.messaging.RabbitTopologyConfig.RETRY_COUNT_HEADER, 3);
+    listener.receive(task, source);
+    verify(retryPolicy).defer(task, source);
+    verify(retryPolicy, org.mockito.Mockito.never()).routeFailure(task, source);
 
     verify(handler, times(0)).markDead(org.mockito.ArgumentMatchers.any(),
         org.mockito.ArgumentMatchers.anyInt());

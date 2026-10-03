@@ -40,8 +40,8 @@ public class QuestionPreparationListener {
     try {
       target = handler.inspect(message);
     } catch (OptimisticLockingFailureException exception) {
-      // A concurrent owner already moved this task forward. This stale delivery is not a
-      // provider failure and must not burn the RabbitMQ retry budget.
+      // A database conflict is not proof that another live consumer owns this delivery.
+      retries.defer(message, source);
       return;
     }
     if (target.terminal()) return;
@@ -50,10 +50,11 @@ public class QuestionPreparationListener {
     try {
       token = claims.acquire(key, PROCESSING_TTL).orElse(null);
     } catch (RuntimeException exception) {
-      token = "";
+      retries.defer(message, source);
+      return;
     }
     if (token == null) {
-      // A duplicate delivery must not consume the retry budget of the active owner.
+      retries.defer(message, source);
       return;
     }
     try {
@@ -63,16 +64,22 @@ public class QuestionPreparationListener {
       } else {
         releaseBestEffort(key, token);
       }
-    } catch (InvalidQuestionDeckException | AiStructuredOutputException exception) {
+    } catch (QuestionPreparationExecutionException exception) {
       releaseBestEffort(key, token);
-      handler.markInvalid(message);
+      if (exception.getCause() instanceof InvalidQuestionDeckException
+          || exception.getCause() instanceof AiStructuredOutputException) {
+        handler.markInvalid(message, exception.attemptGeneration());
+      } else if (exception.getCause() instanceof OptimisticLockingFailureException) {
+        retries.defer(message, source);
+      } else {
+        routeRetry(message, source, exception.attemptGeneration());
+      }
     } catch (OptimisticLockingFailureException exception) {
       releaseBestEffort(key, token);
-      // Persisting a stale execution lost the database ownership race; leave retry ownership
-      // with the winner instead of turning a benign conflict into a dead-letter failure.
+      retries.defer(message, source);
     } catch (RuntimeException exception) {
       releaseBestEffort(key, token);
-      routeRetry(message, source);
+      routeRetry(message, source, target.attemptGeneration());
     }
   }
 
@@ -86,10 +93,10 @@ public class QuestionPreparationListener {
     try { claims.release(key, token); } catch (RuntimeException ignored) { }
   }
 
-  private void routeRetry(TaskMessage message, Message source) {
-    if (retries.routeFailure(message, source) == TaskRetryPolicy.RouteOutcome.DEAD_LETTER
-        && !handler.markDead(message)) {
-      throw new IllegalStateException("Question preparation dead-letter state could not be persisted");
+  private void routeRetry(TaskMessage message, Message source, int attemptGeneration) {
+    if (retries.routeFailure(message, source) == TaskRetryPolicy.RouteOutcome.DEAD_LETTER) {
+      // false means a newer generation or a terminal session; database failures still escape.
+      handler.markDead(message, attemptGeneration);
     }
   }
 }

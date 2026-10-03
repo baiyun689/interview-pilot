@@ -49,11 +49,11 @@ public class KnowledgeIndexListener {
     try {
       token = claims.acquire(claimKey, PROCESSING_TTL).orElse(null);
     } catch (RuntimeException exception) {
-      routeFailure(indexMessage, source, () -> false);
+      retries.defer(indexMessage, source);
       return;
     }
     if (token == null) {
-      routeFailure(indexMessage, source, () -> false);
+      retries.defer(indexMessage, source);
       return;
     }
 

@@ -65,12 +65,20 @@ public class QuestionPreparationHandler {
   }
 
   /**
-   * Short inspection transaction, then the two-stage generation pipeline outside a transaction:
+   * Short execution-claim transaction, then the generation pipeline outside a transaction:
    * question skeletons -> one precise RAG snapshot per question -> per-question rubric deck.
    */
   public Outcome prepare(TaskMessage message) {
-    Target target = inspect(message);
+    Target target = transactions.execute(status -> begin(message));
     if (target.terminal()) return Outcome.STALE;
+    try {
+      return generateAndPersist(message, target);
+    } catch (RuntimeException exception) {
+      throw new QuestionPreparationExecutionException(target.attemptGeneration(), exception);
+    }
+  }
+
+  private Outcome generateAndPersist(TaskMessage message, Target target) {
     InterviewBriefSnapshot brief = target.brief();
 
     // Stage 1: question skeletons (text + knowledge point + focus points), no RAG involved.
@@ -100,12 +108,12 @@ public class QuestionPreparationHandler {
     return transactions.execute(status -> inspectInTransaction(message));
   }
 
-  public boolean markInvalid(TaskMessage message) {
-    return terminalize(message, AsyncTaskStatus.FAILED, "INVALID_QUESTION_DECK");
+  public boolean markInvalid(TaskMessage message, int attemptGeneration) {
+    return terminalize(message, attemptGeneration, AsyncTaskStatus.FAILED, "INVALID_QUESTION_DECK");
   }
 
-  public boolean markDead(TaskMessage message) {
-    return terminalize(message, AsyncTaskStatus.DEAD, "QUESTION_PREPARATION_RETRY_EXHAUSTED");
+  public boolean markDead(TaskMessage message, int attemptGeneration) {
+    return terminalize(message, attemptGeneration, AsyncTaskStatus.DEAD, "QUESTION_PREPARATION_RETRY_EXHAUSTED");
   }
 
   private Target inspectInTransaction(TaskMessage message) {
@@ -126,20 +134,23 @@ public class QuestionPreparationHandler {
         || task.getStatus() == AsyncTaskStatus.FAILED
         || task.getStatus() == AsyncTaskStatus.DEAD
         || session.getStatus() != SessionStatus.PREPARING;
-    if (terminal) return new Target(sessionId, session.getId(), null, true);
-    if (task.getStatus() == AsyncTaskStatus.PENDING) {
-      task.setStatus(AsyncTaskStatus.PUBLISHED);
-      task.setAttemptCount(task.getAttemptCount() + 1);
-    } else if (task.getStatus() == AsyncTaskStatus.PUBLISHED && task.getAttemptCount() == 0) {
-      // The outbox dispatcher atomically claimed PENDING -> PUBLISHED before broker publish.
-      // This is still the first preparation execution, not a duplicate delivery.
-      task.setAttemptCount(1);
-    } else if (task.getStatus() != AsyncTaskStatus.PUBLISHED) {
+    if (terminal) return new Target(sessionId, session.getId(), null, true, task.getAttemptCount());
+    if (task.getStatus() != AsyncTaskStatus.PENDING && task.getStatus() != AsyncTaskStatus.PUBLISHED) {
       throw new IllegalStateException("Question preparation task state is inconsistent");
     }
     return new Target(
         sessionId, session.getId(), decode(session.getBriefSnapshot(), InterviewBriefSnapshot.class),
-        false);
+        false, task.getAttemptCount());
+  }
+
+  private Target begin(TaskMessage message) {
+    Target target = inspectInTransaction(message);
+    if (target.terminal()) return target;
+    AsyncTaskEntity task = tasks.findByTaskId(message.taskId()).orElseThrow();
+    task.setStatus(AsyncTaskStatus.PUBLISHED);
+    task.setAttemptCount(task.getAttemptCount() + 1);
+    return new Target(target.sessionId(), target.sessionDatabaseId(), target.brief(), false,
+        task.getAttemptCount());
   }
 
   private Outcome persist(
@@ -150,6 +161,7 @@ public class QuestionPreparationHandler {
     AsyncTaskEntity task = tasks.findByTaskId(message.taskId()).orElseThrow();
     InterviewSessionEntity session = sessions.findBySessionId(target.sessionId()).orElseThrow();
     if (task.getExecutionEpoch() != message.executionEpoch()
+        || task.getAttemptCount() != target.attemptGeneration()
         || task.getStatus() != AsyncTaskStatus.PUBLISHED
         || session.getStatus() != SessionStatus.PREPARING) {
       return Outcome.STALE;
@@ -186,12 +198,15 @@ public class QuestionPreparationHandler {
   }
 
   private boolean terminalize(
-      TaskMessage message, AsyncTaskStatus taskStatus, String safeError) {
+      TaskMessage message, int attemptGeneration, AsyncTaskStatus taskStatus, String safeError) {
     Boolean result = transactions.execute(status -> {
       requireMessage(message);
       var task = tasks.findByTaskId(message.taskId()).orElse(null);
       if (task == null || task.getExecutionEpoch() != message.executionEpoch()
-          || task.getStatus() == AsyncTaskStatus.COMPLETED) return false;
+          || task.getAttemptCount() != attemptGeneration
+          || task.getTaskType() != message.taskType() || !task.getBizKey().equals(message.bizKey())
+          || (task.getStatus() != AsyncTaskStatus.PENDING
+              && task.getStatus() != AsyncTaskStatus.PUBLISHED)) return false;
       var session = sessions.findBySessionId(sessionId(task.getBizKey())).orElse(null);
       if (session == null || session.getStatus() != SessionStatus.PREPARING) return false;
       cards.deleteAllBySessionId(session.getId());
@@ -235,5 +250,10 @@ public class QuestionPreparationHandler {
   public enum Outcome { COMPLETED, STALE }
 
   public record Target(
-      UUID sessionId, Long sessionDatabaseId, InterviewBriefSnapshot brief, boolean terminal) { }
+      UUID sessionId, Long sessionDatabaseId, InterviewBriefSnapshot brief, boolean terminal,
+      int attemptGeneration) {
+    public Target(UUID sessionId, Long sessionDatabaseId, InterviewBriefSnapshot brief, boolean terminal) {
+      this(sessionId, sessionDatabaseId, brief, terminal, 0);
+    }
+  }
 }

@@ -254,6 +254,10 @@ Skill、Provider、Model 和 InterviewPlan 都会在创建面试时生成不可�
 
 企业写操作按统一顺序加锁，评审草稿和反馈发布分别校验版本；同一版本并发发布只允许一个请求成功，旧轮次不能覆盖已进入后续轮次的流程结果。
 
+在线答题的领取、完成和失败清理统一按「会话 → 轮次 → 回答尝试」访问状态，短事务内锁定会话和轮次；失败清理也校验 `requestId`，防止旧工作线程误伤新回答。模型调用仍在事务外执行。
+
+进程退出后遗留的 `PROCESSING` 回答由定时任务恢复：超过 `InterviewProcessingSla` 的 SSE 时限后，基于已保存的答案和冻结题卡，用备用追问或下一道主问题完成流转，并在同一事务保存可重放结果。恢复不调用模型；旧题卡缺少备用题时保留答案并标记失败，允许用户重试。企业面试超过截止时间时仍交由原有截止处理流程收尾。扫描每批最多 50 条，以 ID 游标推进并逐条隔离失败；默认启动 1 分钟后执行，每轮间隔 30 秒，可用 `app.interview.answer-recovery.initial-delay` / `interval` 调整。
+
 ### 人工评审与可靠通知
 
 企业内部回答、AI 评估、冻结评分依据及知识证据仅向授权人员开放。面试官需要逐场指派；管理员或授权招聘人员才能选择已提交的评审修订，另行填写并发布候选人反馈。评审历史与公开反馈分别存储，候选人接口不返回内部评语和评分依据。
@@ -273,6 +277,8 @@ Skill、Provider、Model 和 InterviewPlan 都会在创建面试时生成不可�
 ### RabbitMQ 可靠异步任务
 
 简历分析、知识库索引和面试报告通过数据库任务表与 RabbitMQ 协作处理。任务发布使用 Publisher Confirm，并配置分级延迟重试队列和 DLQ。由于数据库提交和消息发布无法形成一个本地原子事务，系统采用任务表扫描、周期重发和消费者幂等实现至少一次投递。
+
+消费端区分业务失败与协调等待：模型或处理失败使用 5/30/120 秒重试；Redis 不可用、租约被占用时进入 30 秒延迟队列，保留原重试次数。延迟消息必须收到发布确认且未被退回，本次消费才正常返回，避免提前确认后丢失崩溃任务的后续执行机会。出题状态检查只读，每次实际执行递增 `attemptCount`；结果和失败回写同时校验执行代次与 `executionEpoch`。答题评估异常携带实际执行代次，避免开始事务递增代次后，失败处理仍使用旧值。
 
 ### 知识库与 RAG
 
@@ -666,6 +672,14 @@ docker compose config
 git diff --check
 ```
 
+后端核心链路专项回归（2026-10-03）：
+
+- 使用真实 MySQL 8.4、RabbitMQ 和 Redis 的 Testcontainers 环境，12 个集成测试套件、113 项全部通过，0 失败 / 跳过；模型调用使用替身。
+- 验证两个恢复线程只推进一次回答、已保存答案与重放结果一致、旧线程不能破坏恢复结果，以及租约到期后延迟消息可以继续执行。
+- 验证旧出题执行在新代次已提交但任务仍为 `PUBLISHED` 时不能写入题卡；评估失败按实际执行代次落库；V35 恢复索引已按预期创建。
+- 覆盖简历、知识库、语音消费，以及企业任务租约、邀请失效、截止收尾、评审权限和通知；修正了一项遗漏投递操作的通知测试。
+- 本次是可靠性与一致性验证，未做容量压测或真实模型质量评测。
+
 最近一次完整回归（2026-09-09）：
 
 - 后端 149 个测试套件、806 项：796 通过、10 跳过，0 失败 / 错误。
@@ -687,6 +701,7 @@ git diff --check
 重点测试：
 
 - [回答并发与幂等](src/test/java/interview/pilot/interview/application/FixedAnswerBindingIT.java)
+- [出题执行代次与迟到结果隔离](src/test/java/interview/pilot/interview/application/QuestionPreparationFencingIT.java)
 - [RabbitMQ 重试与死信](src/test/java/interview/pilot/async/messaging/RabbitRetryIT.java)
 - [Qdrant 向量召回与范围隔离](src/test/java/interview/pilot/knowledge/retrieval/QdrantVectorRetrievalSourceIT.java)
 - [简历分析 Listener](src/test/java/interview/pilot/async/resume/ResumeAnalysisListenerIT.java)

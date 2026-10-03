@@ -26,6 +26,15 @@ public class TaskRetryPolicy {
     return RouteOutcome.DEAD_LETTER;
   }
 
+  /**
+   * Reliably park a busy delivery for 30 seconds without spending business retries. The
+   * original delivery may be acknowledged only after this confirmed publication succeeds.
+   * This also keeps a crashed owner's redelivery alive until its processing lease expires.
+   */
+  public void defer(TaskMessage task, Message source) {
+    publisher.publishDeferred(task, retryCountOf(source));
+  }
+
   /** Number of delayed retries already consumed (header x-retry-count); 0 on first delivery. */
   public int retryCountOf(Message source) {
     Object value = source.getMessageProperties()

@@ -109,6 +109,8 @@ class RecruitmentFoundationIT {
   }
 
   @Test void submittedApplicationCreatesAnInboxNotificationForTheCompany() {
+    assertThat(notifications.company(admin, company.id(), 0).items()).isEmpty();
+    recruitment.apply(candidate, job.id(), applyInput(false));
     assertThat(notifications.company(admin, company.id(), 0).items())
         .anyMatch(notification -> notification.title().equals("收到新的候选人投递")
             && notification.message().contains("Candidate"));

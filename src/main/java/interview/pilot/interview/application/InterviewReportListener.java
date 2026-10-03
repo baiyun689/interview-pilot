@@ -38,10 +38,12 @@ public class InterviewReportListener {
     try {
       token = claims.acquire(key, PROCESSING_TTL).orElse(null);
     } catch (RuntimeException exception) {
-      token = "";
+      retries.defer(message, source);
+      return;
     }
     if (token == null) {
-      // A duplicate delivery must not dead-letter a task while its owner is still running.
+      // Keep the redelivery recoverable even if the previous owner has crashed.
+      retries.defer(message, source);
       return;
     }
     try {

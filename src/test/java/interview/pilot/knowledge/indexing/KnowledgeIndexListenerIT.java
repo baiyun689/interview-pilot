@@ -264,10 +264,10 @@ class KnowledgeIndexListenerIT {
     send(work.message());
     send(work.message());
 
-    // Wait for both messages to be routed to retry
+    // Occupied ownership is deferred for 30 seconds without consuming a business retry.
     var route = routeFor(AsyncTaskType.KNOWLEDGE_DOCUMENT_INDEX);
     await(() -> {
-      var messageCount = rabbitAdmin.getQueueInfo(route.mainQueue() + ".retry.1");
+      var messageCount = rabbitAdmin.getQueueInfo(route.mainQueue() + ".retry.2");
       return messageCount != null && messageCount.getMessageCount() >= 1;
     }, Duration.ofSeconds(10));
 

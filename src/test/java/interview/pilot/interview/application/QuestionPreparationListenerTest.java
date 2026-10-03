@@ -38,6 +38,7 @@ class QuestionPreparationListenerTest {
 
     verify(handler, never()).prepare(any());
     verify(retries, never()).routeFailure(any(), any());
+    verify(retries).defer(task, source);
   }
 
   @Test
@@ -56,5 +57,6 @@ class QuestionPreparationListenerTest {
 
     verify(claims, never()).acquire(anyString(), any());
     verify(retries, never()).routeFailure(any(), any());
+    verify(retries).defer(task, source);
   }
 }

@@ -52,6 +52,15 @@ public class TaskMessagePublisher {
         });
   }
 
+  /** Coordination is not a failed business attempt. Preserve its retry budget while waiting. */
+  void publishDeferred(TaskMessage task, int retryCount) {
+    var route = RabbitTopologyConfig.routeFor(task.taskType());
+    sendConfirmed(route.mainExchange(), route.retryRoutingKey(2), task, message -> {
+      message.getMessageProperties().setHeader(RabbitTopologyConfig.RETRY_COUNT_HEADER, retryCount);
+      return message;
+    });
+  }
+
   private void sendConfirmed(
       String exchange,
       String routingKey,

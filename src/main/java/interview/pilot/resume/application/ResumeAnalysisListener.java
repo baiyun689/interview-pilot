@@ -53,11 +53,11 @@ public class ResumeAnalysisListener {
     try {
       token = processingClaim.acquire(claimKey, PROCESSING_TTL).orElse(null);
     } catch (RuntimeException exception) {
-      routeFailure(retryMessage, source, () -> false);
+      retryPolicy.defer(retryMessage, source);
       return;
     }
     if (token == null) {
-      routeFailure(retryMessage, source, () -> false);
+      retryPolicy.defer(retryMessage, source);
       return;
     }
 

@@ -89,6 +89,7 @@ import jakarta.persistence.PersistenceContext;
     "DASHSCOPE_TTS_TIMEOUT=30s",
     "app.async.rabbit.dispatch-initial-delay=1h",
     "app.async.rabbit.dispatch-interval=1h",
+    "app.interview.answer-recovery.initial-delay=1h",
     "spring.autoconfigure.exclude="
         + "org.redisson.spring.starter.RedissonAutoConfigurationV4"
 })
@@ -180,6 +181,68 @@ class FixedAnswerBindingIT {
   }
 
   // ---------------------------------------------------------------- happy path
+
+  @Test void exhaustedEvaluationFailurePersistsTheCommittedGenerationAndKeepsTheAnswer() {
+    var completed = InterviewTurnEntity.asked(session.getId(), 2, InterviewPhase.FUNDAMENTALS,
+        QuestionType.MAIN, fundamentalsCard.getId(), fundamentalsCard.getQuestionText());
+    completed.beginAnswer(UUID.randomUUID(), "Use a unique business key and a conditional update", InputMode.TEXT);
+    completed.completeAnswer();
+    completed.markEvaluationPending();
+    completed = turns.saveAndFlush(completed);
+    var task = interview.pilot.async.infrastructure.AsyncTaskEntity.pending(account.getId(),
+        interview.pilot.async.domain.AsyncTaskType.ANSWER_EVALUATION,
+        "answer-eval:" + session.getSessionId() + ":2", "{}");
+    task.setStatus(interview.pilot.async.domain.AsyncTaskStatus.PUBLISHED);
+    task.setAttemptCount(3);
+    task = tasks.saveAndFlush(task);
+    var evaluator = org.mockito.Mockito.mock(AnswerEvaluator.class);
+    when(evaluator.evaluate(any())).thenAnswer(invocation -> {
+      assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive())
+          .isFalse();
+      throw new IllegalStateException("injected model failure");
+    });
+    var handler = new AnswerEvaluationHandler(tasks, sessions, turns, cards, evaluator,
+        new tools.jackson.databind.ObjectMapper(), transactionManager);
+    var listener = new AnswerEvaluationListener(handler, claims,
+        new interview.pilot.async.messaging.TaskRetryPolicy(publisher));
+    var properties = new org.springframework.amqp.core.MessageProperties();
+    properties.setHeader(interview.pilot.async.messaging.RabbitTopologyConfig.RETRY_COUNT_HEADER, 3);
+    listener.receive(new interview.pilot.async.messaging.TaskMessage(task.getTaskId(), task.getTaskType(), task.getBizKey()),
+        new org.springframework.amqp.core.Message(new byte[0], properties));
+    org.mockito.Mockito.verify(evaluator).evaluate(any());
+    var savedTask = tasks.findByTaskId(task.getTaskId()).orElseThrow();
+    assertThat(savedTask.getAttemptCount()).isEqualTo(4);
+    assertThat(savedTask.getStatus()).isEqualTo(interview.pilot.async.domain.AsyncTaskStatus.DEAD);
+    var savedTurn = turns.findById(completed.getId()).orElseThrow();
+    assertThat(savedTurn.getEvalStatus()).isEqualTo(interview.pilot.interview.domain.EvalStatus.FAILED);
+    assertThat(savedTurn.getStatus()).isEqualTo(interview.pilot.interview.domain.TurnStatus.COMPLETED);
+    assertThat(savedTurn.getAnswerText()).isEqualTo(completed.getAnswerText());
+  }
+
+  @Test void twoRecoveryWorkersCompleteAnOrphanedAnswerOnlyOnce() throws Exception {
+    var request = new SubmitAnswerRequest(UUID.randomUUID(), "Already persisted before process exit");
+    var claim = answers.claim(user, session.getSessionId(), request);
+    Instant cutoff = Instant.now().plusSeconds(1);
+    var candidates = attempts.findExpired(cutoff, 0L, org.springframework.data.domain.PageRequest.of(0, 50));
+    assertThat(candidates).hasSize(1);
+    assertThat(candidates.getFirst().getId()).isEqualTo(claim.work().attemptId());
+    var barrier = new CyclicBarrier(2);
+    try (var executor = Executors.newFixedThreadPool(2)) {
+      var jobs = List.of(1, 2).stream().map(index -> executor.submit(() -> {
+        barrier.await(10, TimeUnit.SECONDS);
+        return answers.recoverExpired(claim.work().attemptId(), session.getId(), cutoff);
+      })).toList();
+      assertThat(List.of(jobs.get(0).get(15, TimeUnit.SECONDS), jobs.get(1).get(15, TimeUnit.SECONDS)))
+          .containsExactlyInAnyOrder(true, false);
+    }
+    assertThat(turns.findAllBySessionIdOrderByTurnNo(session.getId())).hasSize(2);
+    assertThat(turns.findById(turn.getId()).orElseThrow().getAnswerText()).isEqualTo(request.answer());
+    assertThat(answers.claim(user, session.getSessionId(), request).owner()).isFalse();
+    // The former worker waking up cannot undo the recovered result.
+    assertThatThrownBy(() -> answers.process(claim)).isInstanceOf(BusinessException.class);
+    assertThat(attempts.findById(claim.work().attemptId()).orElseThrow().getStatus())
+        .isEqualTo(interview.pilot.interview.domain.AnswerAttemptStatus.COMPLETED);
+  }
 
   @Test void staleTabCannotApplyItsAnswerToTheNextTurnAndReplayKeepsItsVersion() {
     var current=sessions.findById(session.getId()).orElseThrow();

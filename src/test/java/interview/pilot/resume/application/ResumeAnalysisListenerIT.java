@@ -187,9 +187,9 @@ class ResumeAnalysisListenerIT {
     send(work.message());
 
     await(() -> rabbitAdmin.getQueueInfo(
-        RabbitTopologyConfig.RESUME_ANALYSIS_MAIN_QUEUE + ".retry.1").getMessageCount() == 1,
+        RabbitTopologyConfig.RESUME_ANALYSIS_MAIN_QUEUE + ".retry.2").getMessageCount() == 1,
         Duration.ofSeconds(3));
-    await(() -> taskStatus(work) == AsyncTaskStatus.COMPLETED, Duration.ofSeconds(10));
+    await(() -> taskStatus(work) == AsyncTaskStatus.COMPLETED, Duration.ofSeconds(40));
     assertThat(resumeRepository.findById(work.resume().getId()).orElseThrow().getStatus())
         .isEqualTo(ResumeStatus.READY);
   }

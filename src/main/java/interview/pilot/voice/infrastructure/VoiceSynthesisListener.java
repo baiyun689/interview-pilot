@@ -68,12 +68,12 @@ public class VoiceSynthesisListener {
     try {
       token = processingClaim.acquire(claimKey, PROCESSING_TTL).orElse(null);
     } catch (RuntimeException exception) {
-      routeFailure(retryMessage, source, () -> false);
+      retryPolicy.defer(retryMessage, source);
       return;
     }
     if (token == null) {
       // A duplicate delivery must not consume the retry budget of the active owner.
-      routeFailure(retryMessage, source, () -> false);
+      retryPolicy.defer(retryMessage, source);
       return;
     }
 
