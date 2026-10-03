@@ -47,6 +47,7 @@ import interview.pilot.knowledge.infrastructure.KnowledgeDocumentJpaRepository;
 import interview.pilot.knowledge.infrastructure.KnowledgeDocumentRepository;
 
 @SpringBootTest(properties = {
+    "spring.autoconfigure.exclude=org.redisson.spring.starter.RedissonAutoConfigurationV4",
     "app.async.rabbit.dispatch-initial-delay=1h",
     "app.knowledge.enabled=false"
 })
@@ -63,10 +64,6 @@ class KnowledgeIndexListenerIT {
   private static final RabbitMQContainer RABBITMQ =
       new RabbitMQContainer(DockerImageName.parse("rabbitmq:4-management"));
 
-  @Container
-  private static final GenericContainer<?> REDIS =
-      new GenericContainer<>(DockerImageName.parse("redis:7.4-alpine"))
-          .withExposedPorts(6379);
 
   @DynamicPropertySource
   static void infrastructureProperties(DynamicPropertyRegistry registry) {
@@ -77,8 +74,6 @@ class KnowledgeIndexListenerIT {
     registry.add("spring.rabbitmq.port", RABBITMQ::getAmqpPort);
     registry.add("spring.rabbitmq.username", RABBITMQ::getAdminUsername);
     registry.add("spring.rabbitmq.password", RABBITMQ::getAdminPassword);
-    registry.add("spring.data.redis.host", REDIS::getHost);
-    registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
     registry.add("app.knowledge.enabled", () -> "false");
   }
 
@@ -124,7 +119,9 @@ class KnowledgeIndexListenerIT {
   @MockitoSpyBean
   private ProcessingClaim processingClaim;
 
-  @Autowired
+  @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
+  @MockitoBean
   private RedissonClient redis;
 
   @BeforeEach
@@ -138,13 +135,12 @@ class KnowledgeIndexListenerIT {
     for (int retry = 1; retry <= 3; retry++) {
       rabbitAdmin.purgeQueue(route.mainQueue() + ".retry." + retry, true);
     }
-    redis.getKeys().deleteByPattern(REDIS_KEY_PREFIX + "knowledge-index:*");
   }
 
   @Test
   void consumesMainQueueIndexesAndMarksReady() throws Exception {
     Work work = pendingWork();
-    when(indexer.index(work.document().getDocumentId(), 1)).thenReturn(3);
+    when(indexer.index(work.document().getDocumentId(), 1)).thenReturn(new KnowledgeIndexer.IndexResult(3, "parsed", "{}"));
 
     send(work.message());
 
@@ -165,15 +161,15 @@ class KnowledgeIndexListenerIT {
     taskRepository.save(work.task());
 
     String claimKey = "knowledge-index:" + work.document().getDocumentId();
-    String otherOwner = processingClaim.acquire(claimKey, Duration.ofMinutes(5)).orElseThrow();
+    String otherOwner = "preserved-terminal-token";
+    jdbc.update("update async_task set execution_token=? where id=?", otherOwner, work.task().getId());
 
     send(work.message());
     await(() -> queueMessageCount(routeFor(AsyncTaskType.KNOWLEDGE_DOCUMENT_INDEX).mainQueue()) == 0,
         Duration.ofSeconds(5));
 
     verify(indexer, never()).index(org.mockito.ArgumentMatchers.any(java.util.UUID.class), org.mockito.ArgumentMatchers.anyInt());
-    assertThat(redis.getBucket(REDIS_KEY_PREFIX + claimKey, StringCodec.INSTANCE).get())
-        .isEqualTo(otherOwner);
+    assertThat(taskRepository.findById(work.task().getId()).orElseThrow().getExecutionToken()).isEqualTo(otherOwner);
   }
 
   @Test
@@ -190,8 +186,7 @@ class KnowledgeIndexListenerIT {
     await(() -> taskStatus(work) == AsyncTaskStatus.PUBLISHED, Duration.ofSeconds(5));
     assertThat(requireDocument(work.document().getDocumentId()).getStatus())
         .isEqualTo(KnowledgeDocumentStatus.PROCESSING);
-    assertThat(redis.getBucket(REDIS_KEY_PREFIX + "knowledge-index:"
-        + work.document().getDocumentId(), StringCodec.INSTANCE).isExists()).isFalse();
+    await(() -> taskRepository.findById(work.task().getId()).orElseThrow().getExecutionToken() == null, Duration.ofSeconds(5));
   }
 
   @Test
@@ -207,25 +202,39 @@ class KnowledgeIndexListenerIT {
     assertThat(taskStatus(work)).isEqualTo(AsyncTaskStatus.PENDING);
   }
 
-  @Test
-  void lateStaleRevisionDoesNotOverwrite() throws Exception {
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+  void takeoverFencesOldIndexMetadataAndFailure(boolean failOld) throws Exception {
     Work work = pendingWork();
+    var entered = new java.util.concurrent.CountDownLatch(1);
+    var release = new java.util.concurrent.CountDownLatch(1);
+    var calls = new java.util.concurrent.atomic.AtomicInteger();
     when(indexer.index(work.document().getDocumentId(), 1)).thenAnswer(invocation -> {
-      work.document().setStatus(KnowledgeDocumentStatus.PROCESSING);
-      // Don't actually advance to READY — simulate a concurrent revision bump
-      return 2;
+      if (calls.incrementAndGet() == 1) {
+        entered.countDown();
+        if (!release.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("test timeout");
+        if (failOld) throw new IllegalStateException("old index failure");
+        return new KnowledgeIndexer.IndexResult(1, "old metadata", "{}");
+      }
+      return new KnowledgeIndexer.IndexResult(3, "winner metadata", "{}");
     });
-    // Advance revision concurrently so the handler's markReady will be stale.
-    work.document().beginReindex();
-    documentRepository.save(work.document());
-
-    send(work.message());
-
-    // Stale revision causes retryable failure — task stays PUBLISHED
-    await(() -> requireDocument(work.document().getDocumentId()).getIndexRevision() == 2,
-        Duration.ofSeconds(10));
-    assertThat(requireDocument(work.document().getDocumentId()).getStatus())
-        .isEqualTo(KnowledgeDocumentStatus.PROCESSING);
+    try (var pool = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+      var old = pool.submit(() -> handler.handle(work.message()));
+      try {
+        assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+        var original = taskRepository.findById(work.task().getId()).orElseThrow();
+        assertThat(handler.handle(work.message())).isEqualTo(KnowledgeIndexHandler.Outcome.BUSY);
+        assertThat(handler.markDead(work.message(), original.getAttemptCount(), "wrong-token")).isFalse();
+        jdbc.update("update async_task set execution_lease_until=current_timestamp(6)-interval 1 second where id=?", work.task().getId());
+        assertThat(handler.handle(work.message())).isEqualTo(KnowledgeIndexHandler.Outcome.TERMINAL);
+        handler.releaseForRetry(work.message(), original.getAttemptCount(), original.getExecutionToken());
+        assertThat(handler.markDead(work.message(), original.getAttemptCount(), original.getExecutionToken())).isFalse();
+        release.countDown();
+        assertThat(old.get(5, TimeUnit.SECONDS)).isEqualTo(KnowledgeIndexHandler.Outcome.STALE);
+        assertThat(requireDocument(work.document().getDocumentId()).getParsedText()).isEqualTo("winner metadata");
+        assertThat(requireDocument(work.document().getDocumentId()).getChunkCount()).isEqualTo(3);
+      } finally { release.countDown(); }
+    }
   }
 
   @Test
@@ -258,7 +267,8 @@ class KnowledgeIndexListenerIT {
     Work work = pendingWork();
     // Simulate another worker actively processing the same document
     String claimKey = "knowledge-index:" + work.document().getDocumentId();
-    String activeToken = processingClaim.acquire(claimKey, Duration.ofMinutes(1)).orElseThrow();
+    String activeToken = UUID.randomUUID().toString();
+    jdbc.update("update async_task set status='PUBLISHED', execution_token=?, execution_lease_until=current_timestamp(6)+interval 1 minute where id=?", activeToken, work.task().getId());
 
     // Send two messages — both should fail to acquire claim
     send(work.message());
@@ -272,12 +282,11 @@ class KnowledgeIndexListenerIT {
     }, Duration.ofSeconds(10));
 
     // The active claim holder remains
-    assertThat(redis.getBucket(REDIS_KEY_PREFIX + claimKey, StringCodec.INSTANCE).get())
-        .isEqualTo(activeToken);
+    assertThat(taskRepository.findById(work.task().getId()).orElseThrow().getExecutionToken()).isEqualTo(activeToken);
 
     // Now release the active token and verify a re-delivery can complete
-    processingClaim.release(claimKey, activeToken);
-    when(indexer.index(work.document().getDocumentId(), 1)).thenReturn(5);
+    jdbc.update("update async_task set execution_lease_until=current_timestamp(6)-interval 1 second where id=?", work.task().getId());
+    when(indexer.index(work.document().getDocumentId(), 1)).thenReturn(new KnowledgeIndexer.IndexResult(5, "parsed", "{}"));
 
     // Manually re-send
     send(work.message());
@@ -285,6 +294,21 @@ class KnowledgeIndexListenerIT {
     await(() -> taskStatus(work) == AsyncTaskStatus.COMPLETED, Duration.ofSeconds(10));
     assertThat(requireDocument(work.document().getDocumentId()).getStatus())
         .isEqualTo(KnowledgeDocumentStatus.READY);
+  }
+
+  @Test void newDocumentRevisionRejectsLateMetadata() {
+    Work work = pendingWork();
+    when(indexer.index(work.document().getDocumentId(), 1)).thenAnswer(invocation -> {
+      var changed = requireDocument(work.document().getDocumentId());
+      changed.beginReindex();
+      documentRepository.save(changed);
+      return new KnowledgeIndexer.IndexResult(5, "obsolete parsed text", "{}");
+    });
+    assertThat(handler.handle(work.message())).isEqualTo(KnowledgeIndexHandler.Outcome.STALE);
+    var current = requireDocument(work.document().getDocumentId());
+    assertThat(current.getIndexRevision()).isEqualTo(2);
+    assertThat(current.getStatus()).isEqualTo(KnowledgeDocumentStatus.PROCESSING);
+    assertThat(current.getParsedText()).isNotEqualTo("obsolete parsed text");
   }
 
   private void send(TaskMessage message) {

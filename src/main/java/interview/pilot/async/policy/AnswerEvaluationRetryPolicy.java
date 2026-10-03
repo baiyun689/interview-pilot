@@ -13,8 +13,8 @@ import interview.pilot.async.infrastructure.AsyncTaskEntity;
  * {@code TaskRetryPolicy}; on exhaustion the handler marks the turn's eval_status FAILED without
  * touching the answer flow.
  *
- * <p>The claim key equals the bizKey ({@code answer-eval:<sessionId>:<turnNo>}), which is also the
- * key the evaluation listener acquires, so retry bookkeeping and processing claims never drift.
+ * <p>Execution leases live in MySQL. Unsupported manual retries must be rejected without
+ * contacting Redis; the business key remains {@code answer-eval:<sessionId>:<turnNo>}.
  */
 @Component
 public class AnswerEvaluationRetryPolicy extends AbstractRetryableTaskPolicy {

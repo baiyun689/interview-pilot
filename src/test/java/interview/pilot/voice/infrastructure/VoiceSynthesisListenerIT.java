@@ -85,7 +85,7 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * End-to-end synthesis pipeline against MySQL (V21 schema) and Redis with the real
- * {@code RedisProcessingClaim}: StartInterviewService creates the intro turn with its
+ * database execution lease: StartInterviewService creates the intro turn with its
  * question_speech row and synthesis task in one transaction (plan §11) → listener → READY
  * with stored audio metadata. The {@link FakeSpeechSynthesizer} is the seam (plan §5.3); its
  * default audio echoes the synthesized text so the test observes the question text that
@@ -93,6 +93,7 @@ import tools.jackson.databind.ObjectMapper;
  * blocks answering" guarantee are exercised end to end.
  */
 @SpringBootTest(properties = {
+    "spring.autoconfigure.exclude=org.redisson.spring.starter.RedissonAutoConfigurationV4",
     "VOICE_ENABLED=true",
     "VOICE_FILES_ROOT=build/voice-synthesis-listener-test-files",
     "VOICE_MAX_UPLOAD_BYTES=8388608",
@@ -111,23 +112,20 @@ import tools.jackson.databind.ObjectMapper;
 })
 @Testcontainers
 class VoiceSynthesisListenerIT {
+  @MockitoBean private org.redisson.api.RedissonClient unusedRedis;
+  @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
   @Container
   private static final MySQLContainer MYSQL =
       new MySQLContainer(DockerImageName.parse("mysql:8.4"))
           .withDatabaseName("interview_pilot_voice_synthesis");
 
-  @Container
-  private static final GenericContainer<?> REDIS =
-      new GenericContainer<>(DockerImageName.parse("redis:7.4-alpine"))
-          .withExposedPorts(6379);
 
   @DynamicPropertySource
   static void infrastructureProperties(DynamicPropertyRegistry registry) {
     registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
     registry.add("spring.datasource.username", MYSQL::getUsername);
     registry.add("spring.datasource.password", MYSQL::getPassword);
-    registry.add("spring.data.redis.host", REDIS::getHost);
-    registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
   }
 
   @MockitoBean
@@ -458,7 +456,7 @@ class VoiceSynthesisListenerIT {
     var speech = speechOf(start);
     assertThat(speech.getStatus()).isEqualTo(QuestionSpeechStatus.PENDING);
 
-    assertThat(handler.markDeadCurrent(message(speech, 0))).isTrue();
+    assertThat(handler.recoverAbandoned(message(speech, 0), java.time.Instant.now().plusSeconds(1))).isTrue();
 
     var failed = speeches.findBySpeechId(speech.getSpeechId()).orElseThrow();
     assertThat(failed.getStatus()).isEqualTo(QuestionSpeechStatus.FAILED);
@@ -476,7 +474,7 @@ class VoiceSynthesisListenerIT {
 
     // A dead-lettered old-generation message must not terminalize the newer generation:
     // the speech epoch (still 0) no longer matches the message epoch, so markDead refuses.
-    assertThat(handler.markDead(message(speech, 0), 0)).isFalse();
+    assertThat(handler.markDead(message(speech, 0), 0, "old-owner")).isFalse();
     var fenced = speeches.findBySpeechId(speech.getSpeechId()).orElseThrow();
     assertThat(fenced.getStatus()).isEqualTo(QuestionSpeechStatus.PENDING);
     assertThat(taskOf(fenced).getStatus()).isEqualTo(AsyncTaskStatus.PENDING);
@@ -535,6 +533,49 @@ class VoiceSynthesisListenerIT {
     assertThat(speeches.findBySpeechId(speech.getSpeechId()).orElseThrow()
         .getStatus()).isEqualTo(QuestionSpeechStatus.FAILED);
     assertThat(sessions.findById(session.getId()).orElseThrow().getCurrentTurnNo()).isEqualTo(2);
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+  void expiredLeaseFencesOldSuccessAndFailure(boolean failOld) throws Exception {
+    var speech = speechOf(startInterview.start(user, session.getSessionId()));
+    var taskMessage = message(speech, 0);
+    var entered = new java.util.concurrent.CountDownLatch(1);
+    var release = new java.util.concurrent.CountDownLatch(1);
+    var calls = new java.util.concurrent.atomic.AtomicInteger();
+    fakeSynthesizer.respondWith((text, profile) -> {
+      if (calls.incrementAndGet() == 1) {
+        entered.countDown();
+        try { if (!release.await(10, java.util.concurrent.TimeUnit.SECONDS)) throw new IllegalStateException("test timed out"); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IllegalStateException(e); }
+        if (failOld) throw new IllegalStateException("old provider failure");
+        return new SynthesizedSpeech("old audio".getBytes(StandardCharsets.UTF_8), "audio/mpeg", "old");
+      }
+      return new SynthesizedSpeech("new audio".getBytes(StandardCharsets.UTF_8), "audio/mpeg", "new");
+    });
+    try (var pool = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+      var old = pool.submit(() -> handler.synthesize(taskMessage));
+      try {
+        assertThat(entered.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        var original = taskOf(speech);
+        assertThat(handler.synthesize(taskMessage)).isEqualTo(VoiceSynthesisHandler.Outcome.BUSY);
+        assertThat(handler.markDead(taskMessage, original.getAttemptCount(), "wrong-token")).isFalse();
+        // Even the recovery sweeper cannot terminalize a task while its lease is valid.
+        assertThat(handler.recoverAbandoned(taskMessage, java.time.Instant.now().plusSeconds(1))).isFalse();
+        jdbc.update("update async_task set execution_lease_until=current_timestamp(6)-interval 1 second where task_id=?", taskMessage.taskId().toString());
+        assertThat(handler.synthesize(taskMessage)).isEqualTo(VoiceSynthesisHandler.Outcome.TERMINAL);
+        handler.releaseForRetry(taskMessage, original.getAttemptCount(), original.getExecutionToken());
+        assertThat(handler.markDead(taskMessage, original.getAttemptCount(), original.getExecutionToken())).isFalse();
+        release.countDown();
+        assertThat(old.get(5, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(VoiceSynthesisHandler.Outcome.STALE);
+        var winner = speeches.findBySpeechId(speech.getSpeechId()).orElseThrow();
+        try (var media = mediaStore.open(winner.getStorageKey())) {
+          assertThat(new String(media.inputStream().readAllBytes(), StandardCharsets.UTF_8)).isEqualTo("new audio");
+        }
+        assertThat(taskOf(speech).getStatus()).isEqualTo(AsyncTaskStatus.COMPLETED);
+        assertThat(calls.get()).isEqualTo(2);
+      } finally { release.countDown(); }
+    }
   }
 
   // ---------------------------------------------------------------- helpers

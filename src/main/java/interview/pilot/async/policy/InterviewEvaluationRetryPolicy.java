@@ -16,10 +16,7 @@ import interview.pilot.interview.infrastructure.InterviewSessionRepository;
  */
 @Component
 public class InterviewEvaluationRetryPolicy extends AbstractInterviewSessionRetryPolicy {
-  /**
-   * Public so {@code InterviewReportListener} acquires the very key this policy clears on
-   * manual retry — a drifted literal on either side would silently break retry idempotency.
-   */
+  /** Legacy business identity format, retained for retry target validation. */
   public static final String CLAIM_KEY_PREFIX = "interview-report:";
 
   public InterviewEvaluationRetryPolicy(InterviewSessionRepository sessions) {

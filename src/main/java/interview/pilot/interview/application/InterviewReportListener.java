@@ -1,81 +1,52 @@
 package interview.pilot.interview.application;
 
-import java.time.Duration;
-
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Component;
+import interview.pilot.async.domain.AsyncTaskType;
+import interview.pilot.async.messaging.*;
+import interview.pilot.interview.application.FixedInterviewReportHandler;
+import interview.pilot.interview.application.ReportGenerationRetryableException;
 
-import interview.pilot.async.idempotency.ProcessingClaim;
-import interview.pilot.async.messaging.RabbitTopologyConfig;
-import interview.pilot.async.messaging.TaskMessage;
-import interview.pilot.async.messaging.TaskRetryPolicy;
-import interview.pilot.async.policy.InterviewEvaluationRetryPolicy;
-
+/** MySQL owns execution; publish confirmation precedes lease release. */
 @Component
 public class InterviewReportListener {
-  private static final Duration PROCESSING_TTL = Duration.ofMinutes(11);
-  private static final Duration COMPLETED_TTL = Duration.ofHours(24);
   private final FixedInterviewReportHandler handler;
-  private final ProcessingClaim claims;
   private final TaskRetryPolicy retries;
 
-  public InterviewReportListener(
-      FixedInterviewReportHandler handler, ProcessingClaim claims, TaskRetryPolicy retries) {
+  public InterviewReportListener(FixedInterviewReportHandler handler, TaskRetryPolicy retries) {
     this.handler = handler;
-    this.claims = claims;
     this.retries = retries;
   }
 
-  @RabbitListener(
-      queues = RabbitTopologyConfig.INTERVIEW_REPORT_MAIN_QUEUE,
+  @RabbitListener(queues = RabbitTopologyConfig.INTERVIEW_REPORT_MAIN_QUEUE,
       autoStartup = "${app.async.interview-report-listener.auto-startup:true}")
   public void receive(TaskMessage message, Message source) {
-    FixedInterviewReportHandler.Target target = handler.inspect(message);
-    if (target.terminal()) return;
-    String key = InterviewEvaluationRetryPolicy.CLAIM_KEY_PREFIX + target.sessionId();
-    String token;
+    if (message == null) throw new IllegalArgumentException("Task message is required");
+    var retryMessage = new TaskMessage(message.taskId(), AsyncTaskType.INTERVIEW_EVALUATION, message.bizKey(), message.executionEpoch());
+    FixedInterviewReportHandler.Outcome outcome;
     try {
-      token = claims.acquire(key, PROCESSING_TTL).orElse(null);
-    } catch (RuntimeException exception) {
-      retries.defer(message, source);
-      return;
-    }
-    if (token == null) {
-      // Keep the redelivery recoverable even if the previous owner has crashed.
-      retries.defer(message, source);
-      return;
-    }
-    try {
-      var outcome = handler.handle(message, retries.retryCountOf(source));
-      if (outcome == FixedInterviewReportHandler.Outcome.TERMINAL) {
-        completeBestEffort(key, token);
-      } else {
-        releaseBestEffort(key, token);
-      }
+      if (handler.inspect(message).terminal()) return;
+      outcome = handler.handle(message, retries.retryCountOf(source));
     } catch (ReportGenerationRetryableException exception) {
-      releaseBestEffort(key, token);
-      routeFailure(message, source, exception.attemptGeneration());
+      String token = exception.executionToken();
+      if (token == null) {
+        // Failure before a committed claim cannot terminate another execution.
+        retries.defer(retryMessage, source);
+      } else if (exception.getCause() instanceof OptimisticLockingFailureException) {
+        retries.defer(retryMessage, source);
+        handler.releaseForRetry(message, exception.attemptGeneration(), token);
+      } else if (retries.routeFailure(retryMessage, source) == TaskRetryPolicy.RouteOutcome.DEAD_LETTER) {
+        handler.markDead(message, exception.attemptGeneration(), token);
+      } else {
+        handler.releaseForRetry(message, exception.attemptGeneration(), token);
+      }
+      return;
     } catch (RuntimeException exception) {
-      releaseBestEffort(key, token);
-      routeFailure(message, source, target.attemptGeneration());
+      retries.defer(retryMessage, source);
+      return;
     }
-  }
-
-  private void completeBestEffort(String key, String token) {
-    if (token.isEmpty()) return;
-    try { claims.complete(key, token, COMPLETED_TTL); } catch (RuntimeException ignored) { }
-  }
-
-  private void releaseBestEffort(String key, String token) {
-    if (token.isEmpty()) return;
-    try { claims.release(key, token); } catch (RuntimeException ignored) { }
-  }
-
-  private void routeFailure(TaskMessage message, Message source, int attemptGeneration) {
-    if (retries.routeFailure(message, source) == TaskRetryPolicy.RouteOutcome.DEAD_LETTER
-        && !handler.markDead(message, attemptGeneration)) {
-      throw new IllegalStateException("Interview report dead-letter state could not be persisted");
-    }
+    if (outcome == FixedInterviewReportHandler.Outcome.BUSY) retries.defer(retryMessage, source);
   }
 }

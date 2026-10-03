@@ -122,7 +122,7 @@ public class HiringCampaignService {
     if (!work.status.equals("FAILED")) throw conflict("仅失败的准备任务可以重试");
     var task = store.find(AsyncTaskEntity.class, work.taskId, true).orElseThrow();
     work.status = "PENDING"; work.error = null; work.attempts = 0; work.nextAttemptAt = Instant.now(); work.leaseToken = null; work.leaseUntil = null;
-    task.setExecutionEpoch(task.getExecutionEpoch() + 1); task.setStatus(AsyncTaskStatus.PENDING); task.setLastPublishedAt(null); task.setLastError(null);
+    task.clearExecutionLease(); task.setExecutionEpoch(task.getExecutionEpoch() + 1); task.setStatus(AsyncTaskStatus.PENDING); task.setLastPublishedAt(null); task.setLastError(null);
     member.approvedSnapshot = null; member.approvedBy = null; member.approvedAt = null;
     organizations.audit(user, orgId, "BATCH_MEMBER_RETRIED", member.id);
   }

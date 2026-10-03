@@ -307,8 +307,7 @@ class QuestionSpeechModuleTest {
     assertThat(retried.getExecutionEpoch()).isEqualTo(1);
     // The listener's terminal claim is cleared so the retried message can acquire it
     // (the claim key IS the voice bizKey).
-    verify(claims).clearTerminal(
-        QuestionSpeechSynthesisRetryPolicy.BIZ_KEY_PREFIX + speech.getSpeechId());
+    org.mockito.Mockito.verifyNoInteractions(claims);
     var task = tasks.findByTaskTypeAndBizKey(
         AsyncTaskType.QUESTION_SPEECH_SYNTHESIS,
         QuestionSpeechSynthesisRetryPolicy.BIZ_KEY_PREFIX + speech.getSpeechId()).orElseThrow();
@@ -351,18 +350,14 @@ class QuestionSpeechModuleTest {
   }
 
   @Test
-  void retryWithAnActiveListenerClaimIsRejected() {
+  void retryIgnoresObsoleteRedisClaim() {
     var speech = synthesizeFailed();
-    when(claims.clearTerminal(anyString()))
-        .thenReturn(ProcessingClaim.ClearResult.ACTIVE);
-
-    assertThatThrownBy(() ->
-        module.retry(user, session.getSessionId(), speech.getSpeechId()))
-        .isInstanceOfSatisfying(BusinessException.class, error ->
-            assertThat(error.code()).isEqualTo(VoiceErrorCodes.QUESTION_SPEECH_NOT_READY));
-    var untouched = speeches.findBySpeechId(speech.getSpeechId()).orElseThrow();
-    assertThat(untouched.getStatus()).isEqualTo(QuestionSpeechStatus.FAILED);
-    assertThat(untouched.getExecutionEpoch()).isZero();
+    when(claims.clearTerminal(anyString())).thenThrow(new IllegalStateException("Redis unavailable"));
+    module.retry(user, session.getSessionId(), speech.getSpeechId());
+    var retried = speeches.findBySpeechId(speech.getSpeechId()).orElseThrow();
+    assertThat(retried.getStatus()).isEqualTo(QuestionSpeechStatus.PENDING);
+    assertThat(retried.getExecutionEpoch()).isEqualTo(1);
+    org.mockito.Mockito.verifyNoInteractions(claims);
   }
 
   @Test

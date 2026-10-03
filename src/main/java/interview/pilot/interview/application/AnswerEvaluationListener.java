@@ -1,102 +1,53 @@
 package interview.pilot.interview.application;
 
-import java.time.Duration;
-
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Component;
-
-import interview.pilot.async.idempotency.ProcessingClaim;
+import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.messaging.RabbitTopologyConfig;
 import interview.pilot.async.messaging.TaskMessage;
 import interview.pilot.async.messaging.TaskRetryPolicy;
 
-/**
- * Consumer of the {@code interview-pilot.interview.answer-evaluation.main} queue: inspect →
- * acquire the per-turn processing claim (the bizKey, shared with the retry policy) → evaluate →
- * release/complete. Operational failures ride the shared 5s/30s/120s delayed-retry ladder; on
- * dead-letter the handler marks only eval_status FAILED, so neither the next question nor report
- * generation is blocked. A delivery while the owner runs is deferred without consuming
- * its retry budget, so a crashed owner's message is not silently acknowledged and lost.
- */
+/** MySQL owns execution; RabbitMQ confirms every retry before the execution lease is released. */
 @Component
 public class AnswerEvaluationListener {
-  private static final Duration PROCESSING_TTL = Duration.ofMinutes(2);
-  private static final Duration COMPLETED_TTL = Duration.ofHours(24);
-
   private final AnswerEvaluationHandler handler;
-  private final ProcessingClaim claims;
   private final TaskRetryPolicy retries;
 
-  public AnswerEvaluationListener(
-      AnswerEvaluationHandler handler, ProcessingClaim claims, TaskRetryPolicy retries) {
+  public AnswerEvaluationListener(AnswerEvaluationHandler handler, TaskRetryPolicy retries) {
     this.handler = handler;
-    this.claims = claims;
     this.retries = retries;
   }
 
-  @RabbitListener(
-      queues = RabbitTopologyConfig.ANSWER_EVALUATION_MAIN_QUEUE,
+  @RabbitListener(queues = RabbitTopologyConfig.ANSWER_EVALUATION_MAIN_QUEUE,
       autoStartup = "${app.async.answer-evaluation-listener.auto-startup:true}")
   public void receive(TaskMessage message, Message source) {
-    AnswerEvaluationHandler.Target target = handler.inspect(message);
-    if (target.terminal()) {
-      return;
-    }
-    String claimKey = message.bizKey();
-    String token;
+    if (message == null) throw new IllegalArgumentException("Answer evaluation message is required");
+    var retryMessage = new TaskMessage(message.taskId(), AsyncTaskType.ANSWER_EVALUATION,
+        message.bizKey(), message.executionEpoch());
+    AnswerEvaluationHandler.Outcome outcome;
     try {
-      token = claims.acquire(claimKey, PROCESSING_TTL).orElse(null);
-    } catch (RuntimeException exception) {
-      retries.defer(message, source);
-      return;
-    }
-    if (token == null) {
-      retries.defer(message, source);
-      return;
-    }
-    try {
-      AnswerEvaluationHandler.Outcome outcome = handler.evaluate(message);
-      if (outcome == AnswerEvaluationHandler.Outcome.TERMINAL) {
-        completeBestEffort(claimKey, token);
-      } else {
-        releaseBestEffort(claimKey, token);
-      }
+      if (handler.inspect(message).terminal()) return;
+      outcome = handler.evaluate(message);
     } catch (AnswerEvaluationRetryableException exception) {
-      releaseBestEffort(claimKey, token);
-      routeFailure(message, source, exception.attemptGeneration());
+      int generation = exception.attemptGeneration();
+      String token = exception.executionToken();
+      if (exception.getCause() instanceof OptimisticLockingFailureException) {
+        retries.defer(retryMessage, source);
+        handler.releaseForRetry(message, generation, token);
+      } else if (retries.routeFailure(retryMessage, source) == TaskRetryPolicy.RouteOutcome.DEAD_LETTER) {
+        // A false result means a superseded execution or answer, not a persistence failure.
+        handler.markDead(message, generation, token, exception.requestId());
+      } else {
+        handler.releaseForRetry(message, generation, token);
+      }
+      return;
     } catch (RuntimeException exception) {
-      releaseBestEffort(claimKey, token);
-      routeFailure(message, source, target.attemptGeneration());
-    }
-  }
-
-  private void completeBestEffort(String key, String token) {
-    if (token.isEmpty()) {
+      // No committed identity: defer without exhausting or terminating someone else's work.
+      retries.defer(retryMessage, source);
       return;
     }
-    try {
-      claims.complete(key, token, COMPLETED_TTL);
-    } catch (RuntimeException ignored) {
-      // MySQL terminal state is authoritative; Redis completion is best effort.
-    }
-  }
-
-  private void releaseBestEffort(String key, String token) {
-    if (token.isEmpty()) {
-      return;
-    }
-    try {
-      claims.release(key, token);
-    } catch (RuntimeException ignored) {
-      // The short TTL makes a lost release recoverable.
-    }
-  }
-
-  private void routeFailure(TaskMessage message, Message source, int attemptGeneration) {
-    if (retries.routeFailure(message, source) == TaskRetryPolicy.RouteOutcome.DEAD_LETTER
-        && !handler.markDead(message, attemptGeneration)) {
-      throw new IllegalStateException("Answer evaluation dead-letter state could not be persisted");
-    }
+    if (outcome == AnswerEvaluationHandler.Outcome.BUSY) retries.defer(retryMessage, source);
   }
 }

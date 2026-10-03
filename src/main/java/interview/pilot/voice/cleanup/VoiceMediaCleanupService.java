@@ -134,7 +134,7 @@ import interview.pilot.voice.storage.VoiceStorageKeys;
  * re-heads every tick, defers again, and the walk passes it. The {@code deferred} metric on
  * {@link VoiceCleanupMetrics} is the alert signal for that condition (Task 12 dashboarding).
  *
- * <p>Concurrency: one Redis processing claim ({@value #RUN_CLAIM_KEY}, TTL
+ * <p>Concurrency: one MySQL processing lease ({@value #RUN_CLAIM_KEY}, TTL
  * {@code claimTtl}) gates the whole run so two instances (or two overlapping ticks) never walk
  * the same candidates; every step is additionally idempotent and row-locked, so even a claim
  * loss degrades to harmless double-processing. The claim is always released in a
@@ -368,9 +368,9 @@ public class VoiceMediaCleanupService {
       return RowOutcome.RESOLVED; // the coarse task query needs the recording-side confirmation
     }
     try {
-      boolean terminalized = transcriptionHandler.markDeadCurrent(
+      boolean terminalized = transcriptionHandler.recoverAbandoned(
           new TaskMessage(task.getTaskId(), AsyncTaskType.VOICE_TRANSCRIPTION,
-              task.getBizKey(), task.getExecutionEpoch()));
+              task.getBizKey(), task.getExecutionEpoch()), clock.instant().minus(cleanup.stuckTaskThreshold()));
       if (terminalized) {
         metrics.deleted("stuck_transcription");
         return RowOutcome.DELETED;
@@ -404,9 +404,9 @@ public class VoiceMediaCleanupService {
       return RowOutcome.RESOLVED;
     }
     try {
-      boolean terminalized = synthesisHandler.markDeadCurrent(
+      boolean terminalized = synthesisHandler.recoverAbandoned(
           new TaskMessage(task.getTaskId(), AsyncTaskType.QUESTION_SPEECH_SYNTHESIS,
-              task.getBizKey(), task.getExecutionEpoch()));
+              task.getBizKey(), task.getExecutionEpoch()), clock.instant().minus(cleanup.stuckTaskThreshold()));
       if (terminalized) {
         metrics.deleted("stuck_synthesis");
         return RowOutcome.DELETED;
@@ -603,8 +603,7 @@ public class VoiceMediaCleanupService {
       return recordings.findByRecordingId(parsed.resourceId())
           .map(row -> key.equals(row.getStorageKey())).orElse(false);
     }
-    return speeches.findBySpeechId(parsed.resourceId())
-        .map(row -> key.equals(row.getStorageKey())).orElse(false);
+    return speeches.existsByStorageKey(key);
   }
 
   /** Best-effort removal of now-empty key directories up to (not including) the media root. */

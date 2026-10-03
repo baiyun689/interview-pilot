@@ -34,9 +34,6 @@ public class InterviewPreparationRetryPolicy extends AbstractInterviewSessionRet
   }
 
   @Override
-  public boolean requiresRedisClaim() { return false; }
-
-  @Override
   public void reset(AsyncTaskEntity task, long userAccountId) {
     UUID sessionId = parseInterviewId(task.getBizKey());
     InterviewSessionEntity session =

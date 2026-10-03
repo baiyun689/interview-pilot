@@ -12,7 +12,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import interview.pilot.async.api.AsyncTaskResponse;
 import interview.pilot.async.domain.AsyncTaskStatus;
-import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.async.policy.RetryableTaskPolicyRegistry;
@@ -31,19 +30,16 @@ public class AsyncTaskService {
   private static final Logger log = LoggerFactory.getLogger(AsyncTaskService.class);
 
   private final AsyncTaskRepository tasks;
-  private final ProcessingClaim claims;
   private final TransactionTemplate transactions;
   private final AiMetrics metrics;
   private final RetryableTaskPolicyRegistry policies;
 
   public AsyncTaskService(
       AsyncTaskRepository tasks,
-      ProcessingClaim claims,
       PlatformTransactionManager transactionManager,
       AiMetrics metrics,
       RetryableTaskPolicyRegistry policies) {
     this.tasks = tasks;
-    this.claims = claims;
     this.transactions = new TransactionTemplate(transactionManager);
     this.metrics = metrics;
     this.policies = policies;
@@ -55,17 +51,6 @@ public class AsyncTaskService {
 
   public AsyncTaskResponse retry(CurrentUser user, UUID taskId, UUID traceId) {
     RetryTarget target = transactions.execute(status -> retryTarget(user, taskId));
-    if (target.requiresRedisClaim()) {
-      ProcessingClaim.ClearResult cleared;
-      try {
-        cleared = claims.clearTerminal(target.claimKey());
-      } catch (RuntimeException exception) {
-        throw conflict("TASK_RETRY_UNAVAILABLE", "Task retry is temporarily unavailable");
-      }
-      if (cleared == ProcessingClaim.ClearResult.ACTIVE) {
-        throw conflict("TASK_STILL_PROCESSING", "Task processing is still active");
-      }
-    }
     try {
       AsyncTaskResponse result = transactions.execute(status -> reset(target));
       log.info("async_task_retry taskId={} taskType={} traceId={}",
@@ -80,9 +65,8 @@ public class AsyncTaskService {
   private RetryTarget retryTarget(CurrentUser user, UUID taskId) {
     AsyncTaskEntity task = requireTask(user, taskId);
     requireRetryable(task);
-    var policy = policies.forType(task.getTaskType());
-    return new RetryTarget(task.getId(), requireOwner(user), task.getVersion(),
-        policy.claimKey(task), policy.requiresRedisClaim());
+    policies.forType(task.getTaskType()).claimKey(task); // validates the business identity / retry entry point
+    return new RetryTarget(task.getId(), requireOwner(user), task.getVersion());
   }
 
   private AsyncTaskResponse reset(RetryTarget target) {
@@ -94,6 +78,7 @@ public class AsyncTaskService {
     }
     requireRetryable(task);
     policies.forType(task.getTaskType()).reset(task, target.userAccountId());
+    task.clearExecutionLease();
     task.setStatus(AsyncTaskStatus.PENDING);
     task.setExecutionEpoch(task.getExecutionEpoch() + 1);
     task.setLastPublishedAt(null);
@@ -133,6 +118,5 @@ public class AsyncTaskService {
     return new BusinessException(code, message, HttpStatus.CONFLICT);
   }
 
-  private record RetryTarget(Long databaseId, Long userAccountId, long version, String claimKey,
-      boolean requiresRedisClaim) {}
+  private record RetryTarget(Long databaseId, Long userAccountId, long version) {}
 }

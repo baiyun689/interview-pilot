@@ -1,5 +1,6 @@
 package interview.pilot.interview.application;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashSet;
@@ -38,6 +39,8 @@ import tools.jackson.databind.ObjectMapper;
 
 @Component
 public class FixedInterviewReportHandler {
+  @org.springframework.beans.factory.annotation.Value("${app.async.interview-report.lease-duration:11m}")
+  private Duration leaseDuration = Duration.ofMinutes(11);
   private final FixedReportGenerator generator;
   private final AsyncTaskRepository tasks;
   private final InterviewSessionRepository sessions;
@@ -69,11 +72,13 @@ public class FixedInterviewReportHandler {
     this.objectMapper = objectMapper;
     this.evaluationProperties = evaluationProperties;
     this.transactions = new TransactionTemplate(transactionManager);
+    this.transactions.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
   }
 
   public Outcome handle(TaskMessage message, int completedRetries) {
     Begin begin = transactions.execute(status -> begin(message, completedRetries));
-    if (begin.terminal()) return Outcome.STALE;
+    if (begin.skipped() != null) return begin.skipped();
+    if (begin.waiting()) throw new ReportGenerationRetryableException(begin.attemptGeneration(), begin.executionToken());
     try {
       FixedInterviewReport report = generator.generate(
           begin.providerId(), begin.modelName(), begin.input());
@@ -82,11 +87,11 @@ public class FixedInterviewReportHandler {
     } catch (AiStructuredOutputException | IllegalArgumentException exception) {
       String category = exception instanceof InvalidReport invalid ? invalid.category
           : exception instanceof AiStructuredOutputException ? "STRUCTURE" : "CONTENT";
-      transactions.executeWithoutResult(status -> failInvalid(message, begin, category));
-      return Outcome.TERMINAL;
+      return transactions.execute(status -> failInvalid(message, begin, category));
     } catch (RuntimeException exception) {
-      transactions.executeWithoutResult(status -> recordRetryable(message, begin));
-      throw new ReportGenerationRetryableException(begin.attemptGeneration());
+      boolean current = Boolean.TRUE.equals(transactions.execute(status -> recordRetryable(message, begin)));
+      if (!current) return Outcome.STALE;
+      throw new ReportGenerationRetryableException(begin.attemptGeneration(), begin.executionToken(), exception);
     }
   }
 
@@ -104,14 +109,14 @@ public class FixedInterviewReportHandler {
     });
   }
 
-  public boolean markDead(TaskMessage message, int attemptGeneration) {
+  public boolean markDead(TaskMessage message, int attemptGeneration, String executionToken) {
     Boolean result = transactions.execute(status -> {
-      AsyncTaskEntity task = task(message);
-      InterviewSessionEntity session = session(task);
-      if (task.getExecutionEpoch() != message.executionEpoch()
-          || task.getAttemptCount() != attemptGeneration
+      AsyncTaskEntity task = lockedTask(message);
+      InterviewSessionEntity session = lockedSession(task);
+      if (!task.ownsExecution(message.executionEpoch(), attemptGeneration, executionToken)
           || session.getStatus() != SessionStatus.EVALUATING) return false;
       task.setStatus(AsyncTaskStatus.DEAD);
+      task.clearExecutionLease();
       task.setLastError("INTERVIEW_REPORT_RETRY_EXHAUSTED");
       session.evaluationFailed("INTERVIEW_REPORT_RETRY_EXHAUSTED");
       return true;
@@ -121,19 +126,20 @@ public class FixedInterviewReportHandler {
 
   private Begin begin(TaskMessage message, int completedRetries) {
     AsyncTaskEntity task = task(message);
-    InterviewSessionEntity session = session(task);
     if (task.getExecutionEpoch() != message.executionEpoch()
-        || task.getStatus() == AsyncTaskStatus.COMPLETED
-        || session.getStatus() == SessionStatus.COMPLETED) {
-      return Begin.stale();
-    }
+        || task.getStatus() == AsyncTaskStatus.COMPLETED || task.getStatus() == AsyncTaskStatus.FAILED
+        || task.getStatus() == AsyncTaskStatus.DEAD) return Begin.skipped(Outcome.STALE);
+    String token = UUID.randomUUID().toString();
+    if (tasks.claimExecution(message.taskId().toString(), AsyncTaskType.INTERVIEW_EVALUATION.name(),
+        message.bizKey(), message.executionEpoch(), token,
+        interview.pilot.async.infrastructure.ExecutionLeaseDuration.seconds(leaseDuration)) != 1)
+      return Begin.skipped(Outcome.BUSY);
+    task = task(message);
+    InterviewSessionEntity session = lockedSession(task);
     if (session.getStatus() != SessionStatus.EVALUATING
         || reports.findBySessionId(session.getId()).isPresent()) {
       throw new IllegalStateException("Interview report state is inconsistent");
     }
-    task.setStatus(AsyncTaskStatus.PUBLISHED);
-    task.setAttemptCount(task.getAttemptCount() + 1);
-    task.setLastError(null);
 
     InterviewBriefSnapshot brief = decode(session.getBriefSnapshot(), InterviewBriefSnapshot.class);
     var storedTurns = turns.findAllBySessionIdOrderByTurnNo(session.getId());
@@ -162,12 +168,8 @@ public class FixedInterviewReportHandler {
         .filter(turn -> turn.getPhase() != InterviewPhase.SELF_INTRODUCTION)
         .map(turn -> turn.getEvalStatus() == null ? EvalStatus.NOT_REQUIRED : turn.getEvalStatus())
         .toList();
-    if (evaluationBarrier.shouldAwait(formalStatuses, completedRetries,
-        evaluationProperties.getReportBarrierMaxAttempts())) {
-      // Per-turn evaluations are still running; requeue through the report retry ladder and wait,
-      // bounded by reportBarrierMaxAttempts so the report can never hang indefinitely.
-      throw new ReportGenerationRetryableException(task.getAttemptCount());
-    }
+    boolean waiting = evaluationBarrier.shouldAwait(formalStatuses, completedRetries,
+        evaluationProperties.getReportBarrierMaxAttempts());
     var evidence = new ArrayList<FixedReportInput.TurnEvidence>();
     var allowed = new HashSet<String>();
     var availability = new EnumMap<InterviewPhase, String>(InterviewPhase.class);
@@ -189,7 +191,7 @@ public class FixedInterviewReportHandler {
         task.getTaskId(), session.getId(), session.getUserAccountId(), session.getSessionId(),
         session.getProviderId(), session.getModelName(), task.getAttemptCount(),
         task.getExecutionEpoch(), new FixedReportInput(brief, evidence, session.isRecruitment(), session.getTotalMainQuestionCount(), unassessed),
-        Set.copyOf(allowed), Map.copyOf(availability), false);
+        Set.copyOf(allowed), Map.copyOf(availability), token, waiting, null);
   }
 
   static void validate(
@@ -219,25 +221,28 @@ public class FixedInterviewReportHandler {
   }
 
   private Outcome complete(TaskMessage message, Begin begin, FixedInterviewReport report) {
-    AsyncTaskEntity task = task(message);
-    InterviewSessionEntity session = session(task);
+    AsyncTaskEntity task = lockedTask(message);
+    InterviewSessionEntity session = lockedSession(task);
     if (!current(task, session, begin)) return Outcome.STALE;
     if (reports.findBySessionId(session.getId()).isPresent()) return Outcome.STALE;
     reports.saveAndFlush(InterviewReportEntity.create(
         session.getId(), report.overallScore(), report.summary(), encode(report)));
     session.completeEvaluation();
     task.setStatus(AsyncTaskStatus.COMPLETED);
+    task.clearExecutionLease();
     task.setLastError(null);
     return Outcome.TERMINAL;
   }
 
-  private void failInvalid(TaskMessage message, Begin begin, String category) {
-    AsyncTaskEntity task = task(message);
-    InterviewSessionEntity session = session(task);
-    if (!current(task, session, begin)) return;
+  private Outcome failInvalid(TaskMessage message, Begin begin, String category) {
+    AsyncTaskEntity task = lockedTask(message);
+    InterviewSessionEntity session = lockedSession(task);
+    if (!current(task, session, begin)) return Outcome.STALE;
     task.setStatus(AsyncTaskStatus.FAILED);
+    task.clearExecutionLease();
     task.setLastError("INVALID_INTERVIEW_REPORT:" + category);
     session.evaluationFailed("INVALID_INTERVIEW_REPORT:" + category);
+    return Outcome.TERMINAL;
   }
 
   private static final class InvalidReport extends IllegalArgumentException {
@@ -245,22 +250,38 @@ public class FixedInterviewReportHandler {
     private InvalidReport(String category) {super("Invalid report: " + category);this.category=category;}
   }
 
-  private void recordRetryable(TaskMessage message, Begin begin) {
-    AsyncTaskEntity task = task(message);
-    InterviewSessionEntity session = session(task);
+  private boolean recordRetryable(TaskMessage message, Begin begin) {
+    AsyncTaskEntity task = lockedTask(message);
+    InterviewSessionEntity session = lockedSession(task);
     if (current(task, session, begin)) {
       task.setLastError("INTERVIEW_REPORT_TEMPORARILY_UNAVAILABLE");
+      return true;
     }
+    return false;
   }
 
   private boolean current(AsyncTaskEntity task, InterviewSessionEntity session, Begin begin) {
-    return task.getExecutionEpoch() == begin.executionEpoch()
+    return task.ownsExecution(begin.executionEpoch(), begin.attemptGeneration(), begin.executionToken())
         && task.getTaskId().equals(begin.taskId())
         && task.getAttemptCount() == begin.attemptGeneration()
         && task.getStatus() == AsyncTaskStatus.PUBLISHED
         && session.getId().equals(begin.sessionDatabaseId())
         && session.getUserAccountId().equals(begin.userAccountId())
         && session.getStatus() == SessionStatus.EVALUATING;
+  }
+
+  public void releaseForRetry(TaskMessage message, int generation, String token) {
+    transactions.executeWithoutResult(status -> tasks.releaseExecution(message.taskId().toString(),
+        AsyncTaskType.INTERVIEW_EVALUATION.name(), message.bizKey(), message.executionEpoch(), generation, token));
+  }
+
+  private AsyncTaskEntity lockedTask(TaskMessage message) {
+    tasks.findByTaskIdForUpdate(message.taskId()).orElseThrow();
+    return task(message);
+  }
+
+  private InterviewSessionEntity lockedSession(AsyncTaskEntity task) {
+    return sessions.findByIdForUpdate(session(task).getId()).orElseThrow();
   }
 
   private AsyncTaskEntity task(TaskMessage message) {
@@ -316,15 +337,15 @@ public class FixedInterviewReportHandler {
     }
   }
 
-  public enum Outcome { TERMINAL, STALE }
+  public enum Outcome { TERMINAL, STALE, BUSY }
   public record Target(UUID sessionId, boolean terminal, int attemptGeneration) { }
   private record Begin(
       UUID taskId, Long sessionDatabaseId, Long userAccountId, UUID sessionId,
       String providerId, String modelName, int attemptGeneration, int executionEpoch,
       FixedReportInput input, Set<String> allowedSourceIds,
-      Map<InterviewPhase, String> ragAvailability, boolean terminal) {
-    static Begin stale() {
-      return new Begin(null, null, null, null, null, null, 0, 0, null, Set.of(), Map.of(), true);
+      Map<InterviewPhase, String> ragAvailability, String executionToken, boolean waiting, Outcome skipped) {
+    static Begin skipped(Outcome outcome) {
+      return new Begin(null, null, null, null, null, null, 0, 0, null, Set.of(), Map.of(), null, false, outcome);
     }
   }
 }

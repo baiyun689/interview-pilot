@@ -67,7 +67,10 @@ class KnowledgeIndexerTest {
         chunkRepository,
         "text-embedding-v3");
 
-    int chunks = indexer.index(documentId, 1);
+    var indexed = indexer.index(documentId, 1);
+    int chunks = indexed.chunkCount();
+    assertThat(indexed.parsedText()).isEqualTo("Spring transactions");
+    verify(documents, never()).save(any());
 
     org.mockito.ArgumentCaptor<List<Document>> captured =
         org.mockito.ArgumentCaptor.forClass(List.class);

@@ -75,6 +75,8 @@ public class VoiceTranscriptionHandler {
   private final AiMetrics metrics;
   private final VoiceMetrics voiceMetrics;
   private final TransactionTemplate transactions;
+  @org.springframework.beans.factory.annotation.Value("${app.async.voice-transcription.lease-duration:2m}")
+  private Duration leaseDuration = Duration.ofMinutes(2);
 
   public VoiceTranscriptionHandler(
       VoiceRecordingRepository recordings,
@@ -95,6 +97,7 @@ public class VoiceTranscriptionHandler {
     this.metrics = metrics;
     this.voiceMetrics = voiceMetrics;
     this.transactions = new TransactionTemplate(transactionManager);
+    this.transactions.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
   }
 
   public VoiceTranscriptionTarget inspect(TaskMessage message) {
@@ -130,57 +133,81 @@ public class VoiceTranscriptionHandler {
 
   public Outcome transcribe(TaskMessage message) {
     BeginResult begin = transactions.execute(status -> begin(message));
-    return begin.stale() ? Outcome.STALE : transcribeMedia(begin.work());
+    if (begin.skipped() != null) return begin.skipped();
+    try {
+      return transcribeMedia(begin.work());
+    } catch (VoiceTranscriptionRetryableException exception) {
+      throw exception;
+    } catch (RuntimeException exception) {
+      return retryable(begin.work(), Duration.ZERO, exception);
+    }
   }
 
-  public boolean markDead(TaskMessage message, int attemptGeneration) {
+  public boolean markDead(TaskMessage message, int generation, String token) {
     return Boolean.TRUE.equals(transactions.execute(status -> {
+      tasks.findByTaskIdForUpdate(message.taskId()).orElseThrow();
       AsyncTaskEntity task = requireMatchingTask(message);
-      VoiceRecordingEntity recording = requireRecording(task);
-      return markDead(task, recording, attemptGeneration, message.executionEpoch());
+      if (!task.ownsExecution(message.executionEpoch(), generation, token)) return false;
+      return markDead(task, requireRecording(task), generation, message.executionEpoch());
     }));
   }
 
-  public boolean markDeadCurrent(TaskMessage message) {
+  /** Recovery may only take over an expired, still-stale task, checked under its row lock. */
+  public boolean recoverAbandoned(TaskMessage message, java.time.Instant cutoff) {
     return Boolean.TRUE.equals(transactions.execute(status -> {
-      AsyncTaskEntity task = requireMatchingTask(message);
-      VoiceRecordingEntity recording = requireRecording(task);
-      return markDead(task, recording, task.getAttemptCount(), message.executionEpoch());
+      AsyncTaskEntity task = tasks.findByTaskIdForUpdate(message.taskId()).orElseThrow();
+      if (!task.getUpdatedAt().isBefore(cutoff)) return false;
+      String token = UUID.randomUUID().toString();
+      if (tasks.claimExecution(message.taskId().toString(), AsyncTaskType.VOICE_TRANSCRIPTION.name(),
+          message.bizKey(), message.executionEpoch(), token, leaseSeconds()) != 1) return false;
+      task = requireMatchingTask(message);
+      boolean recovered = markDead(task, requireRecording(task), task.getAttemptCount(), message.executionEpoch());
+      if (!recovered) status.setRollbackOnly();
+      return recovered;
     }));
+  }
+
+  public void releaseForRetry(TaskMessage message, int generation, String token) {
+    transactions.executeWithoutResult(status -> tasks.releaseExecution(message.taskId().toString(),
+        AsyncTaskType.VOICE_TRANSCRIPTION.name(), message.bizKey(), message.executionEpoch(), generation, token));
+  }
+
+  private long leaseSeconds() {
+    return interview.pilot.async.infrastructure.ExecutionLeaseDuration.seconds(leaseDuration);
   }
 
   /**
-   * Claim path (steps 1-2): validates again after the Redis claim was acquired, moves the
+   * Claim path (steps 1-2): atomically acquires a MySQL execution lease, moves the
    * recording UPLOADED → TRANSCRIBING (or reuses the TRANSCRIBING state left by a manual
    * retry) without touching the epoch, and marks the task PUBLISHED.
    */
   private BeginResult begin(TaskMessage message) {
     AsyncTaskEntity task = requireMatchingTask(message);
+    if (task.getExecutionEpoch() != message.executionEpoch() || task.getStatus() == AsyncTaskStatus.COMPLETED
+        || task.getStatus() == AsyncTaskStatus.FAILED || task.getStatus() == AsyncTaskStatus.DEAD)
+      return new BeginResult(null, Outcome.STALE);
+    String token = UUID.randomUUID().toString();
+    if (tasks.claimExecution(message.taskId().toString(), AsyncTaskType.VOICE_TRANSCRIPTION.name(),
+        message.bizKey(), message.executionEpoch(), token, leaseSeconds()) != 1)
+      return new BeginResult(null, Outcome.BUSY);
+    task = requireMatchingTask(message);
     VoiceRecordingEntity recording = requireRecording(task);
-    if (task.getExecutionEpoch() != message.executionEpoch()) {
-      return new BeginResult(null, true); // a newer generation owns the row
-    }
+    if (recording.getExecutionEpoch() != message.executionEpoch())
+      throw new IllegalStateException("Task and media epoch do not match");
     switch (recording.getStatus()) {
       case UPLOADED -> recording.startTranscription();
-      case TRANSCRIBING -> { /* manual retry already claimed it; the epoch fence protects */ }
+      case TRANSCRIBING -> { /* manual retry already claimed it; the task token and epoch fence protect */ }
       default -> throw new IllegalStateException("Voice recording is not transcription-ready");
     }
-    if (task.getStatus() == AsyncTaskStatus.PENDING) {
-      task.setStatus(AsyncTaskStatus.PUBLISHED);
-    } else if (task.getStatus() != AsyncTaskStatus.PUBLISHED) {
-      throw new IllegalStateException("Voice transcription task state is inconsistent");
-    }
-    task.setAttemptCount(task.getAttemptCount() + 1);
     int attemptGeneration = task.getAttemptCount();
-    task.setLastError(null);
     InterviewSessionEntity session = sessions.findById(recording.getSessionId())
         .orElseThrow(() -> new IllegalStateException("Voice recording session is missing"));
     RecognitionContext context = contextAssembler.assemble(session);
     return new BeginResult(new Work(
         task.getTaskId(), recording.getRecordingId(), recording.getSessionId(),
         recording.getStorageKey(), recording.getContentType(),
-        recording.getExecutionEpoch(), attemptGeneration, context),
-        false);
+        recording.getExecutionEpoch(), attemptGeneration, token, context),
+        null);
   }
 
   /** Step 3-5, entirely outside the claim transaction (slow provider + media I/O). */
@@ -228,6 +255,7 @@ public class VoiceTranscriptionHandler {
           transcript.text(), latency.toMillis());
       AsyncTaskEntity task = requireMatchingTaskById(work.taskId());
       task.setStatus(AsyncTaskStatus.COMPLETED);
+      task.clearExecutionLease();
       task.setLastError(null);
       metrics.afterCommit(() -> metrics.taskCompleted(AsyncTaskType.VOICE_TRANSCRIPTION));
       return Outcome.TERMINAL;
@@ -257,6 +285,7 @@ public class VoiceTranscriptionHandler {
       recording.failTranscription(code);
       AsyncTaskEntity task = requireMatchingTaskById(work.taskId());
       task.setStatus(AsyncTaskStatus.FAILED);
+      task.clearExecutionLease();
       task.setLastError(detail);
       metrics.afterCommit(() -> metrics.taskFailed(AsyncTaskType.VOICE_TRANSCRIPTION, "failed"));
       return Outcome.TERMINAL;
@@ -273,6 +302,10 @@ public class VoiceTranscriptionHandler {
 
   /** Records the failure evidence on the current attempt, then re-throws for the retry pipeline. */
   private Outcome retryable(Work work, Duration latency) {
+    return retryable(work, latency, null);
+  }
+
+  private Outcome retryable(Work work, Duration latency, Throwable cause) {
     Boolean current = transactions.execute(status -> {
       VoiceRecordingEntity recording = currentRecording(work);
       if (recording == null) {
@@ -288,7 +321,7 @@ public class VoiceTranscriptionHandler {
     }
     log.warn("voice_asr_retryable taskId={} recordingId={} sessionId={} executionEpoch={}",
         work.taskId(), work.recordingId(), work.sessionId(), work.epoch());
-    throw new VoiceTranscriptionRetryableException(RETRYABLE_ERROR, work.attemptGeneration());
+    throw new VoiceTranscriptionRetryableException(RETRYABLE_ERROR, work.attemptGeneration(), work.executionToken(), cause);
   }
 
   /**
@@ -296,8 +329,7 @@ public class VoiceTranscriptionHandler {
    * {@code VOICE_TRANSCRIPTION_FAILED} (so the module endpoint can manually retry) and the task
    * becomes DEAD. Every fence is checked — task epoch/attempt and recording epoch — so a
    * dead-lettered message of an older generation can never terminalize a newer row; a message
-   * that died before the claim transaction ever ran still moves its UPLOADED row to FAILED
-   * (the pre-approved UPLOADED → FAILED transition).
+   * without a committed identity is deferred. The sweeper must first acquire an expired lease.
    */
   private boolean markDead(
       AsyncTaskEntity task,
@@ -321,6 +353,7 @@ public class VoiceTranscriptionHandler {
     }
     recording.failTranscription(VoiceErrorCodes.VOICE_TRANSCRIPTION_FAILED);
     task.setStatus(AsyncTaskStatus.DEAD);
+    task.clearExecutionLease();
     task.setLastError("Voice transcription retries exhausted");
     metrics.afterCommit(() -> metrics.taskFailed(AsyncTaskType.VOICE_TRANSCRIPTION, "dead"));
     voiceMetrics.retry("voice_transcription", "exhausted");
@@ -332,6 +365,8 @@ public class VoiceTranscriptionHandler {
 
   /** Final-transaction fence: the row must still be the claimed TRANSCRIBING execution. */
   private VoiceRecordingEntity currentRecording(Work work) {
+    AsyncTaskEntity task = tasks.findByTaskIdForUpdate(work.taskId()).orElse(null);
+    if (task == null || !task.ownsExecution((int) work.epoch(), work.attemptGeneration(), work.executionToken())) return null;
     VoiceRecordingEntity recording = recordings.findByRecordingId(work.recordingId())
         .orElse(null);
     if (recording == null
@@ -348,7 +383,9 @@ public class VoiceTranscriptionHandler {
         || message.bizKey() == null) {
       throw new IllegalArgumentException("Voice transcription message identity is invalid");
     }
-    return requireMatchingTaskById(message.taskId());
+    AsyncTaskEntity task = requireMatchingTaskById(message.taskId());
+    if (!task.getBizKey().equals(message.bizKey())) throw new IllegalArgumentException("Task business key does not match");
+    return task;
   }
 
   private AsyncTaskEntity requireMatchingTaskById(UUID taskId) {
@@ -385,7 +422,7 @@ public class VoiceTranscriptionHandler {
 
   public enum Outcome {
     TERMINAL,
-    STALE
+    STALE, BUSY
   }
 
   public record VoiceTranscriptionTarget(
@@ -393,7 +430,7 @@ public class VoiceTranscriptionHandler {
 
   private record Work(
       UUID taskId, UUID recordingId, Long sessionId, String storageKey, String contentType,
-      long epoch, int attemptGeneration, RecognitionContext context) {}
+      long epoch, int attemptGeneration, String executionToken, RecognitionContext context) {}
 
-  private record BeginResult(Work work, boolean stale) {}
+  private record BeginResult(Work work, Outcome skipped) {}
 }

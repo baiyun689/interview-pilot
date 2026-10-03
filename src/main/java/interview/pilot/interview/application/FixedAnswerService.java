@@ -13,7 +13,6 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import interview.pilot.async.domain.AsyncTaskType;
-import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.auth.application.CurrentUser;
@@ -53,7 +52,6 @@ public class FixedAnswerService {
   private final InterviewQuestionCardRepository cards;
   private final AnswerAttemptRepository attempts;
   private final AsyncTaskRepository tasks;
-  private final ProcessingClaim coordination;
   private final FollowUpGenerator followUps;
   private final ObjectMapper objectMapper;
   private final TransactionTemplate transactions;
@@ -68,7 +66,6 @@ public class FixedAnswerService {
       InterviewQuestionCardRepository cards,
       AnswerAttemptRepository attempts,
       AsyncTaskRepository tasks,
-      ProcessingClaim coordination,
       FollowUpGenerator followUps,
       ObjectMapper objectMapper,
       PlatformTransactionManager transactionManager,
@@ -80,7 +77,6 @@ public class FixedAnswerService {
     this.cards = cards;
     this.attempts = attempts;
     this.tasks = tasks;
-    this.coordination = coordination;
     this.followUps = followUps;
     this.objectMapper = objectMapper;
     this.transactions = new TransactionTemplate(transactionManager);
@@ -92,41 +88,13 @@ public class FixedAnswerService {
 
   public FixedAnswerClaim claim(
       CurrentUser user, UUID sessionId, SubmitAnswerRequest request) {
-    String coordinationKey = "interview-answer-claim:" + sessionId;
-    String token = null;
-    boolean coordinationAvailable = true;
-    try {
-      token = coordination.acquire(coordinationKey, Duration.ofSeconds(15)).orElse(null);
-    } catch (RuntimeException ignored) {
-      // MySQL remains authoritative when Redis is temporarily unavailable.
-      coordinationAvailable = false;
-    }
-    if (coordinationAvailable && token == null) {
-      throw conflict("ANSWER_CLAIM_BUSY", "Another answer claim is being admitted; retry shortly");
-    }
-    try {
-      for (int attempt = 0; ; attempt++) {
-        try {
-          return transactions.execute(status -> claimInTransaction(user, sessionId, request));
-        } catch (DataIntegrityViolationException exception) {
-          return transactions.execute(status -> replayOrConflict(user, sessionId, request));
-        } catch (OptimisticLockingFailureException exception) {
-          // The recording's optimistic lock can lose to a concurrent discard/retry/transcription
-          // (the turn's own lock no longer conflicts — it is claimed pessimistically). One
-          // retry re-reads the fresh row state and surfaces the accurate 409; the same pattern
-          // guards VoiceAnswerServiceImpl.discardRecording.
-          if (attempt == 1) {
-            throw conflict("ANSWER_CLAIM_CONFLICT", "Answer claim conflicted; retry shortly");
-          }
-        }
-      }
-    } finally {
-      if (token != null) {
-        try {
-          coordination.release(coordinationKey, token);
-        } catch (RuntimeException ignored) {
-          // The durable MySQL claim must survive Redis cleanup failures.
-        }
+    for (int attempt = 0; ; attempt++) {
+      try {
+        return transactions.execute(status -> claimInTransaction(user, sessionId, request));
+      } catch (DataIntegrityViolationException exception) {
+        return transactions.execute(status -> replayOrConflict(user, sessionId, request));
+      } catch (OptimisticLockingFailureException exception) {
+        if (attempt == 1) throw conflict("ANSWER_CLAIM_CONFLICT", "Answer claim conflicted; retry shortly");
       }
     }
   }

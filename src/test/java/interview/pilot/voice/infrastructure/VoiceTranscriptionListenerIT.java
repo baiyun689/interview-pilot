@@ -73,14 +73,14 @@ import interview.pilot.voice.storage.VoiceMediaStore;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * End-to-end transcription pipeline against MySQL (V21+V22 schema) and Redis with the real
- * {@code RedisProcessingClaim}: upload (Task 4) → listener → READY. The {@link FakeSpeechRecognizer}
+ * End-to-end transcription pipeline against MySQL with database execution leases: upload (Task 4) → listener → READY. The {@link FakeSpeechRecognizer}
  * is the seam (plan §5.3); its default transcript echoes the recognition-context vocabulary
  * size so the test observes the context assembly end to end (job title + JD terms + fixed
  * list: 1 + 4 + 30 − 3 fixed-list duplicates = 32 for the seeded brief). Epoch fencing is
  * exercised against a manual retry: a stale message must never overwrite the new result.
  */
 @SpringBootTest(properties = {
+    "spring.autoconfigure.exclude=org.redisson.spring.starter.RedissonAutoConfigurationV4",
     "VOICE_ENABLED=true",
     "VOICE_FILES_ROOT=build/voice-listener-test-files",
     "VOICE_MAX_UPLOAD_BYTES=8388608",
@@ -99,23 +99,20 @@ import tools.jackson.databind.ObjectMapper;
 })
 @Testcontainers
 class VoiceTranscriptionListenerIT {
+  @MockitoBean private org.redisson.api.RedissonClient unusedRedis;
+  @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
   @Container
   private static final MySQLContainer MYSQL =
       new MySQLContainer(DockerImageName.parse("mysql:8.4"))
           .withDatabaseName("interview_pilot_voice_listener");
 
-  @Container
-  private static final GenericContainer<?> REDIS =
-      new GenericContainer<>(DockerImageName.parse("redis:7.4-alpine"))
-          .withExposedPorts(6379);
 
   @DynamicPropertySource
   static void infrastructureProperties(DynamicPropertyRegistry registry) {
     registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
     registry.add("spring.datasource.username", MYSQL::getUsername);
     registry.add("spring.datasource.password", MYSQL::getPassword);
-    registry.add("spring.data.redis.host", REDIS::getHost);
-    registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
   }
 
   @MockitoBean
@@ -317,7 +314,7 @@ class VoiceTranscriptionListenerIT {
     var recording = recordings.findByRecordingId(receipt.recordingId()).orElseThrow();
     assertThat(recording.getStatus()).isEqualTo(VoiceRecordingStatus.UPLOADED);
 
-    assertThat(handler.markDeadCurrent(message(receipt, 0))).isTrue();
+    assertThat(handler.recoverAbandoned(message(receipt, 0), java.time.Instant.now().plusSeconds(1))).isTrue();
 
     var failed = recordings.findByRecordingId(receipt.recordingId()).orElseThrow();
     assertThat(failed.getStatus()).isEqualTo(VoiceRecordingStatus.FAILED);
@@ -336,14 +333,14 @@ class VoiceTranscriptionListenerIT {
         .getExecutionEpoch()).isEqualTo(1);
 
     // A dead-lettered old-generation message must not terminalize the new generation.
-    assertThat(handler.markDead(message(receipt, 0), 0)).isFalse();
+    assertThat(handler.markDead(message(receipt, 0), 0, "old-owner")).isFalse();
     var fenced = recordings.findByRecordingId(receipt.recordingId()).orElseThrow();
     assertThat(fenced.getStatus()).isEqualTo(VoiceRecordingStatus.TRANSCRIBING);
     assertThat(fenced.getExecutionEpoch()).isEqualTo(1);
     assertThat(taskOf(receipt).getStatus()).isEqualTo(AsyncTaskStatus.PENDING);
 
     // The current generation can still be terminalized.
-    assertThat(handler.markDead(message(receipt, 1), 1)).isTrue();
+    assertThat(handler.recoverAbandoned(message(receipt, 1), java.time.Instant.now().plusSeconds(1))).isTrue();
     assertThat(recordings.findByRecordingId(receipt.recordingId()).orElseThrow()
         .getStatus()).isEqualTo(VoiceRecordingStatus.FAILED);
     assertThat(taskOf(receipt).getStatus()).isEqualTo(AsyncTaskStatus.DEAD);
@@ -401,6 +398,46 @@ class VoiceTranscriptionListenerIT {
     assertThat(still.getStatus()).isEqualTo(VoiceRecordingStatus.READY);
     assertThat(still.getRawTranscript()).isEqualTo("fake transcript (vocabulary=32)");
     assertThat(taskOf(receipt).getStatus()).isEqualTo(AsyncTaskStatus.COMPLETED);
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+  void expiredLeaseFencesOldSuccessAndFailure(boolean failOld) throws Exception {
+    var receipt = module.accept(user, session.getSessionId(), 1, UUID.randomUUID(), audio("a"));
+    var taskMessage = message(receipt, 0);
+    var entered = new java.util.concurrent.CountDownLatch(1);
+    var release = new java.util.concurrent.CountDownLatch(1);
+    var calls = new java.util.concurrent.atomic.AtomicInteger();
+    fakeRecognizer.respondWith(context -> {
+      if (calls.incrementAndGet() == 1) {
+        entered.countDown();
+        try { if (!release.await(10, java.util.concurrent.TimeUnit.SECONDS)) throw new IllegalStateException("test timed out"); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IllegalStateException(e); }
+        if (failOld) throw new IllegalStateException("old provider failure");
+        return new Transcript("old transcript", "old", "model");
+      }
+      return new Transcript("new transcript", "new", "model");
+    });
+    try (var pool = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+      var old = pool.submit(() -> handler.transcribe(taskMessage));
+      try {
+        assertThat(entered.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        var original = taskOf(receipt);
+        assertThat(handler.transcribe(taskMessage)).isEqualTo(VoiceTranscriptionHandler.Outcome.BUSY);
+        assertThat(handler.markDead(taskMessage, original.getAttemptCount(), "wrong-token")).isFalse();
+        // Even the recovery sweeper cannot terminalize a task while its lease is valid.
+        assertThat(handler.recoverAbandoned(taskMessage, java.time.Instant.now().plusSeconds(1))).isFalse();
+        jdbc.update("update async_task set execution_lease_until=current_timestamp(6)-interval 1 second where task_id=?", taskMessage.taskId().toString());
+        assertThat(handler.transcribe(taskMessage)).isEqualTo(VoiceTranscriptionHandler.Outcome.TERMINAL);
+        handler.releaseForRetry(taskMessage, original.getAttemptCount(), original.getExecutionToken());
+        assertThat(handler.markDead(taskMessage, original.getAttemptCount(), original.getExecutionToken())).isFalse();
+        release.countDown();
+        assertThat(old.get(5, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(VoiceTranscriptionHandler.Outcome.STALE);
+        assertThat(recordings.findByRecordingId(receipt.recordingId()).orElseThrow().getRawTranscript()).isEqualTo("new transcript");
+        assertThat(taskOf(receipt).getStatus()).isEqualTo(AsyncTaskStatus.COMPLETED);
+        assertThat(calls.get()).isEqualTo(2);
+      } finally { release.countDown(); }
+    }
   }
 
   // ---------------------------------------------------------------- helpers

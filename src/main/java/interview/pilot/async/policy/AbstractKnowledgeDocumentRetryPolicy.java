@@ -15,10 +15,7 @@ import interview.pilot.knowledge.infrastructure.KnowledgeDocumentRepository;
  */
 public abstract class AbstractKnowledgeDocumentRetryPolicy extends AbstractRetryableTaskPolicy {
   private static final String BIZ_KEY_PREFIX = "knowledge-document:";
-  /**
-   * Public so {@code KnowledgeIndexListener} acquires the very key this policy clears on
-   * manual retry — a drifted literal on either side would silently break retry idempotency.
-   */
+  /** Legacy business identity format, retained for retry target validation. */
   public static final String CLAIM_KEY_PREFIX = "knowledge-index:";
 
   private final KnowledgeDocumentRepository knowledgeDocuments;

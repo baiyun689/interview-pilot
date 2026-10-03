@@ -79,7 +79,7 @@ public class HiringAssessmentService {
     if (application.submissionNo != work.submissionNo || application.status.equals("WITHDRAWN") || application.status.equals("FINISHED")) throw conflict("投递状态已变化，不能重试旧分析");
     var task = store.find(AsyncTaskEntity.class, work.taskId, true).orElseThrow();
     work.status = "PENDING"; work.error = null; work.attempts = 0; work.leaseToken = null; work.leaseUntil = null; work.nextAttemptAt = Instant.now();
-    task.setStatus(interview.pilot.async.domain.AsyncTaskStatus.PENDING); task.setExecutionEpoch(task.getExecutionEpoch() + 1);
+    task.setStatus(interview.pilot.async.domain.AsyncTaskStatus.PENDING); task.clearExecutionLease(); task.setExecutionEpoch(task.getExecutionEpoch() + 1);
     task.setLastPublishedAt(null); task.setLastError(null);
     organizations.audit(user, orgId, "APPLICATION_ANALYSIS_RETRIED", application.id);
     return view(work);

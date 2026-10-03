@@ -32,7 +32,7 @@ class FixedAnswerRecoveryTest {
       1L, 1, InterviewPhase.SELF_INTRODUCTION, QuestionType.SELF_INTRODUCTION, 9L, "Introduce yourself");
   private final AnswerAttemptEntity attempt = AnswerAttemptEntity.processing(requestId, 1L, 2L, "fingerprint");
   private final FixedAnswerService service = new FixedAnswerService(sessions, turns, cards, attempts,
-      mock(AsyncTaskRepository.class), mock(ProcessingClaim.class), followUps, new ObjectMapper(),
+      mock(AsyncTaskRepository.class), followUps, new ObjectMapper(),
       mock(PlatformTransactionManager.class), mock(VoiceRecordingRepository.class),
       mock(QuestionSpeechTaskCreator.class), new AnswerEvaluationProperties());
 

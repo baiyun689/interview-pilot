@@ -584,8 +584,7 @@ class VoiceAnswerModuleTest {
     assertThat(retried.getExecutionEpoch()).isEqualTo(1);
     // The listener's terminal claim is cleared so the retried message can acquire it
     // (the claim key IS the voice bizKey).
-    verify(claims).clearTerminal(
-        VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + receipt.recordingId());
+    org.mockito.Mockito.verifyNoInteractions(claims);
     var task = tasks.findByTaskTypeAndBizKey(
         AsyncTaskType.VOICE_TRANSCRIPTION, VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + receipt.recordingId()).orElseThrow();
     assertThat(task.getStatus()).isEqualTo(AsyncTaskStatus.PENDING);

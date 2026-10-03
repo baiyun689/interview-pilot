@@ -51,6 +51,9 @@ import org.springframework.aop.support.AopUtils;
 })
 @AutoConfigureMockMvc
 class InterviewPilotApplicationTest {
+  @org.springframework.test.context.bean.override.mockito.MockitoBean
+  private interview.pilot.async.idempotency.ProcessingClaim schedulerClaim;
+
   @MockitoBean private interview.pilot.recruitment.infrastructure.HiringStore hiringStore;
   @MockitoBean
   private RedissonClient redissonClient;

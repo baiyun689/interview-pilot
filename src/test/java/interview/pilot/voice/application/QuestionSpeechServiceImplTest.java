@@ -87,7 +87,7 @@ class QuestionSpeechServiceImplTest {
     PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
     when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
     module = new QuestionSpeechServiceImpl(
-        speeches, sessions, turns, tasks, claims, mediaStore,
+        speeches, sessions, turns, tasks, mediaStore,
         questionSpeechTaskCreator, mock(VoiceMetrics.class), transactionManager);
     when(claims.clearTerminal(anyString())).thenReturn(ProcessingClaim.ClearResult.CLEARED);
     when(sessions.findBySessionIdAndUserAccountId(session.getSessionId(), 1L))
@@ -146,8 +146,7 @@ class QuestionSpeechServiceImplTest {
     assertThat(task.getStatus()).isEqualTo(AsyncTaskStatus.PENDING);
     assertThat(task.getExecutionEpoch()).isEqualTo(1);
     // The claim clear runs before every transaction attempt, mirroring the recording module.
-    verify(claims, times(2)).clearTerminal(
-        QuestionSpeechSynthesisRetryPolicy.BIZ_KEY_PREFIX + speechUuid);
+    org.mockito.Mockito.verifyNoInteractions(claims);
   }
 
   @Test

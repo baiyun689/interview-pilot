@@ -54,6 +54,9 @@ import interview.pilot.voice.storage.VoiceMediaStore;
         + "org.redisson.spring.starter.RedissonAutoConfigurationV4"
 })
 class VoiceEnabledBindingTest {
+  @org.springframework.test.context.bean.override.mockito.MockitoBean
+  private interview.pilot.async.idempotency.ProcessingClaim schedulerClaim;
+
   @MockitoBean private interview.pilot.recruitment.infrastructure.HiringStore hiringStore;
   @MockitoBean
   private RedissonClient redissonClient;

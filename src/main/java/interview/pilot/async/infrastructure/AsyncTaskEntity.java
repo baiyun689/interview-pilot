@@ -66,7 +66,7 @@ public class AsyncTaskEntity {
   @Column(name = "execution_epoch", nullable = false)
   private int executionEpoch;
 
-  /** MySQL execution ownership for resume analysis and question preparation. */
+  /** MySQL execution ownership for asynchronous consumers. */
   @Column(name = "execution_token", length = 36)
   private String executionToken;
 

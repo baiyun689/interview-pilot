@@ -85,7 +85,7 @@ class VoiceAsyncRoutingTest {
         .thenAnswer(invocation -> new SimpleTransactionStatus());
     var registry = new RetryableTaskPolicyRegistry(List.of(new VoiceTranscriptionRetryPolicy()));
     var service = new AsyncTaskService(
-        tasks, claims, transactionManager, mock(AiMetrics.class), registry);
+        tasks, transactionManager, mock(AiMetrics.class), registry);
 
     assertThatThrownBy(() -> service.retry(
         new CurrentUser(1L, new UUID(0L, 1L), "owner@example.com", "Owner"), taskId,
@@ -119,7 +119,7 @@ class VoiceAsyncRoutingTest {
     var registry = new RetryableTaskPolicyRegistry(
         List.of(new QuestionSpeechSynthesisRetryPolicy()));
     var service = new AsyncTaskService(
-        tasks, claims, transactionManager, mock(AiMetrics.class), registry);
+        tasks, transactionManager, mock(AiMetrics.class), registry);
 
     assertThatThrownBy(() -> service.retry(
         new CurrentUser(1L, new UUID(0L, 1L), "owner@example.com", "Owner"), taskId,

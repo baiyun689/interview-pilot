@@ -48,7 +48,7 @@ class AsyncTaskServiceMetricsTest {
     var metrics = mock(AiMetrics.class);
     var registry = new RetryableTaskPolicyRegistry(List.of(
         new InterviewEvaluationRetryPolicy(mock(InterviewSessionRepository.class))));
-    var service = new AsyncTaskService(tasks, claims, transactionManager, metrics, registry);
+    var service = new AsyncTaskService(tasks, transactionManager, metrics, registry);
 
     assertThatThrownBy(() -> service.retry(OWNER, taskId, UUID.randomUUID()))
         .isInstanceOfSatisfying(BusinessException.class,

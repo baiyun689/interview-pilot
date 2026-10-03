@@ -24,7 +24,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import interview.pilot.async.domain.AsyncTaskStatus;
 import interview.pilot.async.domain.AsyncTaskType;
-import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.async.infrastructure.AsyncTaskEntity;
 import interview.pilot.async.infrastructure.AsyncTaskRepository;
 import interview.pilot.async.policy.QuestionSpeechSynthesisRetryPolicy;
@@ -55,7 +54,7 @@ import interview.pilot.voice.storage.VoiceMediaStore;
  *       schedulers); TEXT sessions and unconfigured TTS answer the view-only NOT_AVAILABLE
  *       status — never a 404 for a legitimately existing turn.</li>
  *   <li>{@code retry} mirrors {@code VoiceAnswerServiceImpl.retryTranscription} exactly:
- *       the listener's terminal Redis claim is cleared first (an ACTIVE claim means a
+ *       the durable failure state gates retry (an active execution means a
  *       synthesis is genuinely in flight → 409 QUESTION_SPEECH_NOT_READY), then ONE
  *       transaction moves the speech FAILED → PENDING ({@link QuestionSpeechEntity#beginRetry}
  *       bumps its execution_epoch) and resets the task row to a fresh PENDING execution with
@@ -82,7 +81,6 @@ public class QuestionSpeechServiceImpl implements QuestionSpeechModule {
   private final InterviewSessionRepository sessions;
   private final InterviewTurnRepository turns;
   private final AsyncTaskRepository tasks;
-  private final ProcessingClaim claims;
   private final VoiceMediaStore mediaStore;
   private final QuestionSpeechTaskCreator questionSpeechTaskCreator;
   private final VoiceMetrics metrics;
@@ -93,7 +91,6 @@ public class QuestionSpeechServiceImpl implements QuestionSpeechModule {
       InterviewSessionRepository sessions,
       InterviewTurnRepository turns,
       AsyncTaskRepository tasks,
-      ProcessingClaim claims,
       VoiceMediaStore mediaStore,
       QuestionSpeechTaskCreator questionSpeechTaskCreator,
       VoiceMetrics metrics,
@@ -102,7 +99,6 @@ public class QuestionSpeechServiceImpl implements QuestionSpeechModule {
     this.sessions = sessions;
     this.turns = turns;
     this.tasks = tasks;
-    this.claims = claims;
     this.mediaStore = mediaStore;
     this.questionSpeechTaskCreator = questionSpeechTaskCreator;
     this.metrics = metrics;
@@ -201,14 +197,13 @@ public class QuestionSpeechServiceImpl implements QuestionSpeechModule {
   }
 
   /**
-   * Manual retry, mirroring {@code VoiceAnswerServiceImpl.retryTranscription} exactly: clear
-   * the listener's terminal claim first, then one transaction moves the speech and resets the
+   * Manual retry, mirroring {@code VoiceAnswerServiceImpl.retryTranscription}: validate
+   * the durable failed state, then one transaction moves the speech and resets the
    * task with both epochs bumped in lockstep; an optimistic-lock conflict retries once.
    */
   private void retrySynthesis(long speechId) {
     for (int attempt = 0; ; attempt++) {
       try {
-        clearSynthesisClaim(speechId);
         transactions.executeWithoutResult(status -> {
           var speech = speeches.findById(speechId).orElseThrow(this::notFound);
           if (speech.getStatus() != QuestionSpeechStatus.FAILED) {
@@ -229,29 +224,6 @@ public class QuestionSpeechServiceImpl implements QuestionSpeechModule {
   }
 
   /**
-   * Clears the listener's terminal processing claim (same pattern as the async retry
-   * endpoint): a deterministic failure or success COMPLETES the claim, and an un-cleared
-   * terminal claim would block the retried message's acquire forever (Task 7 wiring — the
-   * claim key IS the voice bizKey per {@link QuestionSpeechSynthesisRetryPolicy}). The clear
-   * runs before the transaction; an ACTIVE claim means a synthesis is genuinely in flight and
-   * the retry is rejected.
-   */
-  private void clearSynthesisClaim(long speechId) {
-    QuestionSpeechEntity speech = speeches.findById(speechId).orElseThrow(this::notFound);
-    String claimKey = QuestionSpeechSynthesisRetryPolicy.BIZ_KEY_PREFIX + speech.getSpeechId();
-    ProcessingClaim.ClearResult cleared;
-    try {
-      cleared = claims.clearTerminal(claimKey);
-    } catch (RuntimeException exception) {
-      throw conflict("TASK_RETRY_UNAVAILABLE", "Voice synthesis retry is temporarily unavailable");
-    }
-    if (cleared == ProcessingClaim.ClearResult.ACTIVE) {
-      throw conflict(VoiceErrorCodes.QUESTION_SPEECH_NOT_READY,
-          "The question speech synthesis is in progress");
-    }
-  }
-
-  /**
    * Resets the unique task row to a fresh PENDING execution (V9 fenced-epoch precedent): the
    * task epoch is joined to the speech's ALREADY-FENCED epoch (beginRetry bumped it first) so
    * stale listener messages cannot overwrite the new result. The existing row is reused —
@@ -268,6 +240,7 @@ public class QuestionSpeechServiceImpl implements QuestionSpeechModule {
         .orElseGet(() -> tasks.save(AsyncTaskEntity.pending(
             speech.getUserAccountId(), AsyncTaskType.QUESTION_SPEECH_SYNTHESIS, bizKey,
             "{\"speechId\":\"" + speech.getSpeechId() + "\"}")));
+    task.clearExecutionLease();
     task.setStatus(AsyncTaskStatus.PENDING);
     // The speech epoch is a long (V21 bigint) but the task epoch is an int (V9 schema); the
     // cast is safe because both advance once per manual retry in lockstep — 2^31 retries is

@@ -20,14 +20,12 @@ import interview.pilot.async.infrastructure.AsyncTaskEntity;
  *
  * <p>{@link #BIZ_KEY_PREFIX} is the single source of truth for the task bizKey format that
  * {@code QuestionSpeechTaskCreator} writes when it creates the task row (Task 7), and the
- * listener/claim-key contract: the claim key IS the bizKey, so a manual retry clears exactly
- * the claim the listener acquires.
+ * handler identity checks. Manual retry clears the database lease in its reset transaction.
  */
 @Component
 public class QuestionSpeechSynthesisRetryPolicy extends AbstractRetryableTaskPolicy {
   public static final String BIZ_KEY_PREFIX = "question-speech:";
-  // The voice claim key IS the bizKey: the speech id fences both the creation path and the
-  // listener-side processing claim, so retry clears exactly the claim the listener acquires.
+  // Retain the legacy identity format for generic retry validation.
   private static final String CLAIM_KEY_PREFIX = BIZ_KEY_PREFIX;
 
   @Override

@@ -202,8 +202,8 @@ class FixedAnswerBindingIT {
       throw new IllegalStateException("injected model failure");
     });
     var handler = new AnswerEvaluationHandler(tasks, sessions, turns, cards, evaluator,
-        new tools.jackson.databind.ObjectMapper(), transactionManager);
-    var listener = new AnswerEvaluationListener(handler, claims,
+        new tools.jackson.databind.ObjectMapper(), transactionManager, Duration.ofMinutes(2));
+    var listener = new AnswerEvaluationListener(handler,
         new interview.pilot.async.messaging.TaskRetryPolicy(publisher));
     var properties = new org.springframework.amqp.core.MessageProperties();
     properties.setHeader(interview.pilot.async.messaging.RabbitTopologyConfig.RETRY_COUNT_HEADER, 3);

@@ -35,7 +35,7 @@ class FixedAnswerServiceTest {
     when(sessions.findBySessionId(session.getSessionId())).thenReturn(Optional.of(session));
     when(sessions.findByIdForUpdate(1L)).thenReturn(Optional.of(session));
     var service=new FixedAnswerService(sessions,turns,mock(InterviewQuestionCardRepository.class),attempts,
-        mock(AsyncTaskRepository.class),mock(ProcessingClaim.class),mock(FollowUpGenerator.class),new ObjectMapper(),
+        mock(AsyncTaskRepository.class),mock(FollowUpGenerator.class),new ObjectMapper(),
         mock(PlatformTransactionManager.class),mock(interview.pilot.voice.infrastructure.VoiceRecordingRepository.class),
         mock(interview.pilot.voice.application.QuestionSpeechTaskCreator.class),new AnswerEvaluationProperties());
     var work=new FixedAnswerService.Work(session.getSessionId(),1L,1L,1L,UUID.randomUUID(),1,"按时提交的回答",
@@ -44,13 +44,12 @@ class FixedAnswerServiceTest {
     org.mockito.Mockito.verifyNoInteractions(turns,attempts);
   }
   @Test
-  void activeRedisAdmissionClaimFastRejectsAConcurrentAnswer() {
-    ProcessingClaim coordination = mock(ProcessingClaim.class);
-    when(coordination.acquire(anyString(), any())).thenReturn(Optional.empty());
+  void admissionUsesDatabaseOwnershipWithoutRedis() {
+    var sessions = mock(InterviewSessionRepository.class);
     var service = new FixedAnswerService(
-        mock(InterviewSessionRepository.class), mock(InterviewTurnRepository.class),
+        sessions, mock(InterviewTurnRepository.class),
         mock(InterviewQuestionCardRepository.class), mock(AnswerAttemptRepository.class),
-        mock(AsyncTaskRepository.class), coordination, mock(FollowUpGenerator.class),
+        mock(AsyncTaskRepository.class), mock(FollowUpGenerator.class),
         new ObjectMapper(), mock(PlatformTransactionManager.class),
         mock(interview.pilot.voice.infrastructure.VoiceRecordingRepository.class),
         mock(interview.pilot.voice.application.QuestionSpeechTaskCreator.class),
@@ -61,6 +60,6 @@ class FixedAnswerServiceTest {
         UUID.randomUUID(), new SubmitAnswerRequest(UUID.randomUUID(), "有效回答")))
         .isInstanceOfSatisfying(BusinessException.class,
             error -> org.assertj.core.api.Assertions.assertThat(error.code())
-                .isEqualTo("ANSWER_CLAIM_BUSY"));
+                .isEqualTo("INTERVIEW_NOT_FOUND"));
   }
 }

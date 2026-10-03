@@ -91,6 +91,8 @@ public class VoiceSynthesisHandler {
   private final AiMetrics metrics;
   private final VoiceMetrics voiceMetrics;
   private final TransactionTemplate transactions;
+  @org.springframework.beans.factory.annotation.Value("${app.async.voice-synthesis.lease-duration:2m}")
+  private Duration leaseDuration = Duration.ofMinutes(2);
 
   public VoiceSynthesisHandler(
       QuestionSpeechRepository speeches,
@@ -113,6 +115,7 @@ public class VoiceSynthesisHandler {
     this.metrics = metrics;
     this.voiceMetrics = voiceMetrics;
     this.transactions = new TransactionTemplate(transactionManager);
+    this.transactions.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
   }
 
   public VoiceSynthesisTarget inspect(TaskMessage message) {
@@ -146,33 +149,51 @@ public class VoiceSynthesisHandler {
 
   public Outcome synthesize(TaskMessage message) {
     BeginResult begin = transactions.execute(status -> begin(message));
-    if (begin.stale()) {
-      return Outcome.STALE;
+    if (begin.skipped() != null) return begin.skipped();
+    try {
+      return synthesizeMedia(begin.work());
+    } catch (SpeechSynthesisRetryableException exception) {
+      throw exception;
+    } catch (RuntimeException exception) {
+      return retryable(begin.work(), Duration.ZERO, exception);
     }
-    if (begin.terminal()) {
-      return Outcome.TERMINAL;
-    }
-    return synthesizeMedia(begin.work());
   }
 
-  public boolean markDead(TaskMessage message, int attemptGeneration) {
+  public boolean markDead(TaskMessage message, int generation, String token) {
     return Boolean.TRUE.equals(transactions.execute(status -> {
+      tasks.findByTaskIdForUpdate(message.taskId()).orElseThrow();
       AsyncTaskEntity task = requireMatchingTask(message);
-      QuestionSpeechEntity speech = requireSpeech(task);
-      return markDead(task, speech, attemptGeneration, message.executionEpoch());
+      if (!task.ownsExecution(message.executionEpoch(), generation, token)) return false;
+      return markDead(task, requireSpeech(task), generation, message.executionEpoch());
     }));
   }
 
-  public boolean markDeadCurrent(TaskMessage message) {
+  /** Recovery may only take over an expired, still-stale task, checked under its row lock. */
+  public boolean recoverAbandoned(TaskMessage message, java.time.Instant cutoff) {
     return Boolean.TRUE.equals(transactions.execute(status -> {
-      AsyncTaskEntity task = requireMatchingTask(message);
-      QuestionSpeechEntity speech = requireSpeech(task);
-      return markDead(task, speech, task.getAttemptCount(), message.executionEpoch());
+      AsyncTaskEntity task = tasks.findByTaskIdForUpdate(message.taskId()).orElseThrow();
+      if (!task.getUpdatedAt().isBefore(cutoff)) return false;
+      String token = UUID.randomUUID().toString();
+      if (tasks.claimExecution(message.taskId().toString(), AsyncTaskType.QUESTION_SPEECH_SYNTHESIS.name(),
+          message.bizKey(), message.executionEpoch(), token, leaseSeconds()) != 1) return false;
+      task = requireMatchingTask(message);
+      boolean recovered = markDead(task, requireSpeech(task), task.getAttemptCount(), message.executionEpoch());
+      if (!recovered) status.setRollbackOnly();
+      return recovered;
     }));
+  }
+
+  public void releaseForRetry(TaskMessage message, int generation, String token) {
+    transactions.executeWithoutResult(status -> tasks.releaseExecution(message.taskId().toString(),
+        AsyncTaskType.QUESTION_SPEECH_SYNTHESIS.name(), message.bizKey(), message.executionEpoch(), generation, token));
+  }
+
+  private long leaseSeconds() {
+    return interview.pilot.async.infrastructure.ExecutionLeaseDuration.seconds(leaseDuration);
   }
 
   /**
-   * Claim path (steps 1): validates again after the Redis claim was acquired, moves the
+   * Claim path (steps 1): atomically acquires a MySQL execution lease, moves the
    * speech PENDING → SYNTHESIZING (or reuses the SYNTHESIZING state left by a crash-recovery
    * duplicate) without touching the epoch, marks the task PUBLISHED and captures the question
    * text. A text_sha256 drift — impossible through the normal flow since the question text is
@@ -181,41 +202,42 @@ public class VoiceSynthesisHandler {
    */
   private BeginResult begin(TaskMessage message) {
     AsyncTaskEntity task = requireMatchingTask(message);
+    if (task.getExecutionEpoch() != message.executionEpoch() || task.getStatus() == AsyncTaskStatus.COMPLETED
+        || task.getStatus() == AsyncTaskStatus.FAILED || task.getStatus() == AsyncTaskStatus.DEAD)
+      return new BeginResult(null, Outcome.STALE);
+    String token = UUID.randomUUID().toString();
+    if (tasks.claimExecution(message.taskId().toString(), AsyncTaskType.QUESTION_SPEECH_SYNTHESIS.name(),
+        message.bizKey(), message.executionEpoch(), token, leaseSeconds()) != 1)
+      return new BeginResult(null, Outcome.BUSY);
+    task = requireMatchingTask(message);
     QuestionSpeechEntity speech = requireSpeech(task);
-    if (task.getExecutionEpoch() != message.executionEpoch()) {
-      return new BeginResult(null, true, false); // a newer generation owns the row
-    }
+    if (speech.getExecutionEpoch() != message.executionEpoch())
+      throw new IllegalStateException("Task and media epoch do not match");
     switch (speech.getStatus()) {
       case PENDING -> speech.startSynthesis();
-      case SYNTHESIZING -> { /* crash-recovery duplicate; the epoch fence protects */ }
+      case SYNTHESIZING -> { /* crash-recovery duplicate; the task token and epoch fence protect */ }
       default -> throw new IllegalStateException("Question speech is not synthesis-ready");
     }
-    if (task.getStatus() == AsyncTaskStatus.PENDING) {
-      task.setStatus(AsyncTaskStatus.PUBLISHED);
-    } else if (task.getStatus() != AsyncTaskStatus.PUBLISHED) {
-      throw new IllegalStateException("Voice synthesis task state is inconsistent");
-    }
-    task.setAttemptCount(task.getAttemptCount() + 1);
     int attemptGeneration = task.getAttemptCount();
-    task.setLastError(null);
     InterviewTurnEntity turn = turns.findById(speech.getTurnId())
         .orElseThrow(() -> new IllegalStateException(MISSING_TURN_ERROR));
     String questionText = turn.getQuestionText();
     if (!speech.getTextSha256().equals(QuestionSpeechHashes.of(questionText))) {
       speech.failSynthesis(VoiceErrorCodes.VOICE_QUESTION_SPEECH_FAILED);
       task.setStatus(AsyncTaskStatus.FAILED);
+      task.clearExecutionLease();
       task.setLastError(TEXT_MISMATCH_ERROR);
       metrics.afterCommit(() -> metrics.taskFailed(
           AsyncTaskType.QUESTION_SPEECH_SYNTHESIS, "failed"));
-      return new BeginResult(null, false, true);
+      return new BeginResult(null, Outcome.TERMINAL);
     }
     UUID userId = users.findById(speech.getUserAccountId())
         .map(UserAccountEntity::getUserId)
         .orElseThrow(() -> new IllegalStateException("Question speech owner is missing"));
     return new BeginResult(new Work(
         task.getTaskId(), speech.getSpeechId(), userId, speech.getSessionId(),
-        speech.getExecutionEpoch(), attemptGeneration, questionText,
-        speech.getProviderId(), speech.getModelName(), speech.getVoiceName()), false, false);
+        speech.getExecutionEpoch(), attemptGeneration, token, questionText,
+        speech.getProviderId(), speech.getModelName(), speech.getVoiceName()), null);
   }
 
   /**
@@ -246,7 +268,7 @@ public class VoiceSynthesisHandler {
     try {
       stored = mediaStore.store(
           new VoiceMediaKey(work.userId(), work.sessionId(),
-              VoiceMediaKind.SPEECH, work.speechId()),
+              VoiceMediaKind.SPEECH, UUID.fromString(work.executionToken())),
           new ByteArrayInputStream(synthesized.audio()),
           properties.maxUploadBytes());
     } catch (VoiceMediaUnsupportedException exception) {
@@ -264,7 +286,7 @@ public class VoiceSynthesisHandler {
     if (outcome != Outcome.TERMINAL) {
       // The final transaction did not persist the audio (stale fence or text drift): the
       // just-stored file is orphaned — best-effort delete after the transaction.
-      deleteOrphanedAudio(work, stored.storageKey());
+      deleteOrphanedAudio(stored.storageKey());
     }
     return outcome;
   }
@@ -280,6 +302,7 @@ public class VoiceSynthesisHandler {
         speech.failSynthesis(VoiceErrorCodes.VOICE_QUESTION_SPEECH_FAILED);
         AsyncTaskEntity task = requireMatchingTaskById(work.taskId());
         task.setStatus(AsyncTaskStatus.FAILED);
+        task.clearExecutionLease();
         task.setLastError(TEXT_MISMATCH_ERROR);
         metrics.afterCommit(() -> metrics.taskFailed(
             AsyncTaskType.QUESTION_SPEECH_SYNTHESIS, "failed"));
@@ -290,6 +313,7 @@ public class VoiceSynthesisHandler {
           stored.sizeBytes(), stored.duration() == null ? 0 : stored.duration().toMillis());
       AsyncTaskEntity task = requireMatchingTaskById(work.taskId());
       task.setStatus(AsyncTaskStatus.COMPLETED);
+      task.clearExecutionLease();
       task.setLastError(null);
       metrics.afterCommit(() -> metrics.taskCompleted(AsyncTaskType.QUESTION_SPEECH_SYNTHESIS));
       return Outcome.TERMINAL;
@@ -316,6 +340,7 @@ public class VoiceSynthesisHandler {
       speech.failSynthesis(code);
       AsyncTaskEntity task = requireMatchingTaskById(work.taskId());
       task.setStatus(AsyncTaskStatus.FAILED);
+      task.clearExecutionLease();
       task.setLastError(detail);
       metrics.afterCommit(() -> metrics.taskFailed(
           AsyncTaskType.QUESTION_SPEECH_SYNTHESIS, "failed"));
@@ -333,6 +358,10 @@ public class VoiceSynthesisHandler {
 
   /** Records the failure evidence on the current attempt, then re-throws for the retry pipeline. */
   private Outcome retryable(Work work, Duration latency) {
+    return retryable(work, latency, null);
+  }
+
+  private Outcome retryable(Work work, Duration latency, Throwable cause) {
     Boolean current = transactions.execute(status -> {
       QuestionSpeechEntity speech = currentSpeech(work);
       if (speech == null) {
@@ -348,7 +377,7 @@ public class VoiceSynthesisHandler {
     }
     log.warn("voice_tts_retryable taskId={} speechId={} sessionId={} executionEpoch={}",
         work.taskId(), work.speechId(), work.sessionId(), work.epoch());
-    throw new SpeechSynthesisRetryableException(RETRYABLE_ERROR, work.attemptGeneration());
+    throw new SpeechSynthesisRetryableException(RETRYABLE_ERROR, work.attemptGeneration(), work.executionToken(), cause);
   }
 
   /**
@@ -356,9 +385,7 @@ public class VoiceSynthesisHandler {
    * {@code VOICE_QUESTION_SPEECH_FAILED} (so Task 8's retry endpoint can manually retry) and
    * the task becomes DEAD. Every fence is checked — task epoch/attempt and speech epoch — so
    * a dead-lettered message of an older generation can never terminalize a newer row; a
-   * message that died before the claim transaction ever ran still moves its PENDING row to
-   * FAILED (the pre-approved PENDING → FAILED transition, mirror of the recording's
-   * UPLOADED → FAILED).
+   * message without a committed identity is deferred. Recovery first acquires an expired lease.
    */
   private boolean markDead(
       AsyncTaskEntity task,
@@ -382,6 +409,7 @@ public class VoiceSynthesisHandler {
     }
     speech.failSynthesis(VoiceErrorCodes.VOICE_QUESTION_SPEECH_FAILED);
     task.setStatus(AsyncTaskStatus.DEAD);
+    task.clearExecutionLease();
     task.setLastError("Voice synthesis retries exhausted");
     metrics.afterCommit(() -> metrics.taskFailed(
         AsyncTaskType.QUESTION_SPEECH_SYNTHESIS, "dead"));
@@ -394,6 +422,8 @@ public class VoiceSynthesisHandler {
 
   /** Final-transaction fence: the row must still be the claimed SYNTHESIZING execution. */
   private QuestionSpeechEntity currentSpeech(Work work) {
+    AsyncTaskEntity task = tasks.findByTaskIdForUpdate(work.taskId()).orElse(null);
+    if (task == null || !task.ownsExecution((int) work.epoch(), work.attemptGeneration(), work.executionToken())) return null;
     QuestionSpeechEntity speech = speeches.findBySpeechId(work.speechId()).orElse(null);
     if (speech == null
         || speech.getExecutionEpoch() != work.epoch()
@@ -403,23 +433,9 @@ public class VoiceSynthesisHandler {
     return speech;
   }
 
-  /**
-   * Best-effort cleanup of audio the final transaction did not persist (stale final fence or
-   * text drift): the storage key is immutable and shared across generations by design
-   * (rewrite semantics), so a delete must never remove a file a live row references — the
-   * guard deletes only when the row is absent or FAILED without a storage key. The residual
-   * window (a crash between the store and this cleanup, or a retry racing the re-read) can
-   * still leave an unreferenced file; Task 11's sweeper owns that reclamation, and readers
-   * tolerate missing files per the store's {@link VoiceMediaNotFoundException} contract.
-   */
-  private void deleteOrphanedAudio(Work work, String storageKey) {
-    Boolean deletable = transactions.execute(status -> speeches.findBySpeechId(work.speechId())
-        .map(speech -> speech.getStatus() == QuestionSpeechStatus.FAILED
-            && speech.getStorageKey() == null)
-        .orElse(true));
-    if (!Boolean.TRUE.equals(deletable)) {
-      return;
-    }
+  /** Each execution owns a distinct audio key; only its uncommitted file may be removed. */
+  private void deleteOrphanedAudio(String storageKey) {
+    // Each execution writes a distinct key, so stale cleanup cannot delete a winner's file.
     try {
       mediaStore.delete(storageKey);
     } catch (VoiceMediaNotFoundException | IllegalArgumentException ignored) {
@@ -440,7 +456,9 @@ public class VoiceSynthesisHandler {
         || message.bizKey() == null) {
       throw new IllegalArgumentException("Voice synthesis message identity is invalid");
     }
-    return requireMatchingTaskById(message.taskId());
+    AsyncTaskEntity task = requireMatchingTaskById(message.taskId());
+    if (!task.getBizKey().equals(message.bizKey())) throw new IllegalArgumentException("Task business key does not match");
+    return task;
   }
 
   private AsyncTaskEntity requireMatchingTaskById(UUID taskId) {
@@ -484,7 +502,7 @@ public class VoiceSynthesisHandler {
      * listener completes the claim exactly like TERMINAL.
      */
     TERMINAL_WITHOUT_AUDIO,
-    STALE
+    STALE, BUSY
   }
 
   public record VoiceSynthesisTarget(
@@ -492,8 +510,8 @@ public class VoiceSynthesisHandler {
 
   private record Work(
       UUID taskId, UUID speechId, UUID userId, Long sessionId,
-      long epoch, int attemptGeneration, String questionText,
+      long epoch, int attemptGeneration, String executionToken, String questionText,
       String provider, String model, String voice) {}
 
-  private record BeginResult(Work work, boolean stale, boolean terminal) {}
+  private record BeginResult(Work work, Outcome skipped) {}
 }

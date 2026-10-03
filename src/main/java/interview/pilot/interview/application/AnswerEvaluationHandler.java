@@ -1,5 +1,6 @@
 package interview.pilot.interview.application;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -7,7 +8,9 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import interview.pilot.async.domain.AsyncTaskStatus;
@@ -19,6 +22,7 @@ import interview.pilot.async.policy.AnswerEvaluationRetryPolicy;
 import interview.pilot.interview.domain.AnswerEvaluation;
 import interview.pilot.interview.domain.EvalStatus;
 import interview.pilot.interview.domain.RubricPoint;
+import interview.pilot.interview.domain.TurnStatus;
 import interview.pilot.interview.infrastructure.InterviewQuestionCardEntity;
 import interview.pilot.interview.infrastructure.InterviewQuestionCardRepository;
 import interview.pilot.interview.infrastructure.InterviewSessionEntity;
@@ -33,13 +37,11 @@ import tools.jackson.databind.ObjectMapper;
  * Drives the ANSWER_EVALUATION consumer (see {@code AnswerEvaluationListener}). The slow model
  * call is sandwiched between two short transactions, mirroring the answer/transcription handlers:
  * <ol>
- *   <li>{@code begin} validates identity/ownership/epoch, loads the completed turn and its frozen
- *       card (rubric + question-scoped snapshot), marks the task PUBLISHED and assembles the
- *       evaluator input — a turn already judged terminates idempotently;</li>
+ *   <li>{@code begin} atomically acquires a MySQL execution lease, validates the completed turn
+ *       and assembles evaluator input from its frozen card;</li>
  *   <li>the {@link AnswerEvaluator} runs outside any transaction;</li>
- *   <li>{@code complete} re-reads the row and, behind the optimistic {@code @Version}, verifies the
- *       turn is still COMPLETED, still PENDING evaluation and still carries the same requestId, so
- *       a stale or duplicated result can never overwrite a newer one.</li>
+ *   <li>{@code complete} locks task then turn, verifying the token, epoch, generation and answer
+ *       requestId before committing the evaluation and task completion together.</li>
  * </ol>
  * Retry exhaustion ({@link #markDead}) only flips eval_status to FAILED; the answer and the
  * interview flow are never affected.
@@ -55,6 +57,7 @@ public class AnswerEvaluationHandler {
   private final AnswerEvaluator evaluator;
   private final ObjectMapper objectMapper;
   private final TransactionTemplate transactions;
+  private final long leaseSeconds;
 
   public AnswerEvaluationHandler(
       AsyncTaskRepository tasks,
@@ -63,7 +66,8 @@ public class AnswerEvaluationHandler {
       InterviewQuestionCardRepository cards,
       AnswerEvaluator evaluator,
       ObjectMapper objectMapper,
-      PlatformTransactionManager transactionManager) {
+      PlatformTransactionManager transactionManager,
+      @Value("${app.async.answer-evaluation.lease-duration:2m}") Duration leaseDuration) {
     this.tasks = tasks;
     this.sessions = sessions;
     this.turns = turns;
@@ -71,6 +75,12 @@ public class AnswerEvaluationHandler {
     this.evaluator = evaluator;
     this.objectMapper = objectMapper;
     this.transactions = new TransactionTemplate(transactionManager);
+    this.transactions.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+    if (leaseDuration == null || leaseDuration.getSeconds() < 1
+        || leaseDuration.compareTo(Duration.ofHours(1)) > 0 || leaseDuration.getNano() != 0) {
+      throw new IllegalArgumentException("Answer evaluation lease must be whole seconds between 1s and 1h");
+    }
+    this.leaseSeconds = leaseDuration.getSeconds();
   }
 
   public Target inspect(TaskMessage message) {
@@ -87,73 +97,81 @@ public class AnswerEvaluationHandler {
 
   public Outcome evaluate(TaskMessage message) {
     Begin begin = transactions.execute(status -> begin(message));
-    if (begin.stale()) {
-      return Outcome.STALE;
-    }
+    if (begin.skipped() != null) return begin.skipped();
     Work work = begin.work();
     try {
       AnswerEvaluation evaluation = evaluator.evaluate(work.input());
       return transactions.execute(status -> complete(work, evaluation));
     } catch (RuntimeException exception) {
-      throw new AnswerEvaluationRetryableException(work.attemptGeneration(), exception);
+      boolean current = Boolean.TRUE.equals(transactions.execute(status -> {
+        var task = tasks.findByTaskIdForUpdate(work.taskId()).orElse(null);
+        var turn = turns.findBySessionIdAndTurnNoForUpdate(work.sessionId(), work.turnNo()).orElse(null);
+        if (!currentExecution(task, turn, work)) return false;
+        task.setLastError("ANSWER_EVALUATION_TEMPORARILY_UNAVAILABLE");
+        return true;
+      }));
+      if (!current) return Outcome.STALE;
+      throw new AnswerEvaluationRetryableException(work.attemptGeneration(), work.executionToken(),
+          work.requestId(), exception);
     }
   }
 
-  public boolean markDead(TaskMessage message, int attemptGeneration) {
+  public boolean markDead(TaskMessage message, int attemptGeneration, String executionToken, UUID requestId) {
     return Boolean.TRUE.equals(transactions.execute(status -> {
+      tasks.findByTaskIdForUpdate(message.taskId()).orElseThrow();
       AsyncTaskEntity task = requireTask(message);
+      if (!task.ownsExecution(message.executionEpoch(), attemptGeneration, executionToken)) return false;
       Key key = parseKey(task.getBizKey());
       InterviewSessionEntity session = session(task, key);
-      InterviewTurnEntity turn = turn(session, key.turnNo());
-      if (task.getExecutionEpoch() != message.executionEpoch()
-          || task.getAttemptCount() != attemptGeneration) {
-        return false;
-      }
-      if (task.getStatus() == AsyncTaskStatus.DEAD && turn.getEvalStatus() == EvalStatus.FAILED) {
-        return true;
-      }
-      if (task.getStatus() != AsyncTaskStatus.PENDING
-          && task.getStatus() != AsyncTaskStatus.PUBLISHED) {
-        return false;
-      }
-      if (turn.getEvalStatus() == EvalStatus.PENDING) {
-        turn.failEvaluation();
-      }
+      InterviewTurnEntity turn = turns.findBySessionIdAndTurnNoForUpdate(session.getId(), key.turnNo()).orElseThrow();
+      if (!currentAnswer(turn, requestId)) return false;
+      turn.failEvaluation();
       task.setStatus(AsyncTaskStatus.DEAD);
       task.setLastError("ANSWER_EVALUATION_RETRY_EXHAUSTED");
+      task.clearExecutionLease();
       log.warn("answer_evaluation_exhausted taskId={} sessionId={} turnNo={}",
           task.getTaskId(), key.sessionId(), key.turnNo());
       return true;
     }));
   }
 
+  public void releaseForRetry(TaskMessage message, int attemptGeneration, String executionToken) {
+    transactions.executeWithoutResult(status -> tasks.releaseExecution(message.taskId().toString(),
+        AsyncTaskType.ANSWER_EVALUATION.name(), message.bizKey(), message.executionEpoch(), attemptGeneration, executionToken));
+  }
+
   private Begin begin(TaskMessage message) {
     AsyncTaskEntity task = requireTask(message);
     Key key = parseKey(task.getBizKey());
-    if (task.getExecutionEpoch() != message.executionEpoch()) {
+    if (task.getExecutionEpoch() != message.executionEpoch()
+        || task.getStatus() == AsyncTaskStatus.COMPLETED
+        || task.getStatus() == AsyncTaskStatus.FAILED || task.getStatus() == AsyncTaskStatus.DEAD) {
       return Begin.beginStale();
     }
+    String token = UUID.randomUUID().toString();
+    if (tasks.claimExecution(message.taskId().toString(), AsyncTaskType.ANSWER_EVALUATION.name(),
+        message.bizKey(), message.executionEpoch(), token, leaseSeconds) != 1) {
+      return new Begin(null, Outcome.BUSY);
+    }
+    // The bulk CAS clears the persistence context; reload under its retained task row lock.
+    task = requireTask(message);
     InterviewSessionEntity session = session(task, key);
-    InterviewTurnEntity turn = turn(session, key.turnNo());
+    InterviewTurnEntity turn = turns.findBySessionIdAndTurnNoForUpdate(session.getId(), key.turnNo()).orElseThrow();
+    if (turn.getStatus() != TurnStatus.COMPLETED || turn.getRequestId() == null) {
+      throw new IllegalStateException("only a completed answer can be evaluated");
+    }
 
     // Idempotent replay: a turn already at a terminal eval state must not be judged twice. Close
     // the task row so a redelivered message cannot stay PUBLISHED forever.
     if (turn.getEvalStatus().terminal()) {
-      task.setStatus(AsyncTaskStatus.COMPLETED);
-      task.setLastError(null);
+      task.setStatus(turn.getEvalStatus() == EvalStatus.FAILED ? AsyncTaskStatus.DEAD : AsyncTaskStatus.COMPLETED);
+      task.setLastError(turn.getEvalStatus() == EvalStatus.FAILED ? "ANSWER_EVALUATION_RETRY_EXHAUSTED" : null);
+      task.clearExecutionLease();
       return Begin.beginStale();
     }
     if (turn.getEvalStatus() != EvalStatus.PENDING) {
       throw new IllegalStateException("answer evaluation turn state is inconsistent");
     }
-    if (task.getStatus() == AsyncTaskStatus.PENDING) {
-      task.setStatus(AsyncTaskStatus.PUBLISHED);
-    } else if (task.getStatus() != AsyncTaskStatus.PUBLISHED) {
-      throw new IllegalStateException("answer evaluation task state is inconsistent");
-    }
-    task.setAttemptCount(task.getAttemptCount() + 1);
-    task.setLastError(null);
-
     InterviewQuestionCardEntity card = cards.findById(turn.getSourceCardId())
         .orElseThrow(() -> new IllegalStateException("source question card is missing"));
     RagContextSnapshot snapshot = decode(card.getRagContextSnapshot(), RagContextSnapshot.class);
@@ -169,27 +187,34 @@ public class AnswerEvaluationHandler {
         session.getModelName());
     Work work = new Work(
         task.getTaskId(), session.getId(), turn.getId(), key.turnNo(), turn.getRequestId(),
-        task.getAttemptCount(), task.getExecutionEpoch(), input);
+        task.getAttemptCount(), task.getExecutionEpoch(), token, input);
     return Begin.of(work);
   }
 
   private Outcome complete(Work work, AnswerEvaluation evaluation) {
-    AsyncTaskEntity task = tasks.findByTaskId(work.taskId())
+    AsyncTaskEntity task = tasks.findByTaskIdForUpdate(work.taskId())
         .orElseThrow(() -> new IllegalStateException("answer evaluation task is missing"));
-    InterviewTurnEntity turn = turns.findById(work.turnId())
+    InterviewTurnEntity turn = turns.findBySessionIdAndTurnNoForUpdate(work.sessionId(), work.turnNo())
         .orElseThrow(() -> new IllegalStateException("answer evaluation turn is missing"));
-    if (task.getExecutionEpoch() != work.executionEpoch()
-        || task.getAttemptCount() != work.attemptGeneration()
-        || task.getStatus() != AsyncTaskStatus.PUBLISHED
-        || turn.getEvalStatus() != EvalStatus.PENDING
-        || !Objects.equals(turn.getRequestId(), work.requestId())) {
+    if (!currentExecution(task, turn, work)) {
       // A stale/duplicated result (or a newer answer) must never overwrite the current row.
       return Outcome.STALE;
     }
     turn.attachEvaluation(encode(evaluation), evaluation.status());
     task.setStatus(AsyncTaskStatus.COMPLETED);
     task.setLastError(null);
+    task.clearExecutionLease();
     return Outcome.TERMINAL;
+  }
+
+  private boolean currentExecution(AsyncTaskEntity task, InterviewTurnEntity turn, Work work) {
+    return task != null && task.ownsExecution(work.executionEpoch(), work.attemptGeneration(), work.executionToken())
+        && turn != null && Objects.equals(turn.getId(), work.turnId()) && currentAnswer(turn, work.requestId());
+  }
+
+  private boolean currentAnswer(InterviewTurnEntity turn, UUID requestId) {
+    return requestId != null && turn.getStatus() == TurnStatus.COMPLETED
+        && turn.getEvalStatus() == EvalStatus.PENDING && requestId.equals(turn.getRequestId());
   }
 
   /** Frozen rubric when present; otherwise derive generic points from the card's focus points. */
@@ -232,13 +257,9 @@ public class AnswerEvaluationHandler {
         .orElseThrow(() -> new IllegalArgumentException("answer evaluation session not found"));
   }
 
-  private InterviewTurnEntity turn(InterviewSessionEntity session, int turnNo) {
-    return turns.findBySessionIdAndTurnNo(session.getId(), turnNo)
-        .orElseThrow(() -> new IllegalArgumentException("answer evaluation turn not found"));
-  }
-
   private Key parseKey(String bizKey) {
     try {
+      if (!bizKey.startsWith(AnswerEvaluationRetryPolicy.BIZ_KEY_PREFIX)) throw new IllegalArgumentException();
       String body = bizKey.substring(AnswerEvaluationRetryPolicy.BIZ_KEY_PREFIX.length());
       int separator = body.lastIndexOf(':');
       UUID sessionId = UUID.fromString(body.substring(0, separator));
@@ -286,7 +307,7 @@ public class AnswerEvaluationHandler {
     }
   }
 
-  public enum Outcome { TERMINAL, STALE }
+  public enum Outcome { TERMINAL, STALE, BUSY }
 
   public record Target(UUID sessionId, boolean terminal, int attemptGeneration, int executionEpoch) { }
 
@@ -294,14 +315,14 @@ public class AnswerEvaluationHandler {
 
   private record Work(
       UUID taskId, Long sessionId, Long turnId, int turnNo, UUID requestId,
-      int attemptGeneration, int executionEpoch, AnswerEvaluationInput input) { }
+      int attemptGeneration, int executionEpoch, String executionToken, AnswerEvaluationInput input) { }
 
-  private record Begin(Work work, boolean stale) {
+  private record Begin(Work work, Outcome skipped) {
     static Begin of(Work work) {
-      return new Begin(work, false);
+      return new Begin(work, null);
     }
     static Begin beginStale() {
-      return new Begin(null, true);
+      return new Begin(null, Outcome.STALE);
     }
   }
 }

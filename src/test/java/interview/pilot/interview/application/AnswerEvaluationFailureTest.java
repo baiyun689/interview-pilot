@@ -4,72 +4,101 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
-import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.SimpleTransactionStatus;
-import interview.pilot.async.domain.*;
-import interview.pilot.async.idempotency.ProcessingClaim;
-import interview.pilot.async.infrastructure.*;
+import org.springframework.dao.OptimisticLockingFailureException;
+import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.messaging.*;
-import interview.pilot.interview.domain.*;
-import interview.pilot.interview.infrastructure.*;
-import interview.pilot.interview.rag.RagContextSnapshot;
-import tools.jackson.databind.ObjectMapper;
 
-/** Regression for the committed begin transaction followed by a failed model call. */
 class AnswerEvaluationFailureTest {
-  @Test
-  void exhaustedModelFailureShouldPersistDeadWithoutGenerationMismatch() {
-    var tasks = mock(AsyncTaskRepository.class);
-    var sessions = mock(InterviewSessionRepository.class);
-    var turns = mock(InterviewTurnRepository.class);
-    var cards = mock(InterviewQuestionCardRepository.class);
-    var evaluator = mock(AnswerEvaluator.class);
-    var tx = mock(PlatformTransactionManager.class);
-    when(tx.getTransaction(any())).thenAnswer(i -> new SimpleTransactionStatus());
-    var mapper = new ObjectMapper();
-    UUID sessionId = UUID.randomUUID();
-    UUID taskId = UUID.randomUUID();
-    String key = "answer-eval:" + sessionId + ":1";
-    var task = AsyncTaskEntity.pending(7L, AsyncTaskType.ANSWER_EVALUATION, key, "{}");
-    task.setTaskId(taskId);
-    task.setStatus(AsyncTaskStatus.PUBLISHED);
-    task.setAttemptCount(3);
-    var session = mock(InterviewSessionEntity.class);
-    when(session.getId()).thenReturn(11L);
-    var turn = mock(InterviewTurnEntity.class);
-    when(turn.getEvalStatus()).thenReturn(EvalStatus.PENDING);
-    when(turn.getSourceCardId()).thenReturn(22L);
-    when(turn.getQuestionText()).thenReturn("Explain idempotency");
-    when(turn.getAnswerText()).thenReturn("Use a durable unique business key");
-    var card = mock(InterviewQuestionCardEntity.class);
-    when(card.getGroundingMode()).thenReturn(GroundingMode.GENERAL);
-    when(card.getFocusPoints()).thenReturn("[]");
-    when(card.getRagContextSnapshot()).thenReturn(mapper.writeValueAsString(RagContextSnapshot.notConfigured()));
-    when(tasks.findByTaskId(taskId)).thenReturn(Optional.of(task));
-    when(sessions.findBySessionIdAndUserAccountId(sessionId, 7L)).thenReturn(Optional.of(session));
-    when(turns.findBySessionIdAndTurnNo(11L, 1)).thenReturn(Optional.of(turn));
-    when(cards.findById(22L)).thenReturn(Optional.of(card));
-    when(evaluator.evaluate(any())).thenThrow(new IllegalStateException("injected model failure"));
-    var handler = new AnswerEvaluationHandler(tasks, sessions, turns, cards, evaluator, mapper, tx);
-    var claims = mock(ProcessingClaim.class);
-    when(claims.acquire(eq(key), any())).thenReturn(Optional.of("owner"));
-    var publisher = mock(TaskMessagePublisher.class);
-    var listener = new AnswerEvaluationListener(handler, claims, new TaskRetryPolicy(publisher));
-    var props = new MessageProperties();
-    props.setHeader(RabbitTopologyConfig.RETRY_COUNT_HEADER, 3);
-    var failure = catchThrowable(() -> listener.receive(
-        new TaskMessage(taskId, AsyncTaskType.ANSWER_EVALUATION, key, 0),
-        new Message(new byte[0], props)));
-    verify(evaluator).evaluate(any());
-    assertThat(task.getAttemptCount()).isEqualTo(4);
-    assertThat(failure).as("last failed attempt should be persisted as DEAD").isNull();
-    assertThat(task.getStatus()).isEqualTo(AsyncTaskStatus.DEAD);
-    verify(turn).failEvaluation();
+  private final AnswerEvaluationHandler handler = mock(AnswerEvaluationHandler.class);
+  private final TaskRetryPolicy retries = mock(TaskRetryPolicy.class);
+  private final AnswerEvaluationListener listener = new AnswerEvaluationListener(handler, retries);
+  private final TaskMessage task = new TaskMessage(UUID.randomUUID(), AsyncTaskType.ANSWER_EVALUATION,
+      "answer-eval:" + UUID.randomUUID() + ":2");
+  private final UUID requestId = UUID.randomUUID();
+  private final Message source = new Message(new byte[0], new MessageProperties());
+
+  AnswerEvaluationFailureTest() {
+    when(handler.inspect(task)).thenReturn(new AnswerEvaluationHandler.Target(UUID.randomUUID(), false, 3, 0));
+  }
+
+  @Test void deadLetterUsesTheCommittedGenerationTokenAndAnswerIdentity() {
+    when(handler.evaluate(task)).thenThrow(failure(new IllegalStateException("model failed")));
+    when(retries.routeFailure(task, source)).thenReturn(TaskRetryPolicy.RouteOutcome.DEAD_LETTER);
+    listener.receive(task, source);
+    var order = inOrder(retries, handler);
+    order.verify(retries).routeFailure(task, source);
+    order.verify(handler).markDead(task, 4, "owner", requestId);
+    verify(handler, never()).releaseForRetry(any(), anyInt(), any());
+  }
+
+  @Test void failedRetryPublicationKeepsTheDatabaseLease() {
+    when(handler.evaluate(task)).thenThrow(failure(new IllegalStateException("model failed")));
+    when(retries.routeFailure(task, source)).thenThrow(new AmqpException("broker unavailable"));
+    assertThatThrownBy(() -> listener.receive(task, source)).isInstanceOf(AmqpException.class);
+    verify(handler, never()).releaseForRetry(any(), anyInt(), any());
+    verify(handler, never()).markDead(any(), anyInt(), any(), any());
+  }
+
+  @Test void confirmedRetryPrecedesLeaseRelease() {
+    when(handler.evaluate(task)).thenThrow(failure(new IllegalStateException("model failed")));
+    when(retries.routeFailure(task, source)).thenReturn(TaskRetryPolicy.RouteOutcome.RETRY);
+    listener.receive(task, source);
+    var order = inOrder(retries, handler);
+    order.verify(retries).routeFailure(task, source);
+    order.verify(handler).releaseForRetry(task, 4, "owner");
+  }
+
+  @Test void persistenceFailureAfterDeadLetterEscapesForRedelivery() {
+    when(handler.evaluate(task)).thenThrow(failure(new IllegalStateException("model failed")));
+    when(retries.routeFailure(task, source)).thenReturn(TaskRetryPolicy.RouteOutcome.DEAD_LETTER);
+    when(handler.markDead(task, 4, "owner", requestId)).thenThrow(new IllegalStateException("database unavailable"));
+    assertThatThrownBy(() -> listener.receive(task, source)).isInstanceOf(IllegalStateException.class);
+  }
+
+  @Test void busyDeliveryDefersWithoutConsumingTheLastBusinessRetry() {
+    when(handler.evaluate(task)).thenReturn(AnswerEvaluationHandler.Outcome.BUSY);
+    source.getMessageProperties().setHeader(RabbitTopologyConfig.RETRY_COUNT_HEADER, 3);
+    listener.receive(task, source);
+    verify(retries).defer(task, source);
+    verify(retries, never()).routeFailure(any(), any());
+  }
+
+  @Test void failedDeferralEscapes() {
+    when(handler.evaluate(task)).thenReturn(AnswerEvaluationHandler.Outcome.BUSY);
+    doThrow(new AmqpException("broker unavailable")).when(retries).defer(task, source);
+    assertThatThrownBy(() -> listener.receive(task, source)).isInstanceOf(AmqpException.class);
+  }
+
+  @Test void inspectionFailureDefersWithoutInventingAnExecutionIdentity() {
+    when(handler.inspect(task)).thenThrow(new IllegalStateException("database unavailable"));
+    listener.receive(task, source);
+    verify(handler, never()).evaluate(any());
+    verify(retries).defer(task, source);
+    verify(retries, never()).routeFailure(any(), any());
+  }
+
+  @Test void staleResultDoesNotPublishOrRelease() {
+    when(handler.evaluate(task)).thenReturn(AnswerEvaluationHandler.Outcome.STALE);
+    listener.receive(task, source);
+    verifyNoInteractions(retries);
+    verify(handler, never()).releaseForRetry(any(), anyInt(), any());
+  }
+
+  @Test void optimisticConflictDefersBeforeReleasingTheMatchingExecution() {
+    when(handler.evaluate(task)).thenThrow(failure(new OptimisticLockingFailureException("row changed")));
+    listener.receive(task, source);
+    var order = inOrder(retries, handler);
+    order.verify(retries).defer(task, source);
+    order.verify(handler).releaseForRetry(task, 4, "owner");
+    verify(retries, never()).routeFailure(any(), any());
+  }
+
+  private AnswerEvaluationRetryableException failure(Throwable cause) {
+    return new AnswerEvaluationRetryableException(4, "owner", requestId, cause);
   }
 }
-

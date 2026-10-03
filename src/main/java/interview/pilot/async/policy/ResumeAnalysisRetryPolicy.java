@@ -37,8 +37,6 @@ public class ResumeAnalysisRetryPolicy extends AbstractRetryableTaskPolicy {
     return CLAIM_KEY_PREFIX + parseResumeId(task.getBizKey());
   }
 
-  @Override public boolean requiresRedisClaim() { return false; }
-
   @Override
   public void reset(AsyncTaskEntity task, long userAccountId) {
     Long resumeId = parseResumeId(task.getBizKey());

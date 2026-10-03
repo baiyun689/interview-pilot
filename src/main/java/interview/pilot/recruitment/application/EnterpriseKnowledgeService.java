@@ -112,7 +112,7 @@ public class EnterpriseKnowledgeService {
         if (work.status.equals("FAILED") || work.status.equals("CANCELLED")) {
           var task = store.find(AsyncTaskEntity.class, work.taskId, true).orElseThrow();
           work.status = "PENDING"; work.attempts = 0; work.error = null; work.nextAttemptAt = Instant.now();
-          task.setStatus(AsyncTaskStatus.PENDING); task.setExecutionEpoch(task.getExecutionEpoch() + 1); task.setLastPublishedAt(null); task.setLastError(null);
+          task.setStatus(AsyncTaskStatus.PENDING); task.clearExecutionLease(); task.setExecutionEpoch(task.getExecutionEpoch() + 1); task.setLastPublishedAt(null); task.setLastError(null);
         }
       } else {
         document.beginDeletion();
@@ -168,7 +168,7 @@ public class EnterpriseKnowledgeService {
     if (existing.isEmpty()) store.add(AsyncTaskEntity.pending(user.databaseId(), AsyncTaskType.KNOWLEDGE_DOCUMENT_INDEX, key, payload));
     else {
       var task = store.find(AsyncTaskEntity.class, existing.get().getId(), true).orElseThrow();
-      task.setStatus(AsyncTaskStatus.PENDING); task.setExecutionEpoch(task.getExecutionEpoch() + 1);
+      task.setStatus(AsyncTaskStatus.PENDING); task.clearExecutionLease(); task.setExecutionEpoch(task.getExecutionEpoch() + 1);
       task.setAttemptCount(0); task.setLastPublishedAt(null); task.setLastError(null); task.setPayloadSnapshot(payload);
     }
   }

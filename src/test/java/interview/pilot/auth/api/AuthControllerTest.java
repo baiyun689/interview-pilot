@@ -59,6 +59,9 @@ import interview.pilot.voice.infrastructure.VoiceRecordingRepository;
 })
 @AutoConfigureMockMvc
 class AuthControllerTest {
+  @org.springframework.test.context.bean.override.mockito.MockitoBean
+  private interview.pilot.async.idempotency.ProcessingClaim schedulerClaim;
+
   @MockitoBean private interview.pilot.recruitment.infrastructure.HiringStore hiringStore;
   @MockitoBean RedissonClient redissonClient;
   @MockitoBean AiSettingRepository aiSettingRepository;

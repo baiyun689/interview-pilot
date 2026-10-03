@@ -95,8 +95,8 @@ import interview.pilot.voice.storage.VoiceMediaStore;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * End-to-end cleanup sweeper (Task 11) against MySQL (V21-V23 schema) and Redis with the real
- * {@code RedisProcessingClaim} and the real {@code FileSystemVoiceMediaStore} (a spy only to
+ * End-to-end cleanup sweeper (Task 11) against MySQL with the real
+ * {@code MySqlProcessingClaim} and the real {@code FileSystemVoiceMediaStore} (a spy only to
  * count deletes and inject one simulated storage failure). A mutable {@link Clock} bean drives
  * every time condition (RECEIVING TTL, retention window, stuck-task staleness, orphan grace).
  *

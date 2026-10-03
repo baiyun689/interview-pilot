@@ -1,256 +1,74 @@
 package interview.pilot.voice.infrastructure;
-
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-
-import java.util.Optional;
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.*;
 import java.util.UUID;
-
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.springframework.amqp.AmqpException;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
-
 import interview.pilot.async.domain.AsyncTaskType;
-import interview.pilot.async.idempotency.ProcessingClaim;
-import interview.pilot.async.messaging.TaskMessage;
-import interview.pilot.async.messaging.TaskRetryPolicy;
-import interview.pilot.async.policy.VoiceTranscriptionRetryPolicy;
+import interview.pilot.async.messaging.*;
 import interview.pilot.voice.application.VoiceTranscriptionHandler;
 import interview.pilot.voice.application.VoiceTranscriptionRetryableException;
 
 class VoiceTranscriptionListenerTest {
+  private final VoiceTranscriptionHandler handler = mock(VoiceTranscriptionHandler.class);
+  private final TaskRetryPolicy retries = mock(TaskRetryPolicy.class);
+  private final VoiceTranscriptionListener listener = new VoiceTranscriptionListener(handler, retries);
+  private final TaskMessage task = new TaskMessage(UUID.randomUUID(), AsyncTaskType.VOICE_TRANSCRIPTION, "test");
+  private final Message source = new Message(new byte[0], new MessageProperties());
+  @BeforeEach void setup() { when(handler.inspect(task)).thenReturn(new VoiceTranscriptionHandler.VoiceTranscriptionTarget(UUID.randomUUID(), false, 3, 0)); }
 
-  @Test
-  void untrustedTaskTypeCannotRouteAVoiceQueueFailureIntoAnotherPipeline() {
-    VoiceTranscriptionHandler handler = mock(VoiceTranscriptionHandler.class);
-    TaskRetryPolicy retryPolicy = mock(TaskRetryPolicy.class);
-    var listener = new VoiceTranscriptionListener(
-        handler, mock(ProcessingClaim.class), retryPolicy);
-    TaskMessage untrusted = new TaskMessage(
-        UUID.randomUUID(), AsyncTaskType.INTERVIEW_EVALUATION, "voice-recording:42");
-    Message source = new Message(new byte[0], new MessageProperties());
-    when(handler.inspect(untrusted)).thenThrow(new IllegalArgumentException("wrong type"));
-    org.mockito.Mockito.doThrow(new AmqpException("publisher unavailable"))
-        .when(retryPolicy).routeFailure(org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.same(source));
-
-    assertThatThrownBy(() -> listener.receive(untrusted, source))
-        .isInstanceOf(AmqpException.class);
-
-    var routed = ArgumentCaptor.forClass(TaskMessage.class);
-    verify(retryPolicy, times(1)).routeFailure(routed.capture(),
-        org.mockito.ArgumentMatchers.same(source));
-    org.assertj.core.api.Assertions.assertThat(routed.getValue().taskType())
-        .isEqualTo(AsyncTaskType.VOICE_TRANSCRIPTION);
-  }
-
-  @Test
-  void acquiresTheClaimWithThePolicyBizKeyConstant() {
-    VoiceTranscriptionHandler handler = mock(VoiceTranscriptionHandler.class);
-    ProcessingClaim claims = mock(ProcessingClaim.class);
-    TaskRetryPolicy retryPolicy = mock(TaskRetryPolicy.class);
-    var listener = new VoiceTranscriptionListener(handler, claims, retryPolicy);
-    UUID recordingId = UUID.randomUUID();
-    TaskMessage task = new TaskMessage(
-        UUID.randomUUID(), AsyncTaskType.VOICE_TRANSCRIPTION,
-        VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + recordingId);
-    Message source = new Message(new byte[0], new MessageProperties());
-    when(handler.inspect(task)).thenReturn(
-        new VoiceTranscriptionHandler.VoiceTranscriptionTarget(recordingId, false, 1, 0));
-    when(claims.acquire(org.mockito.ArgumentMatchers.anyString(),
-        org.mockito.ArgumentMatchers.any()))
-        .thenReturn(Optional.of("token"));
-    when(handler.transcribe(task))
-        .thenReturn(VoiceTranscriptionHandler.Outcome.TERMINAL);
-
+  @Test void busyDefersWithoutConsumingFailureBudget() {
+    when(handler.transcribe(task)).thenReturn(VoiceTranscriptionHandler.Outcome.BUSY);
     listener.receive(task, source);
-
-    verify(claims).acquire(
-        VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + recordingId,
-        VoiceTranscriptionListener.PROCESSING_TTL);
-    verify(claims).complete(
-        org.mockito.ArgumentMatchers.eq(VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + recordingId),
-        org.mockito.ArgumentMatchers.eq("token"),
-        org.mockito.ArgumentMatchers.any());
+    verify(retries).defer(task, source);
+    verify(retries, never()).routeFailure(any(), any());
+    verify(handler, never()).markDead(any(), anyInt(), any());
   }
-
-  @Test
-  void terminalTargetIsIgnoredWithoutAcquiringAClaim() {
-    VoiceTranscriptionHandler handler = mock(VoiceTranscriptionHandler.class);
-    ProcessingClaim claims = mock(ProcessingClaim.class);
-    var listener = new VoiceTranscriptionListener(
-        handler, claims, mock(TaskRetryPolicy.class));
-    UUID recordingId = UUID.randomUUID();
-    TaskMessage task = new TaskMessage(
-        UUID.randomUUID(), AsyncTaskType.VOICE_TRANSCRIPTION,
-        VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + recordingId);
-    Message source = new Message(new byte[0], new MessageProperties());
-    when(handler.inspect(task)).thenReturn(
-        new VoiceTranscriptionHandler.VoiceTranscriptionTarget(recordingId, true, 0, 0));
-
+  @Test void failedDeferralEscapesToKeepDeliveryUnacknowledged() {
+    when(handler.transcribe(task)).thenReturn(VoiceTranscriptionHandler.Outcome.BUSY);
+    doThrow(new IllegalStateException("broker down")).when(retries).defer(task, source);
+    assertThatThrownBy(() -> listener.receive(task, source)).hasMessage("broker down");
+  }
+  @Test void inspectFailureDoesNotInventAnExecutionIdentity() {
+    when(handler.inspect(task)).thenThrow(new IllegalStateException("database down"));
     listener.receive(task, source);
-
-    verify(claims, times(0)).acquire(org.mockito.ArgumentMatchers.anyString(),
-        org.mockito.ArgumentMatchers.any());
+    verify(retries).defer(task, source);
+    verify(handler, never()).markDead(any(), anyInt(), any());
   }
-
-  @Test
-  void retryableFailureRoutesThroughTheRetryPipelineAndFencesTheAttemptGeneration() {
-    VoiceTranscriptionHandler handler = mock(VoiceTranscriptionHandler.class);
-    ProcessingClaim claims = mock(ProcessingClaim.class);
-    TaskRetryPolicy retryPolicy = mock(TaskRetryPolicy.class);
-    var listener = new VoiceTranscriptionListener(handler, claims, retryPolicy);
-    UUID recordingId = UUID.randomUUID();
-    TaskMessage task = new TaskMessage(
-        UUID.randomUUID(), AsyncTaskType.VOICE_TRANSCRIPTION,
-        VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + recordingId);
-    Message source = new Message(new byte[0], new MessageProperties());
-    when(handler.inspect(task)).thenReturn(
-        new VoiceTranscriptionHandler.VoiceTranscriptionTarget(recordingId, false, 1, 0));
-    when(claims.acquire(org.mockito.ArgumentMatchers.anyString(),
-        org.mockito.ArgumentMatchers.any()))
-        .thenReturn(Optional.of("token"));
-    when(handler.transcribe(task)).thenThrow(new VoiceTranscriptionRetryableException("down", 2));
-    when(retryPolicy.routeFailure(task, source))
-        .thenReturn(TaskRetryPolicy.RouteOutcome.RETRY);
-
+  @Test void retryIsConfirmedBeforeRelease() {
+    when(handler.transcribe(task)).thenThrow(new VoiceTranscriptionRetryableException("unavailable", 4, "owner"));
+    when(retries.routeFailure(task, source)).thenReturn(TaskRetryPolicy.RouteOutcome.RETRY);
     listener.receive(task, source);
-
-    verify(retryPolicy).routeFailure(task, source);
-    verify(claims).release(
-        VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + recordingId, "token");
-    verify(handler, times(0)).markDead(org.mockito.ArgumentMatchers.any(),
-        org.mockito.ArgumentMatchers.anyInt());
+    var order = inOrder(retries, handler);
+    order.verify(retries).routeFailure(task, source);
+    order.verify(handler).releaseForRetry(task, 4, "owner");
   }
-
-  @Test
-  void retryExhaustionDeadLettersAndMarksDeadWithTheFencedAttemptGeneration() {
-    VoiceTranscriptionHandler handler = mock(VoiceTranscriptionHandler.class);
-    ProcessingClaim claims = mock(ProcessingClaim.class);
-    TaskRetryPolicy retryPolicy = mock(TaskRetryPolicy.class);
-    var listener = new VoiceTranscriptionListener(handler, claims, retryPolicy);
-    UUID recordingId = UUID.randomUUID();
-    TaskMessage task = new TaskMessage(
-        UUID.randomUUID(), AsyncTaskType.VOICE_TRANSCRIPTION,
-        VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + recordingId);
-    Message source = new Message(new byte[0], new MessageProperties());
-    when(handler.inspect(task)).thenReturn(
-        new VoiceTranscriptionHandler.VoiceTranscriptionTarget(recordingId, false, 1, 0));
-    when(claims.acquire(org.mockito.ArgumentMatchers.anyString(),
-        org.mockito.ArgumentMatchers.any()))
-        .thenReturn(Optional.of("token"));
-    when(handler.transcribe(task)).thenThrow(new VoiceTranscriptionRetryableException("down", 2));
-    when(retryPolicy.routeFailure(task, source))
-        .thenReturn(TaskRetryPolicy.RouteOutcome.DEAD_LETTER);
-    when(handler.markDead(task, 2)).thenReturn(true);
-
+  @Test void failedPublicationKeepsTheLease() {
+    when(handler.transcribe(task)).thenThrow(new VoiceTranscriptionRetryableException("unavailable", 4, "owner"));
+    when(retries.routeFailure(task, source)).thenThrow(new IllegalStateException("broker down"));
+    assertThatThrownBy(() -> listener.receive(task, source)).hasMessage("broker down");
+    verify(handler, never()).releaseForRetry(any(), anyInt(), any());
+  }
+  @Test void exhaustionUsesCommittedIdentityInsteadOfInspectionGeneration() {
+    when(handler.transcribe(task)).thenThrow(new VoiceTranscriptionRetryableException("unavailable", 4, "owner"));
+    when(retries.routeFailure(task, source)).thenReturn(TaskRetryPolicy.RouteOutcome.DEAD_LETTER);
     listener.receive(task, source);
-
-    verify(handler).markDead(task, 2);
+    verify(handler).markDead(task, 4, "owner");
+    verify(handler, never()).releaseForRetry(any(), anyInt(), any());
   }
-
-  @Test
-  void exhaustedInspectFailureMustTerminalizeOnlyAValidatedCurrentMessage() {
-    VoiceTranscriptionHandler handler = mock(VoiceTranscriptionHandler.class);
-    TaskRetryPolicy retryPolicy = mock(TaskRetryPolicy.class);
-    var listener = new VoiceTranscriptionListener(
-        handler, mock(ProcessingClaim.class), retryPolicy);
-    UUID recordingId = UUID.randomUUID();
-    TaskMessage task = new TaskMessage(
-        UUID.randomUUID(), AsyncTaskType.VOICE_TRANSCRIPTION,
-        VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + recordingId);
-    Message source = new Message(new byte[0], new MessageProperties());
-    when(handler.inspect(task)).thenThrow(new IllegalStateException("database read failed"));
-    when(retryPolicy.routeFailure(task, source))
-        .thenReturn(TaskRetryPolicy.RouteOutcome.DEAD_LETTER);
-    when(handler.markDeadCurrent(task)).thenReturn(true);
-
-    listener.receive(task, source);
-
-    verify(handler).markDeadCurrent(task);
+  @Test void deadLetterPersistenceFailureEscapes() {
+    when(handler.transcribe(task)).thenThrow(new VoiceTranscriptionRetryableException("unavailable", 4, "owner"));
+    when(retries.routeFailure(task, source)).thenReturn(TaskRetryPolicy.RouteOutcome.DEAD_LETTER);
+    when(handler.markDead(task, 4, "owner")).thenThrow(new IllegalStateException("database down"));
+    assertThatThrownBy(() -> listener.receive(task, source)).hasMessage("database down");
   }
-
-  @Test
-  void exhaustedOccupiedClaimMustNotTerminalizeAnotherOwnersGeneration() {
-    VoiceTranscriptionHandler handler = mock(VoiceTranscriptionHandler.class);
-    ProcessingClaim claims = mock(ProcessingClaim.class);
-    TaskRetryPolicy retryPolicy = mock(TaskRetryPolicy.class);
-    var listener = new VoiceTranscriptionListener(handler, claims, retryPolicy);
-    UUID recordingId = UUID.randomUUID();
-    TaskMessage task = new TaskMessage(
-        UUID.randomUUID(), AsyncTaskType.VOICE_TRANSCRIPTION,
-        VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + recordingId);
-    Message source = new Message(new byte[0], new MessageProperties());
-    when(handler.inspect(task)).thenReturn(
-        new VoiceTranscriptionHandler.VoiceTranscriptionTarget(recordingId, false, 1, 0));
-    when(claims.acquire(org.mockito.ArgumentMatchers.anyString(),
-        org.mockito.ArgumentMatchers.any()))
-        .thenReturn(Optional.empty());
-
-
-    source.getMessageProperties().setHeader(interview.pilot.async.messaging.RabbitTopologyConfig.RETRY_COUNT_HEADER, 3);
-    listener.receive(task, source);
-    verify(retryPolicy).defer(task, source);
-    verify(retryPolicy, org.mockito.Mockito.never()).routeFailure(task, source);
-
-    verify(handler, times(0)).markDead(org.mockito.ArgumentMatchers.any(),
-        org.mockito.ArgumentMatchers.anyInt());
-  }
-
-  @Test
-  void dlqSuccessFollowedByTerminalDatabaseFailureMustEscape() {
-    VoiceTranscriptionHandler handler = mock(VoiceTranscriptionHandler.class);
-    ProcessingClaim claims = mock(ProcessingClaim.class);
-    TaskRetryPolicy retryPolicy = mock(TaskRetryPolicy.class);
-    var listener = new VoiceTranscriptionListener(handler, claims, retryPolicy);
-    UUID recordingId = UUID.randomUUID();
-    TaskMessage task = new TaskMessage(
-        UUID.randomUUID(), AsyncTaskType.VOICE_TRANSCRIPTION,
-        VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + recordingId);
-    Message source = new Message(new byte[0], new MessageProperties());
-    when(handler.inspect(task)).thenReturn(
-        new VoiceTranscriptionHandler.VoiceTranscriptionTarget(recordingId, false, 1, 0));
-    when(claims.acquire(org.mockito.ArgumentMatchers.anyString(),
-        org.mockito.ArgumentMatchers.any()))
-        .thenReturn(Optional.of("token"));
-    when(handler.transcribe(task)).thenThrow(new VoiceTranscriptionRetryableException("down", 2));
-    when(retryPolicy.routeFailure(task, source))
-        .thenReturn(TaskRetryPolicy.RouteOutcome.DEAD_LETTER);
-    when(handler.markDead(task, 2))
-        .thenThrow(new IllegalStateException("database unavailable"));
-
-    assertThatThrownBy(() -> listener.receive(task, source))
-        .isInstanceOf(IllegalStateException.class);
-  }
-
-  @Test
-  void staleOutcomeReleasesTheClaimWithoutRoutingAFailure() {
-    VoiceTranscriptionHandler handler = mock(VoiceTranscriptionHandler.class);
-    ProcessingClaim claims = mock(ProcessingClaim.class);
-    TaskRetryPolicy retryPolicy = mock(TaskRetryPolicy.class);
-    var listener = new VoiceTranscriptionListener(handler, claims, retryPolicy);
-    UUID recordingId = UUID.randomUUID();
-    TaskMessage task = new TaskMessage(
-        UUID.randomUUID(), AsyncTaskType.VOICE_TRANSCRIPTION,
-        VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + recordingId);
-    Message source = new Message(new byte[0], new MessageProperties());
-    when(handler.inspect(task)).thenReturn(
-        new VoiceTranscriptionHandler.VoiceTranscriptionTarget(recordingId, false, 1, 1));
-    when(claims.acquire(org.mockito.ArgumentMatchers.anyString(),
-        org.mockito.ArgumentMatchers.any()))
-        .thenReturn(Optional.of("token"));
+  @Test void staleResultDoesNotRetryOrReleaseAnotherOwner() {
     when(handler.transcribe(task)).thenReturn(VoiceTranscriptionHandler.Outcome.STALE);
-
     listener.receive(task, source);
-
-    verify(claims).release(
-        VoiceTranscriptionRetryPolicy.BIZ_KEY_PREFIX + recordingId, "token");
-    verify(retryPolicy, times(0)).routeFailure(org.mockito.ArgumentMatchers.any(),
-        org.mockito.ArgumentMatchers.any());
+    verifyNoInteractions(retries);
+    verify(handler, never()).releaseForRetry(any(), anyInt(), any());
   }
 }

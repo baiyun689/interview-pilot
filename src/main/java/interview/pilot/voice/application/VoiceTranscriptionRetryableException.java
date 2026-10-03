@@ -1,21 +1,17 @@
 package interview.pilot.voice.application;
 
-/**
- * Operational transcription failure (network, timeout, 429, 5xx): the listener routes the
- * message through the RabbitMQ delayed-retry pipeline (plan §10 step 6). {@code attemptGeneration}
- * is the task attempt count at the time of the failure, so a dead-lettered message can never
- * terminalize a newer generation's row.
- */
+/** Carries only the execution identity committed before external I/O. */
 public class VoiceTranscriptionRetryableException extends RuntimeException {
-
   private final int attemptGeneration;
+  private final String executionToken;
 
-  public VoiceTranscriptionRetryableException(String message, int attemptGeneration) {
-    super(message);
+  public VoiceTranscriptionRetryableException(String message, int attemptGeneration) { this(message, attemptGeneration, null, null); }
+  public VoiceTranscriptionRetryableException(String message, int attemptGeneration, String executionToken) { this(message, attemptGeneration, executionToken, null); }
+  public VoiceTranscriptionRetryableException(String message, int attemptGeneration, String executionToken, Throwable cause) {
+    super(message, cause);
     this.attemptGeneration = attemptGeneration;
+    this.executionToken = executionToken;
   }
-
-  public int attemptGeneration() {
-    return attemptGeneration;
-  }
+  public int attemptGeneration() { return attemptGeneration; }
+  public String executionToken() { return executionToken; }
 }

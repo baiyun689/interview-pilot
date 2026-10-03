@@ -13,7 +13,7 @@ import interview.pilot.auth.application.CurrentUser;
  * getOrCreate path as turn creation), or answers NOT_AVAILABLE for TEXT sessions and
  * unconfigured TTS — a legitimately existing turn without speech is never a 404. {@code retry}
  * only accepts FAILED speech (mirror of {@code VoiceAnswerModule.retry}): the listener's
- * Redis claim is cleared first, then the speech FAILED → PENDING transition and the task
+ * The speech FAILED → PENDING transition, database lease reset and the task
  * reset run in ONE transaction with their epochs bumped in lockstep, so stale listener
  * messages from the old generation are fenced. {@code open} validates ownership (404 hides
  * cross-user/cross-session resources) and the READY state (409 otherwise) and returns the

@@ -16,7 +16,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *        matching TRANSCRIBING recording / SYNTHESIZING speech is treated as orphaned
  * @param orphanGrace minimum file age (by mtime) before an unreferenced media file may be
  *        deleted — protects an in-flight store that will soon commit a row referencing the key
- * @param claimTtl Redis processing-claim TTL covering one whole cleanup run
+ * @param claimTtl MySQL scheduler-lease TTL covering one whole cleanup run
  */
 @ConfigurationProperties("app.voice.cleanup")
 public record VoiceCleanupProperties(

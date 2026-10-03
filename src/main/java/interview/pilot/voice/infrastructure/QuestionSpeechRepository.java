@@ -12,6 +12,8 @@ import org.springframework.data.repository.query.Param;
 import jakarta.persistence.LockModeType;
 
 public interface QuestionSpeechRepository extends JpaRepository<QuestionSpeechEntity, Long> {
+  boolean existsByStorageKey(String storageKey);
+
   Optional<QuestionSpeechEntity> findBySpeechId(UUID speechId);
 
   Optional<QuestionSpeechEntity> findByTurnId(Long turnId);

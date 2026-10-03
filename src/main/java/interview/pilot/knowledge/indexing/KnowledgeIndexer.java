@@ -64,9 +64,9 @@ public class KnowledgeIndexer {
    * and deterministically upserted into Qdrant. Previous revisions remain available
    * until revision-aware cleanup proves no active interview references them.
    *
-   * @return number of chunks produced, or -1 if the document revision is stale
+   * @return metadata to commit under the handler execution fence; chunkCount is -1 for a stale revision
    */
-  public int index(UUID documentUuid, int expectedRevision) {
+  public IndexResult index(UUID documentUuid, int expectedRevision) {
     if (vectorStore == null) {
       throw new IllegalStateException("Knowledge vector store is unavailable");
     }
@@ -74,7 +74,7 @@ public class KnowledgeIndexer {
         .findByDocumentIdWithKnowledgeBase(documentUuid)
         .orElseThrow(() -> new IllegalArgumentException("Knowledge document not found"));
     if (document.getIndexRevision() != expectedRevision) {
-      return -1;
+      return new IndexResult(-1, null, null);
     }
     if (document.getStatus() != KnowledgeDocumentStatus.PROCESSING) {
       throw new IllegalStateException("Document is not being indexed");
@@ -87,25 +87,20 @@ public class KnowledgeIndexer {
       throw new IllegalArgumentException("Knowledge document could not be opened", exception);
     }
     if (parsed == null || parsed.isBlank()) {
-      document.setParsedText("");
-      document.setEmbeddingSnapshot(null);
-      documentRepository.save(document);
-      return 0;
+      return new IndexResult(0, "", null);
     }
 
     List<String> chunks = splitter.split(parsed);
     KnowledgeDocumentEntity current = current(documentUuid, expectedRevision);
-    if (current == null) return -1;
+    if (current == null) return new IndexResult(-1, null, null);
     if (!chunks.isEmpty()) {
       embedAndUpsert(current, chunks, expectedRevision);
     }
 
     current = current(documentUuid, expectedRevision);
-    if (current == null) return -1;
-    current.setParsedText(parsed);
-    current.setEmbeddingSnapshot(embeddingSnapshot());
-    documentRepository.save(current);
-    return chunks.size();
+    if (current == null) return new IndexResult(-1, null, null);
+    // Metadata is committed by the handler under its execution fence, never by external I/O.
+    return new IndexResult(chunks.size(), parsed, embeddingSnapshot());
   }
 
   private void embedAndUpsert(
@@ -160,6 +155,8 @@ public class KnowledgeIndexer {
         || current.getStatus() != KnowledgeDocumentStatus.PROCESSING) return null;
     return current;
   }
+
+  public record IndexResult(int chunkCount, String parsedText, String embeddingSnapshot) {}
 
   private String embeddingSnapshot() {
     return "{\"model\":\"" + embeddingModel + "\",\"dimensions\":1024}";

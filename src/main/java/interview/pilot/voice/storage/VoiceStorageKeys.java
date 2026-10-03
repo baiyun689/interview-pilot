@@ -11,8 +11,8 @@ import interview.pilot.voice.domain.VoiceMediaKind;
  * absolute and encoded variants are rejected by construction.
  *
  * <p>{@link #parse} additionally exposes the key components to the cleanup sweeper (Task 11):
- * the orphan-file sweep derives the owning row lookup (kind + resource id) from a media
- * directory file's relative path, so the walk never guesses a key layout of its own.
+ * recordings retain their recording id; speech paths use an execution token and are checked
+ * against the exact database storage key, including legacy paths named by speech id.
  */
 public final class VoiceStorageKeys {
 

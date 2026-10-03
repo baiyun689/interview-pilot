@@ -86,7 +86,7 @@ class AsyncTaskRetryEquivalenceTest {
         new KnowledgeDocumentIndexRetryPolicy(knowledgeDocuments),
         new KnowledgeDocumentDeleteRetryPolicy(knowledgeDocuments),
         new VoiceTranscriptionRetryPolicy()));
-    return new AsyncTaskService(tasks, claims, transactionManager, metrics, registry);
+    return new AsyncTaskService(tasks, transactionManager, metrics, registry);
   }
 
   private AsyncTaskEntity task(AsyncTaskType type, String bizKey, AsyncTaskStatus status) {
@@ -95,6 +95,8 @@ class AsyncTaskRetryEquivalenceTest {
     task.setTaskId(UUID.randomUUID());
     task.setStatus(status);
     task.setVersion(3L);
+    task.setExecutionToken("abandoned-token");
+    task.setExecutionLeaseUntil(java.time.Instant.now().plusSeconds(60));
     return task;
   }
 
@@ -127,6 +129,9 @@ class AsyncTaskRetryEquivalenceTest {
     var response = service().retry(OWNER, task.getTaskId(), UUID.randomUUID());
 
     assertThat(response.status()).isEqualTo(AsyncTaskStatus.PENDING);
+    assertThat(task.getExecutionToken()).isNull();
+    assertThat(task.getExecutionLeaseUntil()).isNull();
+    assertThat(task.getExecutionEpoch()).isEqualTo(1);
     verifyNoInteractions(claims);
     verify(resume).setStatus(ResumeStatus.PENDING);
     verify(resume).setFailureReason(null);
@@ -149,13 +154,16 @@ class AsyncTaskRetryEquivalenceTest {
     var response = service().retry(OWNER, task.getTaskId(), UUID.randomUUID());
 
     assertThat(response.status()).isEqualTo(AsyncTaskStatus.PENDING);
+    assertThat(task.getExecutionToken()).isNull();
+    assertThat(task.getExecutionLeaseUntil()).isNull();
+    assertThat(task.getExecutionEpoch()).isEqualTo(1);
     verifyNoInteractions(claims);
     verify(session).retryPreparation();
     verify(session, never()).retryEvaluation();
   }
 
   @Test
-  void interviewEvaluationRetryClearsTheExactClaimAndRetriesEvaluation() {
+  void interviewEvaluationRetryWithoutRedisRetriesEvaluation() {
     UUID sessionId = UUID.randomUUID();
     var task = task(
         AsyncTaskType.INTERVIEW_EVALUATION, "interview:" + sessionId, AsyncTaskStatus.FAILED);
@@ -168,14 +176,17 @@ class AsyncTaskRetryEquivalenceTest {
     var response = service().retry(OWNER, task.getTaskId(), UUID.randomUUID());
 
     assertThat(response.status()).isEqualTo(AsyncTaskStatus.PENDING);
-    verify(claims).clearTerminal("interview-report:" + sessionId);
+    assertThat(task.getExecutionToken()).isNull();
+    assertThat(task.getExecutionLeaseUntil()).isNull();
+    assertThat(task.getExecutionEpoch()).isEqualTo(1);
+    verifyNoInteractions(claims);
     verify(session).retryEvaluation();
     verify(session, never()).retryPreparation();
   }
 
   @ParameterizedTest
   @MethodSource("knowledgeDocumentTypes")
-  void knowledgeDocumentRetryClearsTheExactClaimAndReindexes(AsyncTaskType type) {
+  void knowledgeDocumentRetryWithoutRedisReindexes(AsyncTaskType type) {
     UUID documentId = UUID.randomUUID();
     var task = task(type, "knowledge-document:" + documentId, AsyncTaskStatus.FAILED);
     var document = mock(KnowledgeDocumentEntity.class);
@@ -186,12 +197,15 @@ class AsyncTaskRetryEquivalenceTest {
     var response = service().retry(OWNER, task.getTaskId(), UUID.randomUUID());
 
     assertThat(response.status()).isEqualTo(AsyncTaskStatus.PENDING);
-    verify(claims).clearTerminal("knowledge-index:" + documentId);
+    assertThat(task.getExecutionToken()).isNull();
+    assertThat(task.getExecutionLeaseUntil()).isNull();
+    assertThat(task.getExecutionEpoch()).isEqualTo(1);
+    verifyNoInteractions(claims);
     verify(document).beginReindex();
   }
 
   @Test
-  void voiceTranscriptionRetryClearsTheClaimButRefusesToResetTheTask() {
+  void voiceTranscriptionRetryWithoutRedisRefusesToResetTheTask() {
     UUID recordingId = UUID.randomUUID();
     var task = task(
         AsyncTaskType.VOICE_TRANSCRIPTION, "voice-recording:" + recordingId,
@@ -203,7 +217,7 @@ class AsyncTaskRetryEquivalenceTest {
     // Task 4: the voice claim key still participates in the retry protocol (it is cleared),
     // but the generic endpoint refuses to reset the task — recording retry is owned by
     // VoiceAnswerModule so the recording row and task row stay in epoch lockstep.
-    verify(claims).clearTerminal("voice-recording:" + recordingId);
+    verifyNoInteractions(claims);
     assertThat(error.code()).isEqualTo("TASK_NOT_RETRYABLE");
     assertThat(error.getMessage())
         .isEqualTo("Voice transcription retry is managed by the recording");
@@ -220,6 +234,9 @@ class AsyncTaskRetryEquivalenceTest {
     var response = service().retry(OWNER, task.getTaskId(), UUID.randomUUID());
 
     assertThat(response.status()).isEqualTo(AsyncTaskStatus.PENDING);
+    assertThat(task.getExecutionToken()).isNull();
+    assertThat(task.getExecutionLeaseUntil()).isNull();
+    assertThat(task.getExecutionEpoch()).isEqualTo(1);
   }
 
   @ParameterizedTest
@@ -245,8 +262,7 @@ class AsyncTaskRetryEquivalenceTest {
     var error = retryError(service(), task.getTaskId());
 
     assertThat(error.code()).isEqualTo("TASK_STATE_INVALID");
-    if (type == AsyncTaskType.RESUME_ANALYSIS || type == AsyncTaskType.INTERVIEW_QUESTION_PREPARATION) verifyNoInteractions(claims);
-    else verify(claims).clearTerminal(any());
+    verifyNoInteractions(claims);
   }
 
   @ParameterizedTest
@@ -276,8 +292,7 @@ class AsyncTaskRetryEquivalenceTest {
     assertThat(error.code()).isEqualTo("TASK_STATE_INVALID");
     // The claim is cleared before the business-state check refuses the reset — if this
     // drifted from the listener-side key, manual retry would clear a claim nobody holds.
-    if (type == AsyncTaskType.RESUME_ANALYSIS || type == AsyncTaskType.INTERVIEW_QUESTION_PREPARATION) verifyNoInteractions(claims);
-    else verify(claims).clearTerminal(claimKey);
+    verifyNoInteractions(claims);
   }
 
   @Test

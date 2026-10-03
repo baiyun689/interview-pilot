@@ -26,6 +26,8 @@ public class KnowledgeIndexHandler {
   static final String RETRYABLE_ERROR = "Knowledge document indexing temporarily unavailable";
   static final String DEAD_ERROR = "Knowledge document index retries exhausted";
 
+  @org.springframework.beans.factory.annotation.Value("${app.async.knowledge-index.lease-duration:2m}")
+  private java.time.Duration leaseDuration = java.time.Duration.ofMinutes(2);
   private final KnowledgeIndexer indexer;
   private final KnowledgeDocumentRepository documentRepository;
   private final AsyncTaskRepository taskRepository;
@@ -45,27 +47,28 @@ public class KnowledgeIndexHandler {
     this.taskRepository = taskRepository;
     this.objectMapper = objectMapper;
     this.transactions = new TransactionTemplate(transactionManager);
+    this.transactions.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
     this.metrics = metrics;
   }
 
   public Outcome handle(TaskMessage message) {
     BeginResult begin = transactions.execute(status -> beginMessage(message));
-    return begin.stale() ? Outcome.STALE : index(begin.work());
+    return begin.skipped() != null ? begin.skipped() : index(begin.work());
   }
 
   private Outcome index(IndexWork work) {
     if (work == null) return Outcome.TERMINAL;
     try {
-      int chunkCount = indexer.index(work.documentUuid(), work.indexRevision());
-      if (chunkCount < 0) {
+      KnowledgeIndexer.IndexResult indexed = indexer.index(work.documentUuid(), work.indexRevision());
+      if (indexed.chunkCount() < 0) {
         return transactions.execute(status -> fail(work));
       }
-      return transactions.execute(status -> complete(work, chunkCount));
+      return transactions.execute(status -> complete(work, indexed));
     } catch (RuntimeException exception) {
       boolean current = Boolean.TRUE.equals(
           transactions.execute(status -> recordRetryableFailure(work)));
       if (!current) return Outcome.STALE;
-      throw new KnowledgeIndexRetryableException(work.attemptGeneration());
+      throw new KnowledgeIndexRetryableException(work.attemptGeneration(), work.executionToken(), exception);
     }
   }
 
@@ -105,86 +108,74 @@ public class KnowledgeIndexHandler {
         task.getAttemptCount(), task.getExecutionEpoch());
   }
 
-  public boolean markDead(TaskMessage message, int attemptGeneration) {
+  public boolean markDead(TaskMessage message, int generation, String token) {
     return Boolean.TRUE.equals(transactions.execute(status -> {
+      taskRepository.findByTaskIdForUpdate(message.taskId()).orElseThrow();
       AsyncTaskEntity task = requireMatchingTask(message);
-      KnowledgeDocumentEntity document = requireDocument(task);
-      return markDead(task, document, attemptGeneration, message.executionEpoch());
+      if (!task.ownsExecution(message.executionEpoch(), generation, token)) return false;
+      return markDead(task, requireDocument(task), generation, message.executionEpoch());
     }));
   }
 
-  public boolean markDeadCurrent(TaskMessage message) {
-    return Boolean.TRUE.equals(transactions.execute(status -> {
-      AsyncTaskEntity task = requireMatchingTask(message);
-      KnowledgeDocumentEntity document = requireDocument(task);
-      return markDead(task, document, task.getAttemptCount(), message.executionEpoch());
-    }));
+  public void releaseForRetry(TaskMessage message, int generation, String token) {
+    transactions.executeWithoutResult(status -> taskRepository.releaseExecution(message.taskId().toString(),
+        AsyncTaskType.KNOWLEDGE_DOCUMENT_INDEX.name(), message.bizKey(), message.executionEpoch(), generation, token));
   }
 
   private BeginResult beginMessage(TaskMessage message) {
     AsyncTaskEntity task = requireMatchingTask(message);
-    if (task.getExecutionEpoch() != message.executionEpoch()) {
-      return new BeginResult(null, true);
-    }
-    return new BeginResult(begin(task), false);
-  }
-
-  private IndexWork begin(AsyncTaskEntity task) {
+    if (task.getExecutionEpoch() != message.executionEpoch() || task.getStatus() == AsyncTaskStatus.COMPLETED
+        || task.getStatus() == AsyncTaskStatus.FAILED || task.getStatus() == AsyncTaskStatus.DEAD)
+      return new BeginResult(null, Outcome.STALE);
+    String token = UUID.randomUUID().toString();
+    if (taskRepository.claimExecution(message.taskId().toString(), AsyncTaskType.KNOWLEDGE_DOCUMENT_INDEX.name(),
+        message.bizKey(), message.executionEpoch(), token,
+        interview.pilot.async.infrastructure.ExecutionLeaseDuration.seconds(leaseDuration)) != 1)
+      return new BeginResult(null, Outcome.BUSY);
+    task = requireMatchingTask(message);
     KnowledgeDocumentEntity document = requireDocument(task);
     if (deleting(document)) {
-      return null;
+      task.setStatus(AsyncTaskStatus.COMPLETED);
+      task.clearExecutionLease();
+      return new BeginResult(null, Outcome.STALE);
     }
-    if (task.getStatus() == AsyncTaskStatus.COMPLETED
-        && document.getStatus() == KnowledgeDocumentStatus.READY) {
-      return null;
-    }
-    if ((task.getStatus() == AsyncTaskStatus.FAILED || task.getStatus() == AsyncTaskStatus.DEAD)
-        && document.getStatus() == KnowledgeDocumentStatus.FAILED) {
-      return null;
-    }
-    if (document.getStatus() != KnowledgeDocumentStatus.PROCESSING) {
+    if (document.getStatus() != KnowledgeDocumentStatus.PROCESSING)
       throw new IllegalStateException("Knowledge document index state is inconsistent");
-    }
-    if (task.getStatus() == AsyncTaskStatus.PENDING) {
-      task.setStatus(AsyncTaskStatus.PUBLISHED);
-    } else if (task.getStatus() != AsyncTaskStatus.PUBLISHED) {
-      throw new IllegalStateException("Knowledge index task state is inconsistent");
-    }
-    task.setAttemptCount(task.getAttemptCount() + 1);
-    task.setLastError(null);
-    return new IndexWork(
-        task.getTaskId(), document.getId(), document.getDocumentId(),
-        document.getIndexRevision(), task.getAttemptCount());
+    return new BeginResult(new IndexWork(task.getTaskId(), document.getId(), document.getDocumentId(),
+        document.getIndexRevision(), task.getAttemptCount(), task.getExecutionEpoch(), token), null);
   }
 
-  private Outcome complete(IndexWork work, int chunkCount) {
-    AsyncTaskEntity task = requireTask(work.taskId());
+  private Outcome complete(IndexWork work, KnowledgeIndexer.IndexResult indexed) {
+    AsyncTaskEntity task = taskRepository.findByTaskIdForUpdate(work.taskId()).orElseThrow();
     KnowledgeDocumentEntity document = documentRepository.findByDocumentId(work.documentUuid())
         .orElseThrow();
     if (!current(task, document, work)) return Outcome.STALE;
-    document.markReady(work.indexRevision(), document.getParsedText(), chunkCount);
+    document.markReady(work.indexRevision(), indexed.parsedText(), indexed.chunkCount());
+    document.setEmbeddingSnapshot(indexed.embeddingSnapshot());
     documentRepository.save(document);
     task.setStatus(AsyncTaskStatus.COMPLETED);
+    task.clearExecutionLease();
     task.setLastError(null);
     metrics.afterCommit(() -> metrics.taskCompleted(AsyncTaskType.KNOWLEDGE_DOCUMENT_INDEX));
     return Outcome.TERMINAL;
   }
 
   private Outcome fail(IndexWork work) {
-    AsyncTaskEntity task = requireTask(work.taskId());
+    AsyncTaskEntity task = taskRepository.findByTaskIdForUpdate(work.taskId()).orElseThrow();
     KnowledgeDocumentEntity document = documentRepository.findByDocumentId(work.documentUuid())
         .orElseThrow();
     if (!current(task, document, work)) return Outcome.STALE;
     document.markFailed(work.indexRevision(), INVALID_OUTPUT_ERROR);
     documentRepository.save(document);
     task.setStatus(AsyncTaskStatus.FAILED);
+    task.clearExecutionLease();
     task.setLastError(INVALID_OUTPUT_ERROR);
     metrics.afterCommit(() -> metrics.taskFailed(AsyncTaskType.KNOWLEDGE_DOCUMENT_INDEX, "failed"));
     return Outcome.TERMINAL;
   }
 
   private boolean recordRetryableFailure(IndexWork work) {
-    AsyncTaskEntity task = requireTask(work.taskId());
+    AsyncTaskEntity task = taskRepository.findByTaskIdForUpdate(work.taskId()).orElseThrow();
     KnowledgeDocumentEntity document = documentRepository.findByDocumentId(work.documentUuid())
         .orElseThrow();
     if (!current(task, document, work)) return false;
@@ -193,8 +184,8 @@ public class KnowledgeIndexHandler {
   }
 
   private boolean current(AsyncTaskEntity task, KnowledgeDocumentEntity document, IndexWork work) {
-    return task.getStatus() == AsyncTaskStatus.PUBLISHED
-        && task.getAttemptCount() == work.attemptGeneration()
+    return task.ownsExecution(work.executionEpoch(), work.attemptGeneration(), work.executionToken())
+        && document.getId().equals(work.documentId())
         && document.getStatus() == KnowledgeDocumentStatus.PROCESSING
         && document.getIndexRevision() == work.indexRevision();
   }
@@ -222,6 +213,7 @@ public class KnowledgeIndexHandler {
       return false;
     }
     task.setStatus(AsyncTaskStatus.DEAD);
+    task.clearExecutionLease();
     task.setLastError(DEAD_ERROR);
     document.markFailed(document.getIndexRevision(), DEAD_ERROR);
     documentRepository.save(document);
@@ -267,11 +259,11 @@ public class KnowledgeIndexHandler {
 
   private record IndexWork(
       UUID taskId, Long documentId, UUID documentUuid,
-      int indexRevision, int attemptGeneration) {}
+      int indexRevision, int attemptGeneration, int executionEpoch, String executionToken) {}
 
-  private record BeginResult(IndexWork work, boolean stale) {}
+  private record BeginResult(IndexWork work, Outcome skipped) {}
 
-  public enum Outcome { TERMINAL, STALE }
+  public enum Outcome { TERMINAL, STALE, BUSY }
 
   public record IndexTarget(
       UUID documentUuid, boolean terminal, int attemptGeneration, int executionEpoch) {}
