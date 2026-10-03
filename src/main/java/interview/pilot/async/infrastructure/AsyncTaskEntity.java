@@ -66,6 +66,13 @@ public class AsyncTaskEntity {
   @Column(name = "execution_epoch", nullable = false)
   private int executionEpoch;
 
+  /** MySQL execution ownership for resume analysis and question preparation. */
+  @Column(name = "execution_token", length = 36)
+  private String executionToken;
+
+  @Column(name = "execution_lease_until")
+  private Instant executionLeaseUntil;
+
   @Column(name = "publish_attempts", nullable = false)
   private int publishAttempts;
 
@@ -86,6 +93,18 @@ public class AsyncTaskEntity {
   @Version
   @Column(nullable = false)
   private long version;
+
+  /** Check only under the task row lock before writing execution results. */
+  public boolean ownsExecution(int epoch, int generation, String token) {
+    return status == AsyncTaskStatus.PUBLISHED
+        && executionEpoch == epoch && attemptCount == generation
+        && token != null && token.equals(executionToken);
+  }
+
+  public void clearExecutionLease() {
+    executionToken = null;
+    executionLeaseUntil = null;
+  }
 
   public static AsyncTaskEntity pending(
       Long userAccountId,

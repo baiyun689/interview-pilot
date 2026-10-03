@@ -55,14 +55,16 @@ public class AsyncTaskService {
 
   public AsyncTaskResponse retry(CurrentUser user, UUID taskId, UUID traceId) {
     RetryTarget target = transactions.execute(status -> retryTarget(user, taskId));
-    ProcessingClaim.ClearResult cleared;
-    try {
-      cleared = claims.clearTerminal(target.claimKey());
-    } catch (RuntimeException exception) {
-      throw conflict("TASK_RETRY_UNAVAILABLE", "Task retry is temporarily unavailable");
-    }
-    if (cleared == ProcessingClaim.ClearResult.ACTIVE) {
-      throw conflict("TASK_STILL_PROCESSING", "Task processing is still active");
+    if (target.requiresRedisClaim()) {
+      ProcessingClaim.ClearResult cleared;
+      try {
+        cleared = claims.clearTerminal(target.claimKey());
+      } catch (RuntimeException exception) {
+        throw conflict("TASK_RETRY_UNAVAILABLE", "Task retry is temporarily unavailable");
+      }
+      if (cleared == ProcessingClaim.ClearResult.ACTIVE) {
+        throw conflict("TASK_STILL_PROCESSING", "Task processing is still active");
+      }
     }
     try {
       AsyncTaskResponse result = transactions.execute(status -> reset(target));
@@ -78,8 +80,9 @@ public class AsyncTaskService {
   private RetryTarget retryTarget(CurrentUser user, UUID taskId) {
     AsyncTaskEntity task = requireTask(user, taskId);
     requireRetryable(task);
+    var policy = policies.forType(task.getTaskType());
     return new RetryTarget(task.getId(), requireOwner(user), task.getVersion(),
-        policies.forType(task.getTaskType()).claimKey(task));
+        policy.claimKey(task), policy.requiresRedisClaim());
   }
 
   private AsyncTaskResponse reset(RetryTarget target) {
@@ -130,5 +133,6 @@ public class AsyncTaskService {
     return new BusinessException(code, message, HttpStatus.CONFLICT);
   }
 
-  private record RetryTarget(Long databaseId, Long userAccountId, long version, String claimKey) {}
+  private record RetryTarget(Long databaseId, Long userAccountId, long version, String claimKey,
+      boolean requiresRedisClaim) {}
 }

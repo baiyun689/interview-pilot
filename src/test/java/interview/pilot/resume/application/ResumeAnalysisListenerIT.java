@@ -15,7 +15,6 @@ import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.redisson.api.RedissonClient;
-import org.redisson.client.codec.StringCodec;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,7 +23,6 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
-import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.RabbitMQContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -50,10 +48,13 @@ import interview.pilot.resume.domain.ResumeStatus;
 import interview.pilot.resume.infrastructure.ResumeEntity;
 import interview.pilot.resume.infrastructure.ResumeRepository;
 
-@SpringBootTest(properties = "app.async.rabbit.dispatch-initial-delay=1h")
+@SpringBootTest(properties = {
+    "app.async.rabbit.dispatch-initial-delay=1h",
+    "spring.autoconfigure.exclude=org.redisson.spring.starter.RedissonAutoConfigurationV4"
+})
 @Testcontainers
 class ResumeAnalysisListenerIT {
-  private static final String REDIS_KEY_PREFIX = "interview-pilot:processing:";
+
 
   @Container
   private static final MySQLContainer MYSQL =
@@ -64,10 +65,6 @@ class ResumeAnalysisListenerIT {
   private static final RabbitMQContainer RABBITMQ =
       new RabbitMQContainer(DockerImageName.parse("rabbitmq:4-management"));
 
-  @Container
-  private static final GenericContainer<?> REDIS =
-      new GenericContainer<>(DockerImageName.parse("redis:7.4-alpine"))
-          .withExposedPorts(6379);
 
   @DynamicPropertySource
   static void infrastructureProperties(DynamicPropertyRegistry registry) {
@@ -78,8 +75,6 @@ class ResumeAnalysisListenerIT {
     registry.add("spring.rabbitmq.port", RABBITMQ::getAmqpPort);
     registry.add("spring.rabbitmq.username", RABBITMQ::getAdminUsername);
     registry.add("spring.rabbitmq.password", RABBITMQ::getAdminPassword);
-    registry.add("spring.data.redis.host", REDIS::getHost);
-    registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
   }
 
   @MockitoBean
@@ -100,11 +95,13 @@ class ResumeAnalysisListenerIT {
   @Autowired
   private RabbitAdmin rabbitAdmin;
 
-  @MockitoSpyBean
+  @MockitoBean
   private ProcessingClaim processingClaim;
 
-  @Autowired
+  @MockitoBean
   private RedissonClient redis;
+
+  @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
 
   @Autowired
   private AsyncTaskService taskService;
@@ -119,11 +116,14 @@ class ResumeAnalysisListenerIT {
       rabbitAdmin.purgeQueue(
           RabbitTopologyConfig.RESUME_ANALYSIS_MAIN_QUEUE + ".retry." + retry, true);
     }
-    redis.getKeys().deleteByPattern(REDIS_KEY_PREFIX + "resume-analysis:*");
+    org.mockito.Mockito.doThrow(new IllegalStateException("Redis unavailable"))
+        .when(processingClaim).acquire(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+    org.mockito.Mockito.doThrow(new IllegalStateException("Redis unavailable"))
+        .when(processingClaim).clearTerminal(org.mockito.ArgumentMatchers.anyString());
   }
 
   @Test
-  void consumesMainQueuePersistsProfileThenCompletesOwnedClaim() throws Exception {
+  void consumesMainQueueWithoutRedisAndClearsDatabaseLease() throws Exception {
     Work work = pendingWork();
     when(profiler.analyze(work.resume().getParsedText())).thenReturn(validResult());
 
@@ -133,8 +133,8 @@ class ResumeAnalysisListenerIT {
     ResumeEntity completed = resumeRepository.findById(work.resume().getId()).orElseThrow();
     assertThat(completed.getStatus()).isEqualTo(ResumeStatus.READY);
     assertThat(completed.getEvaluationSnapshot()).contains("overallScore");
-    assertThat(redis.getBucket(claimKey(work.resume().getId()), StringCodec.INSTANCE).get())
-        .asString().startsWith("done:");
+    assertThat(taskRepository.findById(work.task().getId()).orElseThrow().getExecutionToken()).isNull();
+    org.mockito.Mockito.verifyNoInteractions(processingClaim);
   }
 
   @Test
@@ -145,9 +145,6 @@ class ResumeAnalysisListenerIT {
     work.task().setStatus(AsyncTaskStatus.COMPLETED);
     resumeRepository.saveAndFlush(work.resume());
     taskRepository.saveAndFlush(work.task());
-    String claimBusinessKey = "resume-analysis:" + work.resume().getId();
-    String otherOwner = processingClaim.acquire(claimBusinessKey, Duration.ofMinutes(5))
-        .orElseThrow();
 
     send(work.message());
     await(() -> rabbitAdmin.getQueueInfo(
@@ -155,8 +152,7 @@ class ResumeAnalysisListenerIT {
         Duration.ofSeconds(5));
 
     verify(profiler, never()).analyze(org.mockito.ArgumentMatchers.anyString());
-    assertThat(redis.getBucket(claimKey(work.resume().getId()), StringCodec.INSTANCE).get())
-        .isEqualTo(otherOwner);
+    org.mockito.Mockito.verifyNoInteractions(processingClaim);
   }
 
   @Test
@@ -173,16 +169,18 @@ class ResumeAnalysisListenerIT {
     await(() -> taskStatus(work) == AsyncTaskStatus.PUBLISHED, Duration.ofSeconds(5));
     assertThat(resumeRepository.findById(work.resume().getId()).orElseThrow().getStatus())
         .isEqualTo(ResumeStatus.ANALYZING);
-    assertThat(redis.getBucket(claimKey(work.resume().getId()), StringCodec.INSTANCE).isExists())
-        .isFalse();
+    await(() -> taskRepository.findById(work.task().getId()).orElseThrow().getExecutionToken() == null,
+        Duration.ofSeconds(5));
+    org.mockito.Mockito.verifyNoInteractions(processingClaim);
   }
 
   @Test
   void occupiedClaimExpiresAndTheDelayedDeliveryEventuallyCompletesTheWork() throws Exception {
     Work work = pendingWork();
     when(profiler.analyze(work.resume().getParsedText())).thenReturn(validResult());
-    processingClaim.acquire(
-        "resume-analysis:" + work.resume().getId(), Duration.ofSeconds(2)).orElseThrow();
+    jdbc.update("update async_task set status='PUBLISHED', attempt_count=1, execution_token='crashed-owner', "
+        + "execution_lease_until=timestampadd(second, 2, current_timestamp(6)) where id=?", work.task().getId());
+    jdbc.update("update resume set status='ANALYZING' where id=?", work.resume().getId());
 
     send(work.message());
 
@@ -195,10 +193,16 @@ class ResumeAnalysisListenerIT {
   }
 
   @Test
-  void productionClaimExpiresBeforeTheThirdRetryReturns() {
-    Duration totalDelayBeforeThirdRetry = Duration.ofSeconds(5 + 30 + 120);
-
-    assertThat(ResumeAnalysisListener.PROCESSING_TTL).isLessThan(totalDelayBeforeThirdRetry);
+  void staleFailureCannotReleaseOrTerminateAnotherDatabaseOwner() {
+    Work work = pendingWork();
+    jdbc.update("update async_task set status='PUBLISHED', attempt_count=2, execution_token='new-owner', "
+        + "execution_lease_until=timestampadd(second, 120, current_timestamp(6)) where id=?", work.task().getId());
+    jdbc.update("update resume set status='ANALYZING' where id=?", work.resume().getId());
+    handler.releaseForRetry(work.message(), 1, "old-owner");
+    assertThat(handler.markDead(work.message(), 2, "old-owner")).isFalse();
+    assertThat(handler.markDeadCurrent(work.message())).isFalse();
+    assertThat(taskRepository.findById(work.task().getId()).orElseThrow().getExecutionToken()).isEqualTo("new-owner");
+    assertThat(taskStatus(work)).isEqualTo(AsyncTaskStatus.PUBLISHED);
   }
 
   @Test
@@ -212,36 +216,7 @@ class ResumeAnalysisListenerIT {
     verify(handler, org.mockito.Mockito.timeout(5_000)).handle(work.message());
     assertThat(rabbitTemplate.receive(
         RabbitTopologyConfig.RESUME_ANALYSIS_MAIN_QUEUE + ".retry.1", 500)).isNull();
-    assertThat(redis.getBucket(
-        claimKey(work.resume().getId()), StringCodec.INSTANCE).isExists()).isFalse();
-  }
-
-  @Test
-  void lostClaimAfterDurableTerminalResultDoesNotPublishAFalseRetry() {
-    Work work = pendingWork();
-    org.mockito.Mockito.doAnswer(invocation -> {
-      ResumeEntity resume = resumeRepository.findById(work.resume().getId()).orElseThrow();
-      AsyncTaskEntity task = taskRepository.findById(work.task().getId()).orElseThrow();
-      resume.setStatus(ResumeStatus.ANALYZING);
-      resume.setStatus(ResumeStatus.READY);
-      task.setStatus(AsyncTaskStatus.COMPLETED);
-      resumeRepository.saveAndFlush(resume);
-      taskRepository.saveAndFlush(task);
-      return ResumeAnalysisHandler.Outcome.TERMINAL;
-    }).when(handler).handle(work.message());
-    org.mockito.Mockito.doReturn(false).when(processingClaim).complete(
-        org.mockito.ArgumentMatchers.anyString(),
-        org.mockito.ArgumentMatchers.anyString(),
-        org.mockito.ArgumentMatchers.any(Duration.class));
-
-    send(work.message());
-
-    verify(handler, org.mockito.Mockito.timeout(5_000)).handle(work.message());
-    assertThat(rabbitTemplate.receive(
-        RabbitTopologyConfig.RESUME_ANALYSIS_MAIN_QUEUE + ".retry.1", 500)).isNull();
-    assertThat(taskStatus(work)).isEqualTo(AsyncTaskStatus.COMPLETED);
-    assertThat(resumeRepository.findById(work.resume().getId()).orElseThrow().getStatus())
-        .isEqualTo(ResumeStatus.READY);
+    org.mockito.Mockito.verifyNoInteractions(processingClaim);
   }
 
   @Test
@@ -285,7 +260,7 @@ class ResumeAnalysisListenerIT {
   }
 
   @Test
-  void manualRetryRestoresDeadResumeAndClearsOnlyTerminalClaim() {
+  void manualRetryRestoresDeadResumeWithoutRedis() {
     Work work = pendingWork();
     ResumeEntity resume = resumeRepository.findById(work.resume().getId()).orElseThrow();
     resume.setStatus(ResumeStatus.FAILED);
@@ -299,9 +274,7 @@ class ResumeAnalysisListenerIT {
     task.setPublishAttempts(6);
     task.setLastError("Resume analysis retries exhausted");
     taskRepository.saveAndFlush(task);
-    String key = "resume-analysis:" + resume.getId();
-    String token = processingClaim.acquire(key, Duration.ofMinutes(1)).orElseThrow();
-    processingClaim.complete(key, token, Duration.ofHours(1));
+
 
     var retried = taskService.retry(owner(), task.getTaskId(), UUID.randomUUID());
 
@@ -315,10 +288,11 @@ class ResumeAnalysisListenerIT {
     assertThat(resetResume.getFailureReason()).isNull();
     assertThat(resetResume.getSkillsSnapshot()).isNull();
     assertThat(resetResume.getEvaluationSnapshot()).isNull();
+    org.mockito.Mockito.verifyNoInteractions(processingClaim);
   }
 
   @Test
-  void inspectedOldDeliveryAfterManualRetryReleasesItsClaimForTheNewEpoch() throws Exception {
+  void inspectedOldDeliveryAfterManualRetryCannotClaimTheNewEpoch() throws Exception {
     Work work = pendingWork();
     CountDownLatch inspected = new CountDownLatch(1);
     CountDownLatch continueOldDelivery = new CountDownLatch(1);
@@ -343,14 +317,12 @@ class ResumeAnalysisListenerIT {
 
     continueOldDelivery.countDown();
     verify(handler, org.mockito.Mockito.timeout(10_000)).handle(work.message());
-    String claimBusinessKey = "resume-analysis:" + resume.getId();
-    await(() -> !redis.getBucket(
-        REDIS_KEY_PREFIX + claimBusinessKey, StringCodec.INSTANCE).isExists(),
-        Duration.ofSeconds(5));
-
-    assertThat(taskRepository.findById(task.getId()).orElseThrow().getExecutionEpoch())
-        .isEqualTo(1);
-    assertThat(processingClaim.acquire(claimBusinessKey, Duration.ofMinutes(1))).isPresent();
+    assertThat(taskRepository.findById(task.getId()).orElseThrow().getExecutionEpoch()).isEqualTo(1);
+    assertThat(taskRepository.findById(task.getId()).orElseThrow().getExecutionToken()).isNull();
+    when(profiler.analyze(work.resume().getParsedText())).thenReturn(validResult());
+    send(new TaskMessage(work.task().getTaskId(), AsyncTaskType.RESUME_ANALYSIS, work.task().getBizKey(), 1));
+    await(() -> taskStatus(work) == AsyncTaskStatus.COMPLETED, Duration.ofSeconds(10));
+    org.mockito.Mockito.verifyNoInteractions(processingClaim);
   }
 
   @Test
@@ -420,9 +392,6 @@ class ResumeAnalysisListenerIT {
     return taskRepository.findById(work.task().getId()).orElseThrow().getStatus();
   }
 
-  private String claimKey(Long resumeId) {
-    return REDIS_KEY_PREFIX + "resume-analysis:" + resumeId;
-  }
 
   private void await(BooleanSupplier condition, Duration timeout) throws Exception {
     long deadline = System.nanoTime() + timeout.toNanos();

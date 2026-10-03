@@ -8,10 +8,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -87,10 +89,83 @@ class ResumeAnalysisHandlerTest {
   @Autowired
   private UserAccountRepository users;
 
+  @Autowired private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
   @BeforeEach
   void cleanDatabase() {
     taskRepository.deleteAll();
     resumeRepository.deleteAll();
+  }
+
+  @Test
+  void concurrentDuplicateCannotStartAnotherModelCallWhileOwnerIsActive() throws Exception {
+    Work work = pendingWork();
+    var started = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var calls = new AtomicInteger();
+    when(profiler.analyze(work.resume().getParsedText())).thenAnswer(invocation -> {
+      if (calls.incrementAndGet() == 1) {
+        started.countDown();
+        assertThat(release.await(15, TimeUnit.SECONDS)).isTrue();
+      }
+      return validResult();
+    });
+    try (var executor = Executors.newSingleThreadExecutor()) {
+      var first = executor.submit(() -> handler.handle(work.task().getTaskId()));
+      try {
+        assertThat(started.await(10, TimeUnit.SECONDS)).isTrue();
+        var duplicate = handler.handle(work.task().getTaskId());
+        assertThat(calls.get()).as("database ownership must prevent the second model invocation").isEqualTo(1);
+        assertThat(duplicate).isEqualTo(ResumeAnalysisHandler.Outcome.BUSY);
+      } finally {
+        release.countDown();
+      }
+      assertThat(first.get(10, TimeUnit.SECONDS)).isEqualTo(ResumeAnalysisHandler.Outcome.TERMINAL);
+    }
+  }
+
+  @Test
+  void simultaneousDatabaseClaimsHaveOnlyOneWinner() throws Exception {
+    Work work = pendingWork();
+    int workers = 6;
+    var ready = new CountDownLatch(workers);
+    var start = new CountDownLatch(1);
+    var losersFinished = new CountDownLatch(workers - 1);
+    var releaseModel = new CountDownLatch(1);
+    var calls = new AtomicInteger();
+    when(profiler.analyze(work.resume().getParsedText())).thenAnswer(invocation -> {
+      calls.incrementAndGet();
+      assertThat(releaseModel.await(20, TimeUnit.SECONDS)).isTrue();
+      return validResult();
+    });
+    try (var executor = Executors.newFixedThreadPool(workers)) {
+      var results = new ArrayList<Future<ResumeAnalysisHandler.Outcome>>();
+      for (int i = 0; i < workers; i++) {
+        results.add(executor.submit(() -> {
+          ready.countDown();
+          assertThat(start.await(10, TimeUnit.SECONDS)).isTrue();
+          try {
+            return handler.handle(work.task().getTaskId());
+          } finally {
+            losersFinished.countDown();
+          }
+        }));
+      }
+      try {
+        assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+        start.countDown();
+        assertThat(losersFinished.await(15, TimeUnit.SECONDS)).isTrue();
+        assertThat(calls.get()).isEqualTo(1);
+        assertThat(taskRepository.findById(work.task().getId()).orElseThrow().getAttemptCount()).isEqualTo(1);
+      } finally {
+        start.countDown();
+        releaseModel.countDown();
+      }
+      var outcomes = new ArrayList<ResumeAnalysisHandler.Outcome>();
+      for (var result : results) outcomes.add(result.get(10, TimeUnit.SECONDS));
+      assertThat(outcomes).containsOnly(ResumeAnalysisHandler.Outcome.TERMINAL, ResumeAnalysisHandler.Outcome.BUSY);
+      assertThat(outcomes.stream().filter(value -> value == ResumeAnalysisHandler.Outcome.TERMINAL).count()).isEqualTo(1);
+    }
   }
 
   @Test
@@ -442,6 +517,8 @@ class ResumeAnalysisHandlerTest {
     try {
       var oldOwner = executor.submit(() -> handler.handle(work.task().getTaskId()));
       assertThat(oldEntered.await(10, TimeUnit.SECONDS)).isTrue();
+      jdbc.update("update async_task set execution_lease_until = timestampadd(second, -1, current_timestamp(6)) "
+          + "where id = ?", work.task().getId());
       var newOwner = executor.submit(() -> handler.handle(work.task().getTaskId()));
       assertThat(newEntered.await(10, TimeUnit.SECONDS)).isTrue();
 

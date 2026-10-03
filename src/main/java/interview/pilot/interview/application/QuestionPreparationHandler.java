@@ -1,12 +1,15 @@
 package interview.pilot.interview.application;
 
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import interview.pilot.async.domain.AsyncTaskStatus;
@@ -42,6 +45,7 @@ public class QuestionPreparationHandler {
   private final FollowUpQuotaAllocator quotas;
   private final ObjectMapper objectMapper;
   private final TransactionTemplate transactions;
+  private final long leaseSeconds;
 
   public QuestionPreparationHandler(
       AsyncTaskRepository tasks,
@@ -52,7 +56,8 @@ public class QuestionPreparationHandler {
       RubricGenerator rubricGenerator,
       FollowUpQuotaAllocator quotas,
       ObjectMapper objectMapper,
-      PlatformTransactionManager transactionManager) {
+      PlatformTransactionManager transactionManager,
+      @Value("${app.async.question-preparation.lease-duration:11m}") Duration leaseDuration) {
     this.tasks = tasks;
     this.sessions = sessions;
     this.cards = cards;
@@ -62,6 +67,12 @@ public class QuestionPreparationHandler {
     this.quotas = quotas;
     this.objectMapper = objectMapper;
     this.transactions = new TransactionTemplate(transactionManager);
+    this.transactions.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+    if (leaseDuration == null || leaseDuration.getSeconds() < 1
+        || leaseDuration.compareTo(Duration.ofHours(1)) > 0 || leaseDuration.getNano() != 0) {
+      throw new IllegalArgumentException("Question preparation lease must be whole seconds between 1s and 1h");
+    }
+    this.leaseSeconds = leaseDuration.getSeconds();
   }
 
   /**
@@ -69,12 +80,18 @@ public class QuestionPreparationHandler {
    * question skeletons -> one precise RAG snapshot per question -> per-question rubric deck.
    */
   public Outcome prepare(TaskMessage message) {
-    Target target = transactions.execute(status -> begin(message));
-    if (target.terminal()) return Outcome.STALE;
+    BeginResult begin = transactions.execute(status -> begin(message));
+    if (begin.skipped() != null) return begin.skipped();
+    Target target = begin.target();
     try {
       return generateAndPersist(message, target);
     } catch (RuntimeException exception) {
-      throw new QuestionPreparationExecutionException(target.attemptGeneration(), exception);
+      boolean current = Boolean.TRUE.equals(transactions.execute(status -> {
+        var task = tasks.findByTaskIdForUpdate(message.taskId()).orElse(null);
+        return matchesExecution(task, message, target.attemptGeneration(), target.executionToken());
+      }));
+      if (!current) return Outcome.STALE;
+      throw new QuestionPreparationExecutionException(target.attemptGeneration(), target.executionToken(), exception);
     }
   }
 
@@ -108,12 +125,18 @@ public class QuestionPreparationHandler {
     return transactions.execute(status -> inspectInTransaction(message));
   }
 
-  public boolean markInvalid(TaskMessage message, int attemptGeneration) {
-    return terminalize(message, attemptGeneration, AsyncTaskStatus.FAILED, "INVALID_QUESTION_DECK");
+  public boolean markInvalid(TaskMessage message, int attemptGeneration, String executionToken) {
+    return terminalize(message, attemptGeneration, executionToken, AsyncTaskStatus.FAILED, "INVALID_QUESTION_DECK");
   }
 
-  public boolean markDead(TaskMessage message, int attemptGeneration) {
-    return terminalize(message, attemptGeneration, AsyncTaskStatus.DEAD, "QUESTION_PREPARATION_RETRY_EXHAUSTED");
+  public boolean markDead(TaskMessage message, int attemptGeneration, String executionToken) {
+    return terminalize(message, attemptGeneration, executionToken, AsyncTaskStatus.DEAD, "QUESTION_PREPARATION_RETRY_EXHAUSTED");
+  }
+
+  public void releaseForRetry(TaskMessage message, int attemptGeneration, String executionToken) {
+    transactions.executeWithoutResult(status -> tasks.releaseExecution(message.taskId().toString(),
+        AsyncTaskType.INTERVIEW_QUESTION_PREPARATION.name(), message.bizKey(), message.executionEpoch(),
+        attemptGeneration, executionToken));
   }
 
   private Target inspectInTransaction(TaskMessage message) {
@@ -143,14 +166,18 @@ public class QuestionPreparationHandler {
         false, task.getAttemptCount());
   }
 
-  private Target begin(TaskMessage message) {
+  private BeginResult begin(TaskMessage message) {
     Target target = inspectInTransaction(message);
-    if (target.terminal()) return target;
+    if (target.terminal()) return new BeginResult(null, Outcome.STALE);
+    String token = UUID.randomUUID().toString();
+    if (tasks.claimExecution(message.taskId().toString(), AsyncTaskType.INTERVIEW_QUESTION_PREPARATION.name(),
+        message.bizKey(), message.executionEpoch(), token, leaseSeconds) != 1) {
+      return new BeginResult(null, Outcome.BUSY);
+    }
+    // CAS clears the persistence context; reload the generation committed by this claim.
     AsyncTaskEntity task = tasks.findByTaskId(message.taskId()).orElseThrow();
-    task.setStatus(AsyncTaskStatus.PUBLISHED);
-    task.setAttemptCount(task.getAttemptCount() + 1);
-    return new Target(target.sessionId(), target.sessionDatabaseId(), target.brief(), false,
-        task.getAttemptCount());
+    return new BeginResult(new Target(target.sessionId(), target.sessionDatabaseId(), target.brief(), false,
+        task.getAttemptCount(), token), null);
   }
 
   private Outcome persist(
@@ -158,11 +185,10 @@ public class QuestionPreparationHandler {
       Target target,
       Map<QuestionCardKey, RagContextSnapshot> questionSnapshots,
       PreparedQuestionDeck deck) {
-    AsyncTaskEntity task = tasks.findByTaskId(message.taskId()).orElseThrow();
+    AsyncTaskEntity task = tasks.findByTaskIdForUpdate(message.taskId()).orElseThrow();
     InterviewSessionEntity session = sessions.findBySessionId(target.sessionId()).orElseThrow();
-    if (task.getExecutionEpoch() != message.executionEpoch()
-        || task.getAttemptCount() != target.attemptGeneration()
-        || task.getStatus() != AsyncTaskStatus.PUBLISHED
+    if (!matchesExecution(task, message, target.attemptGeneration(), target.executionToken())
+        || !task.getUserAccountId().equals(session.getUserAccountId())
         || session.getStatus() != SessionStatus.PREPARING) {
       return Outcome.STALE;
     }
@@ -194,24 +220,23 @@ public class QuestionPreparationHandler {
     session.preparationReady();
     task.setStatus(AsyncTaskStatus.COMPLETED);
     task.setLastError(null);
+    task.clearExecutionLease();
     return Outcome.COMPLETED;
   }
 
   private boolean terminalize(
-      TaskMessage message, int attemptGeneration, AsyncTaskStatus taskStatus, String safeError) {
+      TaskMessage message, int attemptGeneration, String executionToken, AsyncTaskStatus taskStatus, String safeError) {
     Boolean result = transactions.execute(status -> {
       requireMessage(message);
-      var task = tasks.findByTaskId(message.taskId()).orElse(null);
-      if (task == null || task.getExecutionEpoch() != message.executionEpoch()
-          || task.getAttemptCount() != attemptGeneration
-          || task.getTaskType() != message.taskType() || !task.getBizKey().equals(message.bizKey())
-          || (task.getStatus() != AsyncTaskStatus.PENDING
-              && task.getStatus() != AsyncTaskStatus.PUBLISHED)) return false;
+      var task = tasks.findByTaskIdForUpdate(message.taskId()).orElse(null);
+      if (!matchesExecution(task, message, attemptGeneration, executionToken)) return false;
       var session = sessions.findBySessionId(sessionId(task.getBizKey())).orElse(null);
-      if (session == null || session.getStatus() != SessionStatus.PREPARING) return false;
+      if (session == null || session.getStatus() != SessionStatus.PREPARING
+          || !task.getUserAccountId().equals(session.getUserAccountId())) return false;
       cards.deleteAllBySessionId(session.getId());
       task.setStatus(taskStatus);
       task.setLastError(safeError);
+      task.clearExecutionLease();
       session.preparationFailed(safeError);
       return true;
     });
@@ -219,7 +244,8 @@ public class QuestionPreparationHandler {
   }
 
   private void requireMessage(TaskMessage message) {
-    if (message == null || message.taskId() == null) {
+    if (message == null || message.taskId() == null || message.bizKey() == null
+        || message.taskType() != AsyncTaskType.INTERVIEW_QUESTION_PREPARATION) {
       throw new IllegalArgumentException("Question preparation message is required");
     }
   }
@@ -229,6 +255,12 @@ public class QuestionPreparationHandler {
       throw new IllegalStateException("Invalid question preparation business key");
     }
     return UUID.fromString(bizKey.substring("interview:".length()));
+  }
+
+  private boolean matchesExecution(AsyncTaskEntity task, TaskMessage message, int generation, String token) {
+    return task != null && task.getTaskType() == message.taskType()
+        && task.getBizKey().equals(message.bizKey())
+        && task.ownsExecution(message.executionEpoch(), generation, token);
   }
 
   private <T> T decode(String json, Class<T> type) {
@@ -247,11 +279,17 @@ public class QuestionPreparationHandler {
     }
   }
 
-  public enum Outcome { COMPLETED, STALE }
+  public enum Outcome { COMPLETED, STALE, BUSY }
+
+  private record BeginResult(Target target, Outcome skipped) { }
 
   public record Target(
       UUID sessionId, Long sessionDatabaseId, InterviewBriefSnapshot brief, boolean terminal,
-      int attemptGeneration) {
+      int attemptGeneration, String executionToken) {
+    public Target(UUID sessionId, Long sessionDatabaseId, InterviewBriefSnapshot brief, boolean terminal,
+        int attemptGeneration) {
+      this(sessionId, sessionDatabaseId, brief, terminal, attemptGeneration, null);
+    }
     public Target(UUID sessionId, Long sessionDatabaseId, InterviewBriefSnapshot brief, boolean terminal) {
       this(sessionId, sessionDatabaseId, brief, terminal, 0);
     }

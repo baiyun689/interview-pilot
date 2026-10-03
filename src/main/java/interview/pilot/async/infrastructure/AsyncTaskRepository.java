@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
@@ -14,9 +15,41 @@ import org.springframework.data.repository.query.Param;
 
 import interview.pilot.async.domain.AsyncTaskStatus;
 import interview.pilot.async.domain.AsyncTaskType;
+import jakarta.persistence.LockModeType;
 
 public interface AsyncTaskRepository extends JpaRepository<AsyncTaskEntity, Long> {
   Optional<AsyncTaskEntity> findByTaskId(UUID taskId);
+
+  @Lock(LockModeType.PESSIMISTIC_WRITE)
+  @Query("select task from AsyncTaskEntity task where task.taskId = :taskId")
+  Optional<AsyncTaskEntity> findByTaskIdForUpdate(@Param("taskId") UUID taskId);
+
+  /** Database time determines eligibility; the token fences a worker after takeover. */
+  @Modifying(flushAutomatically = true, clearAutomatically = true)
+  @Query(value = """
+      update async_task
+         set execution_token = :token,
+             execution_lease_until = timestampadd(second, :leaseSeconds, current_timestamp(6)),
+             attempt_count = attempt_count + 1, status = 'PUBLISHED', last_error = null,
+             updated_at = current_timestamp(6), version = version + 1
+       where task_id = :taskId and task_type = :taskType and biz_key = :bizKey
+         and execution_epoch = :epoch and status in ('PENDING', 'PUBLISHED')
+         and (execution_token is null or execution_lease_until <= current_timestamp(6))
+      """, nativeQuery = true)
+  int claimExecution(@Param("taskId") String taskId, @Param("taskType") String taskType, @Param("bizKey") String bizKey,
+      @Param("epoch") int epoch, @Param("token") String token, @Param("leaseSeconds") long leaseSeconds);
+
+  /** Release only after the retry message has been confirmed; never release another owner. */
+  @Modifying(flushAutomatically = true, clearAutomatically = true)
+  @Query(value = """
+      update async_task set execution_token = null, execution_lease_until = null,
+             updated_at = current_timestamp(6), version = version + 1
+       where task_id = :taskId and task_type = :taskType and biz_key = :bizKey
+         and execution_epoch = :epoch and attempt_count = :generation
+         and execution_token = :token and status = 'PUBLISHED'
+      """, nativeQuery = true)
+  int releaseExecution(@Param("taskId") String taskId, @Param("taskType") String taskType, @Param("bizKey") String bizKey,
+      @Param("epoch") int epoch, @Param("generation") int generation, @Param("token") String token);
 
   Optional<AsyncTaskEntity> findByTaskIdAndUserAccountId(UUID taskId, Long userAccountId);
 

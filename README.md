@@ -280,6 +280,28 @@ Skill、Provider、Model 和 InterviewPlan 都会在创建面试时生成不可�
 
 消费端区分业务失败与协调等待：模型或处理失败使用 5/30/120 秒重试；Redis 不可用、租约被占用时进入 30 秒延迟队列，保留原重试次数。延迟消息必须收到发布确认且未被退回，本次消费才正常返回，避免提前确认后丢失崩溃任务的后续执行机会。出题状态检查只读，每次实际执行递增 `attemptCount`；结果和失败回写同时校验执行代次与 `executionEpoch`。答题评估异常携带实际执行代次，避免开始事务递增代次后，失败处理仍使用旧值。
 
+#### 简历分析：MySQL 执行租约试点
+
+`RESUME_ANALYSIS` 的消费领权与人工重试已不再调用 Redis Claim。任务行新增 `execution_token` 和 `execution_lease_until`，由 MySQL 同时管理业务状态与执行身份：
+
+1. **短事务领权：** 条件 UPDATE 校验任务身份、`executionEpoch`、可执行状态及租约是否空闲或过期；成功后生成独立 token、递增 `attemptCount`，并在同一事务把简历改为 `ANALYZING`。租约使用数据库时间，避免不同应用实例的时钟偏差。
+2. **事务外执行：** 提交领权事务后调用模型。并发重复消息领权失败时进入 30 秒延迟队列，不占用业务重试次数。
+3. **短事务回写：** 先锁定任务行，再核对 token、执行代次与 epoch；成功和失败都必须属于当前执行者，才允许更新任务及简历。终态在同一事务清除租约。
+4. **重试与恢复：** 可重试失败先保留租约，确认延迟消息发布成功后再按原 token 释放；死信也由原执行身份落库。进程退出后依靠 RabbitMQ 未确认消息重投及延迟投递，在租约过期后接管。人工重试在数据库事务中重置业务状态、清除租约并递增 epoch，旧消息不能执行新一轮任务。
+
+租约默认 `2m`，可通过 `app.async.resume-analysis.lease-duration` 调整，范围为 1 秒到 1 小时的整数秒。租约到期仅表示允许其他执行者接管；没有发生接管时，原执行者仍可提交。当前不自动续租，慢调用超过租期可能与接管者重复调用模型，但旧 token 不能覆盖新执行者的数据，因此不承诺模型调用严格只执行一次。
+
+#### 题卡准备：复用数据库执行租约
+
+`INTERVIEW_QUESTION_PREPARATION` 的消费领权与人工重试也已迁移到 MySQL。两条链路共用 `AsyncTaskRepository.claimExecution/releaseExecution` 的条件更新，以及任务实体的 `ownsExecution/clearExecutionLease`，按任务类型和业务键隔离执行身份。
+
+- 出题、逐题 RAG 检索和评分要点生成均在数据库事务外执行；领权失败返回 `BUSY`，通过确认发布的延迟消息等待。
+- 写入前锁定任务行，核对 token、执行代次、epoch 和会话归属；自我介绍与全部题卡、会话 `READY`、任务 `COMPLETED` 在同一事务提交。中途抛错时整批回滚，不留下半套题卡。
+- 旧执行的成功、无效输出及运行时失败均受身份校验约束，不能删除接管者的题卡或把新任务标记为失败。可重试失败及乐观锁冲突在确认消息发布后才释放当前租约；发布失败则保留租约并让异常返回消息容器。
+- 租约默认 `11m`，可通过 `app.async.question-preparation.lease-duration` 配置，仍采用前述不续租的过期接管语义。人工重试在一个事务中恢复会话、清除租约并递增 epoch。
+
+当前迁移范围为简历分析和题卡准备；回答评估、报告生成等任务仍使用原有 Claim，模型网关的全局限流和并发配额也仍使用 Redis。升级时先停止并等待旧版简历和题卡消费者退出，再执行 Flyway V36 并启动新版消费者；不要让不校验数据库 token 的旧版消费者与新版混跑。题卡准备复用 V36 的字段，无需额外迁移。
+
 ### 知识库与 RAG
 
 知识库文档上传后会先进入 `PROCESSING`，后台任务负责解析文件、切分文本，先将分块写入 MySQL 的 `knowledge_chunk` 表，再向量化写入 Qdrant，并在成功后标记为 `READY`。两路使用相同的确定性分块 ID，失败重试可以幂等重放。文档列表会返回 `PENDING`、`PROCESSING`、`READY`、`FAILED`、`DELETING` 等可见状态，前端会对索引中的文档轮询刷新。
@@ -298,7 +320,7 @@ Redis 只承担三类短期协调职责：
 
 - API 固定窗口限流。
 - 全局大模型并发租约。
-- 异步 Worker 和回答处理的短期 Claim。
+- 其他异步 Worker 和回答处理的短期 Claim；简历分析和题卡准备已改为 MySQL 执行租约。
 
 Redis 不保存面试业务事实。即使锁或标记因异常丢失，MySQL 中的任务状态、尝试次数和版本字段仍是最终判断依据。
 
@@ -672,6 +694,20 @@ docker compose config
 git diff --check
 ```
 
+题卡准备数据库租约迁移回归（2026-10-03）：
+
+- 85 项定向测试全部通过，覆盖题卡与简历两条链路、人工重试及消息延迟处理；其中题卡准备的 11 项集成测试使用真实 MySQL、RabbitMQ 和模型替身，不启动 Redis。
+- 验证 6 个线程同时抢占仅调用一次生成流程；租约过期后新执行者接管，旧成功、旧无效输出、旧运行时失败以及错误 token 的释放操作均不能影响新执行者。
+- 验证写入中途异常使整批题卡回滚，延迟重试完成后只保存一套题卡；死信任务可在 Redis Claim 不可用时人工恢复，旧 epoch 消息不能启动新一轮任务。
+- 另运行 587 项非容器测试及 9 项发布补偿、权限、数据库启动测试；与定向测试去重后，本轮共覆盖 120 个套件、640 项，630 通过、10 跳过，0 失败。未重复执行全部集成套件，也未做容量压测或真实模型质量评测。
+
+简历分析数据库租约试点回归（2026-10-03）：
+
+- 完整后端回归执行 157 个套件、842 项；修复 4 个旧迁移测试中写死的脚本数量断言并定向复测后，汇总为 832 通过、10 跳过、0 未解决失败。
+- 真实 MySQL 验证 6 个线程同时争抢同一任务时只有一个执行者；过期接管后，旧执行的成功、无效输出和运行时失败都不能覆盖新状态。
+- 简历消费集成测试只启动 MySQL 和 RabbitMQ，使用模型替身，并让 Redis Claim 调用直接抛错；验证正常消费、延迟重试、死信和人工恢复均不调用 Redis Claim。
+- 升级测试验证存量任务的新租约字段默认为空；本轮未进行容量压测或真实模型调用测试。
+
 后端核心链路专项回归（2026-10-03）：
 
 - 使用真实 MySQL 8.4、RabbitMQ 和 Redis 的 Testcontainers 环境，12 个集成测试套件、113 项全部通过，0 失败 / 跳过；模型调用使用替身。
@@ -704,7 +740,8 @@ git diff --check
 - [出题执行代次与迟到结果隔离](src/test/java/interview/pilot/interview/application/QuestionPreparationFencingIT.java)
 - [RabbitMQ 重试与死信](src/test/java/interview/pilot/async/messaging/RabbitRetryIT.java)
 - [Qdrant 向量召回与范围隔离](src/test/java/interview/pilot/knowledge/retrieval/QdrantVectorRetrievalSourceIT.java)
-- [简历分析 Listener](src/test/java/interview/pilot/async/resume/ResumeAnalysisListenerIT.java)
+- [简历分析数据库领权与并发隔离](src/test/java/interview/pilot/resume/application/ResumeAnalysisHandlerTest.java)
+- [简历分析 Listener](src/test/java/interview/pilot/resume/application/ResumeAnalysisListenerIT.java)
 - [报告 Listener](src/test/java/interview/pilot/async/report/InterviewReportListenerTest.java)
 - [固定流程策略](src/test/java/interview/pilot/interview/domain/FixedInterviewFlowPolicyTest.java)
 - [回答服务与 SSE 编排](src/test/java/interview/pilot/interview/application/FixedAnswerServiceTest.java)
@@ -720,7 +757,7 @@ git diff --check
 - **没有可用模型：** 为至少一个 Provider 设置非空 API Key 和 `*_ENABLED=true`，并让 `AI_DEFAULT_PROVIDER` 使用相同 ID。Provider Client 在启动时组装，修改后需要重启 App。
 - **启动时提示 LLM Lease 无效：** 增大 `LLM_LEASE`，或降低已启用 Provider 的超时时间。Lease 必须大于最长超时时间的两倍。
 - **App 一直处于 unhealthy：** 查看 `docker compose logs app mysql redis rabbitmq`。Actuator 会检查基础设施健康状态，凭据错误或依赖不可用都会让 App 保持不健康。
-- **简历或报告一直 pending：** 查询任务接口并查看 RabbitMQ 管理页面。失败或进入 `DEAD` 的任务可以在 Redis Claim 释放后，通过 `POST /api/tasks/{taskId}/retry` 重试。
+- **简历或报告一直 pending：** 查询任务接口并查看 RabbitMQ 管理页面。失败或进入 `DEAD` 的任务可通过 `POST /api/tasks/{taskId}/retry` 重试；简历分析和题卡准备使用数据库状态校验，其他任务还需确认 Redis Claim 已释放。
 - **SSE 响应看起来被缓冲：** 通过项目自带的 Nginx 访问。它已经为 `/api/` 关闭代理缓冲并延长读写超时；其他反向代理也需要保留这些配置。
 - **端口被占用：** 在 `.env` 中修改 `FRONTEND_PORT`、`MYSQL_PORT`、`REDIS_PORT`、`RABBITMQ_PORT` 或 `RABBITMQ_MANAGEMENT_PORT`。Spring Boot 端口在 Compose 中不会公开到宿主机。
 - **Docker 拉取镜像失败：** 如果日志出现镜像站 EOF 或超时，这是 Docker 镜像源网络问题，不是项目构建错误。检查 Docker Desktop 的 Registry Mirror 配置后重试。

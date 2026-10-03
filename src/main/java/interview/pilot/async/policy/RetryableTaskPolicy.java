@@ -11,7 +11,8 @@ import interview.pilot.async.infrastructure.AsyncTaskEntity;
  *
  * <ul>
  *   <li>{@link #claimKey(AsyncTaskEntity)} — the idempotency business key whose Redis
- *       processing claim must be cleared before the task row is reset;</li>
+ *       processing claim is cleared before reset when {@link #requiresRedisClaim()} is true;
+ *       database-owned pipelines validate the key but skip Redis cleanup;</li>
  *   <li>{@link #reset(AsyncTaskEntity, long)} — the per-type state recovery that makes the
  *       underlying business row retryable, or the refusal to reset when the type owns its
  *       retry elsewhere (e.g. {@code VOICE_TRANSCRIPTION}).</li>
@@ -30,6 +31,9 @@ public interface RetryableTaskPolicy {
   AsyncTaskType type();
 
   String claimKey(AsyncTaskEntity task);
+
+  /** Database-owned pipelines need no Redis cleanup before a manual retry. */
+  default boolean requiresRedisClaim() { return true; }
 
   void reset(AsyncTaskEntity task, long userAccountId);
 }

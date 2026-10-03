@@ -17,8 +17,7 @@ import interview.pilot.resume.infrastructure.ResumeRepository;
 public class ResumeAnalysisRetryPolicy extends AbstractRetryableTaskPolicy {
   private static final String BIZ_KEY_PREFIX = "resume:";
   /**
-   * Public so {@code ResumeAnalysisListener} acquires the very key this policy clears on
-   * manual retry — a drifted literal on either side would silently break retry idempotency.
+   * Legacy namespace retained to identify markers from pre-migration workers.
    */
   public static final String CLAIM_KEY_PREFIX = "resume-analysis:";
 
@@ -38,6 +37,8 @@ public class ResumeAnalysisRetryPolicy extends AbstractRetryableTaskPolicy {
     return CLAIM_KEY_PREFIX + parseResumeId(task.getBizKey());
   }
 
+  @Override public boolean requiresRedisClaim() { return false; }
+
   @Override
   public void reset(AsyncTaskEntity task, long userAccountId) {
     Long resumeId = parseResumeId(task.getBizKey());
@@ -50,6 +51,7 @@ public class ResumeAnalysisRetryPolicy extends AbstractRetryableTaskPolicy {
     resume.setFailureReason(null);
     resume.setSkillsSnapshot(null);
     resume.setEvaluationSnapshot(null);
+    task.clearExecutionLease();
   }
 
   private Long parseResumeId(String bizKey) {

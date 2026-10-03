@@ -65,10 +65,11 @@ class InterviewV25MigrationIT {
         Integer.class)).isEqualTo(80);
 
     latest.clean();
+    int expectedMigrations = latest.info().pending().length;
     latest.migrate();
     assertThat(jdbc.queryForObject(
         "select count(*) from flyway_schema_history where success=true", Integer.class))
-        .isEqualTo(33);
+        .isEqualTo(expectedMigrations);
   }
 
   private int columnCount(JdbcTemplate jdbc, String column) {

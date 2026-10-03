@@ -116,7 +116,7 @@ class AsyncTaskRetryEquivalenceTest {
   }
 
   @Test
-  void resumeAnalysisRetryClearsTheExactClaimAndRestoresTheRow() {
+  void resumeAnalysisRetryRestoresTheRowWithoutRedis() {
     long resumeId = 42L;
     var task = task(AsyncTaskType.RESUME_ANALYSIS, "resume:" + resumeId, AsyncTaskStatus.FAILED);
     var resume = mock(ResumeEntity.class);
@@ -127,7 +127,7 @@ class AsyncTaskRetryEquivalenceTest {
     var response = service().retry(OWNER, task.getTaskId(), UUID.randomUUID());
 
     assertThat(response.status()).isEqualTo(AsyncTaskStatus.PENDING);
-    verify(claims).clearTerminal("resume-analysis:" + resumeId);
+    verifyNoInteractions(claims);
     verify(resume).setStatus(ResumeStatus.PENDING);
     verify(resume).setFailureReason(null);
     verify(resume).setSkillsSnapshot(null);
@@ -135,7 +135,7 @@ class AsyncTaskRetryEquivalenceTest {
   }
 
   @Test
-  void interviewPreparationRetryClearsTheExactClaimAndRetriesPreparation() {
+  void interviewPreparationRetryRestoresTheSessionWithoutRedis() {
     UUID sessionId = UUID.randomUUID();
     var task = task(
         AsyncTaskType.INTERVIEW_QUESTION_PREPARATION, "interview:" + sessionId,
@@ -149,7 +149,7 @@ class AsyncTaskRetryEquivalenceTest {
     var response = service().retry(OWNER, task.getTaskId(), UUID.randomUUID());
 
     assertThat(response.status()).isEqualTo(AsyncTaskStatus.PENDING);
-    verify(claims).clearTerminal("interview-preparation:" + sessionId);
+    verifyNoInteractions(claims);
     verify(session).retryPreparation();
     verify(session, never()).retryEvaluation();
   }
@@ -245,7 +245,8 @@ class AsyncTaskRetryEquivalenceTest {
     var error = retryError(service(), task.getTaskId());
 
     assertThat(error.code()).isEqualTo("TASK_STATE_INVALID");
-    verify(claims).clearTerminal(any());
+    if (type == AsyncTaskType.RESUME_ANALYSIS || type == AsyncTaskType.INTERVIEW_QUESTION_PREPARATION) verifyNoInteractions(claims);
+    else verify(claims).clearTerminal(any());
   }
 
   @ParameterizedTest
@@ -275,7 +276,8 @@ class AsyncTaskRetryEquivalenceTest {
     assertThat(error.code()).isEqualTo("TASK_STATE_INVALID");
     // The claim is cleared before the business-state check refuses the reset — if this
     // drifted from the listener-side key, manual retry would clear a claim nobody holds.
-    verify(claims).clearTerminal(claimKey);
+    if (type == AsyncTaskType.RESUME_ANALYSIS || type == AsyncTaskType.INTERVIEW_QUESTION_PREPARATION) verifyNoInteractions(claims);
+    else verify(claims).clearTerminal(claimKey);
   }
 
   @Test

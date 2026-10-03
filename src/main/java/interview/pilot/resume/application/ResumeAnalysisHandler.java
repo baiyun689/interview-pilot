@@ -1,10 +1,13 @@
 package interview.pilot.resume.application;
 
+import java.time.Duration;
 import java.util.Objects;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import interview.pilot.ai.AiStructuredOutputException;
@@ -35,6 +38,7 @@ public class ResumeAnalysisHandler {
   private final Validator validator;
   private final TransactionTemplate transactions;
   private final AiMetrics metrics;
+  private final long leaseSeconds;
 
   public ResumeAnalysisHandler(
       ResumeProfiler profiler,
@@ -43,24 +47,31 @@ public class ResumeAnalysisHandler {
       ObjectMapper objectMapper,
       Validator validator,
       PlatformTransactionManager transactionManager,
-      AiMetrics metrics) {
+      AiMetrics metrics,
+      @Value("${app.async.resume-analysis.lease-duration:2m}") Duration leaseDuration) {
     this.profiler = profiler;
     this.resumeRepository = resumeRepository;
     this.taskRepository = taskRepository;
     this.objectMapper = objectMapper;
     this.validator = validator;
     this.transactions = new TransactionTemplate(transactionManager);
+    this.transactions.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     this.metrics = metrics;
+    if (leaseDuration == null || leaseDuration.getSeconds() < 1
+        || leaseDuration.compareTo(Duration.ofHours(1)) > 0 || leaseDuration.getNano() != 0) {
+      throw new IllegalArgumentException("Resume execution lease must be whole seconds between 1s and 1h");
+    }
+    this.leaseSeconds = leaseDuration.getSeconds();
   }
 
   public Outcome handle(UUID taskId) {
-    AnalysisWork work = transactions.execute(status -> begin(taskId));
-    return profile(work);
+    BeginResult begin = transactions.execute(status -> begin(requireTask(taskId)));
+    return begin.skipped() != null ? begin.skipped() : profile(begin.work());
   }
 
   public Outcome handle(TaskMessage message) {
     BeginResult begin = transactions.execute(status -> beginMessage(message));
-    return begin.stale() ? Outcome.STALE : profile(begin.work());
+    return begin.skipped() != null ? begin.skipped() : profile(begin.work());
   }
 
   private Outcome profile(AnalysisWork work) {
@@ -82,7 +93,7 @@ public class ResumeAnalysisHandler {
       if (!currentAttempt) {
         return Outcome.STALE;
       }
-      throw new ResumeAnalysisRetryableException(work.attemptGeneration());
+      throw new ResumeAnalysisRetryableException(work.attemptGeneration(), work.executionToken());
     }
   }
 
@@ -120,66 +131,71 @@ public class ResumeAnalysisHandler {
         task.getAttemptCount(), task.getExecutionEpoch());
   }
 
-  public boolean markDead(TaskMessage message, int attemptGeneration) {
+  public boolean markDead(TaskMessage message, int attemptGeneration, String executionToken) {
     return Boolean.TRUE.equals(transactions.execute(status -> {
-      AsyncTaskEntity task = requireMatchingTask(message);
+      AsyncTaskEntity task = requireMatchingTaskForUpdate(message);
       ResumeEntity resume = requireResume(task);
+      if (executionToken == null || !executionToken.equals(task.getExecutionToken())) return false;
       return markDead(task, resume, attemptGeneration, message.executionEpoch());
     }));
   }
 
   public boolean markDeadCurrent(TaskMessage message) {
     return Boolean.TRUE.equals(transactions.execute(status -> {
-      AsyncTaskEntity task = requireMatchingTask(message);
+      AsyncTaskEntity task = requireMatchingTaskForUpdate(message);
       ResumeEntity resume = requireResume(task);
+      // Inspection failures do not grant execution ownership.
+      if (task.getExecutionToken() != null) return false;
       return markDead(task, resume, task.getAttemptCount(), message.executionEpoch());
     }));
   }
 
-  private AnalysisWork begin(UUID taskId) {
-    AsyncTaskEntity task = requireTask(taskId);
-    return begin(task);
+  public void releaseForRetry(TaskMessage message, int generation, String executionToken) {
+    transactions.executeWithoutResult(status -> taskRepository.releaseExecution(
+        message.taskId().toString(), AsyncTaskType.RESUME_ANALYSIS.name(), message.bizKey(),
+        message.executionEpoch(), generation, executionToken));
   }
 
   private BeginResult beginMessage(TaskMessage message) {
     AsyncTaskEntity task = requireMatchingTask(message);
     if (task.getExecutionEpoch() != message.executionEpoch()) {
-      return new BeginResult(null, true);
+      return new BeginResult(null, Outcome.STALE);
     }
-    return new BeginResult(begin(task), false);
+    return begin(task);
   }
 
-  private AnalysisWork begin(AsyncTaskEntity task) {
+  private BeginResult begin(AsyncTaskEntity task) {
     ResumeEntity resume = requireResume(task);
     if (task.getStatus() == AsyncTaskStatus.COMPLETED
         && resume.getStatus() == ResumeStatus.READY) {
-      return null;
+      return new BeginResult(null, Outcome.TERMINAL);
     }
     if ((task.getStatus() == AsyncTaskStatus.FAILED || task.getStatus() == AsyncTaskStatus.DEAD)
         && resume.getStatus() == ResumeStatus.FAILED) {
-      return null;
+      return new BeginResult(null, Outcome.TERMINAL);
     }
-    if (resume.getStatus() == ResumeStatus.PENDING) {
-      resume.setStatus(ResumeStatus.ANALYZING);
-    } else if (resume.getStatus() != ResumeStatus.ANALYZING) {
+    if (resume.getStatus() != ResumeStatus.PENDING && resume.getStatus() != ResumeStatus.ANALYZING) {
       throw new IllegalStateException("Resume analysis state is inconsistent");
     }
-    if (task.getStatus() == AsyncTaskStatus.PENDING) {
-      task.setStatus(AsyncTaskStatus.PUBLISHED);
-    } else if (task.getStatus() != AsyncTaskStatus.PUBLISHED) {
+    if (task.getStatus() != AsyncTaskStatus.PENDING && task.getStatus() != AsyncTaskStatus.PUBLISHED) {
       throw new IllegalStateException("Resume analysis task state is inconsistent");
     }
-    task.setAttemptCount(task.getAttemptCount() + 1);
-    int attemptGeneration = task.getAttemptCount();
-    task.setLastError(null);
-    resumeRepository.save(resume);
-    taskRepository.save(task);
-    return new AnalysisWork(
-        task.getTaskId(), resume.getId(), requireOwner(task), resume.getParsedText(), attemptGeneration);
+    String token = UUID.randomUUID().toString();
+    UUID taskId = task.getTaskId();
+    if (taskRepository.claimExecution(taskId.toString(), AsyncTaskType.RESUME_ANALYSIS.name(), task.getBizKey(),
+        task.getExecutionEpoch(), token, leaseSeconds) != 1) {
+      return new BeginResult(null, Outcome.BUSY);
+    }
+    // The bulk CAS clears the persistence context. Reload before advancing business state.
+    task = requireTask(taskId);
+    resume = requireResume(task);
+    if (resume.getStatus() == ResumeStatus.PENDING) resume.setStatus(ResumeStatus.ANALYZING);
+    return new BeginResult(new AnalysisWork(task.getTaskId(), resume.getId(), requireOwner(task),
+        resume.getParsedText(), task.getAttemptCount(), task.getExecutionEpoch(), token), null);
   }
 
   private Outcome complete(AnalysisWork work, String profileJson, String evaluationJson) {
-    AsyncTaskEntity task = requireTask(work.taskId());
+    AsyncTaskEntity task = taskRepository.findByTaskIdForUpdate(work.taskId()).orElseThrow();
     ResumeEntity resume = resumeRepository.findByIdAndUserAccountId(
         work.resumeId(), requireOwner(task)).orElseThrow();
     if (!isCurrentProcessingAttempt(task, resume, work)) {
@@ -191,12 +207,13 @@ public class ResumeAnalysisHandler {
     resume.setStatus(ResumeStatus.READY);
     task.setStatus(AsyncTaskStatus.COMPLETED);
     task.setLastError(null);
+    task.clearExecutionLease();
     metrics.afterCommit(() -> metrics.taskCompleted(AsyncTaskType.RESUME_ANALYSIS));
     return Outcome.TERMINAL;
   }
 
   private Outcome fail(AnalysisWork work) {
-    AsyncTaskEntity task = requireTask(work.taskId());
+    AsyncTaskEntity task = taskRepository.findByTaskIdForUpdate(work.taskId()).orElseThrow();
     ResumeEntity resume = resumeRepository.findByIdAndUserAccountId(
         work.resumeId(), requireOwner(task)).orElseThrow();
     if (!isCurrentProcessingAttempt(task, resume, work)) {
@@ -208,12 +225,13 @@ public class ResumeAnalysisHandler {
     resume.setStatus(ResumeStatus.FAILED);
     task.setStatus(AsyncTaskStatus.FAILED);
     task.setLastError(INVALID_PROFILE_ERROR);
+    task.clearExecutionLease();
     metrics.afterCommit(() -> metrics.taskFailed(AsyncTaskType.RESUME_ANALYSIS, "failed"));
     return Outcome.TERMINAL;
   }
 
   private boolean recordRetryableFailure(AnalysisWork work) {
-    AsyncTaskEntity task = requireTask(work.taskId());
+    AsyncTaskEntity task = taskRepository.findByTaskIdForUpdate(work.taskId()).orElseThrow();
     ResumeEntity resume = resumeRepository.findByIdAndUserAccountId(
         work.resumeId(), requireOwner(task)).orElseThrow();
     if (!isCurrentProcessingAttempt(task, resume, work)) {
@@ -256,6 +274,13 @@ public class ResumeAnalysisHandler {
     return task;
   }
 
+  private AsyncTaskEntity requireMatchingTaskForUpdate(TaskMessage message) {
+    // Lock before reading any task fields, so a concurrent takeover cannot leave a stale entity.
+    if (message == null || message.taskId() == null) throw new IllegalArgumentException("Task identity required");
+    taskRepository.findByTaskIdForUpdate(message.taskId()).orElseThrow();
+    return requireMatchingTask(message);
+  }
+
   private boolean markDead(
       AsyncTaskEntity task,
       ResumeEntity resume,
@@ -275,6 +300,7 @@ public class ResumeAnalysisHandler {
     }
     task.setStatus(AsyncTaskStatus.DEAD);
     task.setLastError("Resume analysis retries exhausted");
+    task.clearExecutionLease();
     resume.setStatus(ResumeStatus.FAILED);
     resume.setFailureReason("Resume analysis retries exhausted");
     metrics.afterCommit(() -> metrics.taskFailed(AsyncTaskType.RESUME_ANALYSIS, "dead"));
@@ -302,10 +328,9 @@ public class ResumeAnalysisHandler {
       AsyncTaskEntity task,
       ResumeEntity resume,
       AnalysisWork work) {
-    return task.getStatus() == AsyncTaskStatus.PUBLISHED
+    return task.ownsExecution(work.executionEpoch(), work.attemptGeneration(), work.executionToken())
         && Objects.equals(task.getUserAccountId(), work.userAccountId())
-        && resume.getStatus() == ResumeStatus.ANALYZING
-        && task.getAttemptCount() == work.attemptGeneration();
+        && resume.getStatus() == ResumeStatus.ANALYZING;
   }
 
   private record AnalysisWork(
@@ -313,13 +338,14 @@ public class ResumeAnalysisHandler {
       Long resumeId,
       Long userAccountId,
       String resumeText,
-      int attemptGeneration) {}
+      int attemptGeneration, int executionEpoch, String executionToken) {}
 
-  private record BeginResult(AnalysisWork work, boolean stale) {}
+  private record BeginResult(AnalysisWork work, Outcome skipped) {}
 
   public enum Outcome {
     TERMINAL,
-    STALE
+    STALE,
+    BUSY
   }
 
   public record ResumeAnalysisTarget(

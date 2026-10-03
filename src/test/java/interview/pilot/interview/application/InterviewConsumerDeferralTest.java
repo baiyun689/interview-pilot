@@ -16,7 +16,7 @@ import interview.pilot.async.idempotency.ProcessingClaim;
 import interview.pilot.async.messaging.*;
 
 class InterviewConsumerDeferralTest {
-  enum Pipeline { PREPARATION, EVALUATION, REPORT }
+  enum Pipeline { EVALUATION, REPORT }
 
   @ParameterizedTest @EnumSource(Pipeline.class)
   void redisOutageDefersInsteadOfStartingAnUncoordinatedModelCall(Pipeline pipeline) {
@@ -43,7 +43,7 @@ class InterviewConsumerDeferralTest {
     var retries = mock(TaskRetryPolicy.class);
     UUID sessionId = UUID.randomUUID();
     AsyncTaskType type = switch (pipeline) {
-      case PREPARATION -> AsyncTaskType.INTERVIEW_QUESTION_PREPARATION;
+
       case EVALUATION -> AsyncTaskType.ANSWER_EVALUATION;
       case REPORT -> AsyncTaskType.INTERVIEW_EVALUATION;
     };
@@ -51,13 +51,7 @@ class InterviewConsumerDeferralTest {
     var source = new Message(new byte[0], new MessageProperties());
     source.getMessageProperties().setHeader(RabbitTopologyConfig.RETRY_COUNT_HEADER, 3);
     return switch (pipeline) {
-      case PREPARATION -> {
-        var handler = mock(QuestionPreparationHandler.class);
-        when(handler.inspect(task)).thenReturn(new QuestionPreparationHandler.Target(sessionId, 1L, null, false, 3));
-        var listener = new QuestionPreparationListener(handler, claims, retries);
-        yield new Fixture(claims, retries, task, source, () -> listener.receive(task, source),
-            () -> verify(handler, never()).prepare(any()));
-      }
+
       case EVALUATION -> {
         var handler = mock(AnswerEvaluationHandler.class);
         when(handler.inspect(task)).thenReturn(new AnswerEvaluationHandler.Target(sessionId, false, 3, 0));

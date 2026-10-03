@@ -1,102 +1,57 @@
 package interview.pilot.interview.application;
 
-import java.time.Duration;
-
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Component;
 
 import interview.pilot.ai.AiStructuredOutputException;
-import interview.pilot.async.idempotency.ProcessingClaim;
+import interview.pilot.async.domain.AsyncTaskType;
 import interview.pilot.async.messaging.RabbitTopologyConfig;
 import interview.pilot.async.messaging.TaskMessage;
 import interview.pilot.async.messaging.TaskRetryPolicy;
-import interview.pilot.async.policy.InterviewPreparationRetryPolicy;
 
 @Component
 public class QuestionPreparationListener {
-  private static final Duration PROCESSING_TTL = Duration.ofMinutes(11);
-  private static final Duration COMPLETED_TTL = Duration.ofHours(24);
-
   private final QuestionPreparationHandler handler;
-  private final ProcessingClaim claims;
   private final TaskRetryPolicy retries;
 
-  public QuestionPreparationListener(
-      QuestionPreparationHandler handler,
-      ProcessingClaim claims,
-      TaskRetryPolicy retries) {
+  public QuestionPreparationListener(QuestionPreparationHandler handler, TaskRetryPolicy retries) {
     this.handler = handler;
-    this.claims = claims;
     this.retries = retries;
   }
 
-  @RabbitListener(
-      queues = RabbitTopologyConfig.INTERVIEW_PREPARATION_MAIN_QUEUE,
+  @RabbitListener(queues = RabbitTopologyConfig.INTERVIEW_PREPARATION_MAIN_QUEUE,
       autoStartup = "${app.async.interview-preparation-listener.auto-startup:true}")
   public void receive(TaskMessage message, Message source) {
-    QuestionPreparationHandler.Target target;
+    if (message == null) throw new IllegalArgumentException("Question preparation message is required");
+    var retryMessage = new TaskMessage(message.taskId(), AsyncTaskType.INTERVIEW_QUESTION_PREPARATION,
+        message.bizKey(), message.executionEpoch());
+    QuestionPreparationHandler.Outcome outcome;
     try {
-      target = handler.inspect(message);
-    } catch (OptimisticLockingFailureException exception) {
-      // A database conflict is not proof that another live consumer owns this delivery.
-      retries.defer(message, source);
-      return;
-    }
-    if (target.terminal()) return;
-    String key = InterviewPreparationRetryPolicy.CLAIM_KEY_PREFIX + target.sessionId();
-    String token;
-    try {
-      token = claims.acquire(key, PROCESSING_TTL).orElse(null);
-    } catch (RuntimeException exception) {
-      retries.defer(message, source);
-      return;
-    }
-    if (token == null) {
-      retries.defer(message, source);
-      return;
-    }
-    try {
-      var outcome = handler.prepare(message);
-      if (outcome == QuestionPreparationHandler.Outcome.COMPLETED) {
-        completeBestEffort(key, token);
-      } else {
-        releaseBestEffort(key, token);
-      }
+      if (handler.inspect(message).terminal()) return;
+      outcome = handler.prepare(message);
     } catch (QuestionPreparationExecutionException exception) {
-      releaseBestEffort(key, token);
+      int generation = exception.attemptGeneration();
+      String token = exception.executionToken();
       if (exception.getCause() instanceof InvalidQuestionDeckException
           || exception.getCause() instanceof AiStructuredOutputException) {
-        handler.markInvalid(message, exception.attemptGeneration());
+        handler.markInvalid(message, generation, token);
       } else if (exception.getCause() instanceof OptimisticLockingFailureException) {
-        retries.defer(message, source);
+        retries.defer(retryMessage, source);
+        handler.releaseForRetry(message, generation, token);
+      } else if (retries.routeFailure(retryMessage, source) == TaskRetryPolicy.RouteOutcome.DEAD_LETTER) {
+        handler.markDead(message, generation, token);
       } else {
-        routeRetry(message, source, exception.attemptGeneration());
+        // The retry must be durable before this execution gives up its database lease.
+        handler.releaseForRetry(message, generation, token);
       }
-    } catch (OptimisticLockingFailureException exception) {
-      releaseBestEffort(key, token);
-      retries.defer(message, source);
+      return;
     } catch (RuntimeException exception) {
-      releaseBestEffort(key, token);
-      routeRetry(message, source, target.attemptGeneration());
+      // Without a committed execution identity, never consume retries or fail another owner.
+      retries.defer(retryMessage, source);
+      return;
     }
-  }
-
-  private void completeBestEffort(String key, String token) {
-    if (token.isEmpty()) return;
-    try { claims.complete(key, token, COMPLETED_TTL); } catch (RuntimeException ignored) { }
-  }
-
-  private void releaseBestEffort(String key, String token) {
-    if (token.isEmpty()) return;
-    try { claims.release(key, token); } catch (RuntimeException ignored) { }
-  }
-
-  private void routeRetry(TaskMessage message, Message source, int attemptGeneration) {
-    if (retries.routeFailure(message, source) == TaskRetryPolicy.RouteOutcome.DEAD_LETTER) {
-      // false means a newer generation or a terminal session; database failures still escape.
-      handler.markDead(message, attemptGeneration);
-    }
+    if (outcome == QuestionPreparationHandler.Outcome.BUSY) retries.defer(retryMessage, source);
   }
 }

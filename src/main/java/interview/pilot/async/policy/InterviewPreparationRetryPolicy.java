@@ -16,11 +16,7 @@ import interview.pilot.interview.infrastructure.InterviewSessionRepository;
  */
 @Component
 public class InterviewPreparationRetryPolicy extends AbstractInterviewSessionRetryPolicy {
-  /**
-   * Public so {@code QuestionPreparationListener} acquires the very key this policy clears
-   * on manual retry — a drifted literal on either side would silently break retry
-   * idempotency.
-   */
+  /** Legacy namespace retained for business-key validation; no Redis cleanup is needed. */
   public static final String CLAIM_KEY_PREFIX = "interview-preparation:";
 
   public InterviewPreparationRetryPolicy(InterviewSessionRepository sessions) {
@@ -38,6 +34,9 @@ public class InterviewPreparationRetryPolicy extends AbstractInterviewSessionRet
   }
 
   @Override
+  public boolean requiresRedisClaim() { return false; }
+
+  @Override
   public void reset(AsyncTaskEntity task, long userAccountId) {
     UUID sessionId = parseInterviewId(task.getBizKey());
     InterviewSessionEntity session =
@@ -47,5 +46,6 @@ public class InterviewPreparationRetryPolicy extends AbstractInterviewSessionRet
       throw stateInvalid();
     }
     session.retryPreparation();
+    task.clearExecutionLease();
   }
 }

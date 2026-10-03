@@ -43,11 +43,16 @@ class AsyncTaskV9MigrationIT {
         "select is_nullable from information_schema.columns where table_schema=database() "
             + "and table_name='async_task' and column_name='execution_epoch'", String.class))
         .isEqualTo("NO");
+    assertThat(jdbc.queryForMap(
+        "select execution_token, execution_lease_until from async_task limit 1"))
+        .containsEntry("execution_token", null)
+        .containsEntry("execution_lease_until", null);
 
     latest.clean();
+    int expectedMigrations = latest.info().pending().length;
     latest.migrate();
     assertThat(jdbc.queryForObject(
         "select count(*) from flyway_schema_history where success=true", Integer.class))
-        .isEqualTo(33);
+        .isEqualTo(expectedMigrations);
   }
 }

@@ -1,176 +1,85 @@
 package interview.pilot.resume.application;
 
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 import java.util.UUID;
-import java.util.Optional;
-
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.springframework.amqp.AmqpException;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
-
 import interview.pilot.async.domain.AsyncTaskType;
-import interview.pilot.async.idempotency.ProcessingClaim;
-import interview.pilot.async.messaging.TaskMessage;
-import interview.pilot.async.messaging.TaskRetryPolicy;
+import interview.pilot.async.messaging.*;
 
 class ResumeAnalysisListenerTest {
-  @Test
-  void untrustedTaskTypeCannotRouteAResumeQueueFailureIntoAnotherPipeline() {
-    ResumeAnalysisHandler handler = mock(ResumeAnalysisHandler.class);
-    TaskRetryPolicy retryPolicy = mock(TaskRetryPolicy.class);
-    var listener = new ResumeAnalysisListener(
-        handler, mock(ProcessingClaim.class), retryPolicy);
-    TaskMessage untrusted = new TaskMessage(
-        UUID.randomUUID(), AsyncTaskType.INTERVIEW_EVALUATION, "resume:42");
-    Message source = new Message(new byte[0], new MessageProperties());
-    when(handler.inspect(untrusted)).thenThrow(new IllegalArgumentException("wrong type"));
-    org.mockito.Mockito.doThrow(new AmqpException("publisher unavailable"))
-        .when(retryPolicy).routeFailure(org.mockito.ArgumentMatchers.any(),
-            org.mockito.ArgumentMatchers.same(source));
+  private final ResumeAnalysisHandler handler = mock(ResumeAnalysisHandler.class);
+  private final TaskRetryPolicy retries = mock(TaskRetryPolicy.class);
+  private final ResumeAnalysisListener listener = new ResumeAnalysisListener(handler, retries);
+  private final TaskMessage task = new TaskMessage(UUID.randomUUID(), AsyncTaskType.RESUME_ANALYSIS, "resume:42");
+  private final Message source = new Message(new byte[0], new MessageProperties());
 
-    assertThatThrownBy(() -> listener.receive(untrusted, source))
-        .isInstanceOf(AmqpException.class);
-
-    var routed = ArgumentCaptor.forClass(TaskMessage.class);
-    verify(retryPolicy, times(1)).routeFailure(routed.capture(),
-        org.mockito.ArgumentMatchers.same(source));
-    org.assertj.core.api.Assertions.assertThat(routed.getValue().taskType())
-        .isEqualTo(AsyncTaskType.RESUME_ANALYSIS);
+  ResumeAnalysisListenerTest() {
+    when(handler.inspect(task)).thenReturn(new ResumeAnalysisHandler.ResumeAnalysisTarget(42L, false));
   }
 
-  @Test
-  void typedRetryPublishFailureMustEscapeSoTheDeliveryIsNotAcknowledged() {
-    ResumeAnalysisHandler handler = mock(ResumeAnalysisHandler.class);
-    ProcessingClaim claims = mock(ProcessingClaim.class);
-    TaskRetryPolicy retryPolicy = mock(TaskRetryPolicy.class);
-    var listener = new ResumeAnalysisListener(handler, claims, retryPolicy);
-    TaskMessage task = new TaskMessage(
-        UUID.randomUUID(), AsyncTaskType.RESUME_ANALYSIS, "resume:42");
-    Message source = new Message(new byte[0], new MessageProperties());
-    when(handler.inspect(task)).thenReturn(new ResumeAnalysisHandler.ResumeAnalysisTarget(42L, false));
-    when(claims.acquire(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
-        .thenReturn(Optional.of("token"));
-    when(handler.handle(task)).thenThrow(new ResumeAnalysisRetryableException(1));
-    when(retryPolicy.routeFailure(task, source))
-        .thenThrow(new AmqpException("publisher unavailable"));
+  @Test void activeDatabaseOwnerDefersWithoutSpendingBusinessRetries() {
+    when(handler.handle(task)).thenReturn(ResumeAnalysisHandler.Outcome.BUSY);
+    source.getMessageProperties().setHeader(RabbitTopologyConfig.RETRY_COUNT_HEADER, 3);
+    listener.receive(task, source);
+    verify(retries).defer(task, source);
+    verify(retries, never()).routeFailure(any(), any());
+    verify(handler, never()).markDead(any(), anyInt(), any());
+  }
 
+  @Test void failedDeferralEscapesForBrokerRedelivery() {
+    when(handler.handle(task)).thenReturn(ResumeAnalysisHandler.Outcome.BUSY);
+    doThrow(new AmqpException("broker unavailable")).when(retries).defer(task, source);
     assertThatThrownBy(() -> listener.receive(task, source)).isInstanceOf(AmqpException.class);
   }
 
-  @Test
-  void dlqSuccessFollowedByTerminalDatabaseFailureMustEscape() {
-    ResumeAnalysisHandler handler = mock(ResumeAnalysisHandler.class);
-    ProcessingClaim claims = mock(ProcessingClaim.class);
-    TaskRetryPolicy retryPolicy = mock(TaskRetryPolicy.class);
-    var listener = new ResumeAnalysisListener(handler, claims, retryPolicy);
-    TaskMessage task = new TaskMessage(
-        UUID.randomUUID(), AsyncTaskType.RESUME_ANALYSIS, "resume:42");
-    Message source = new Message(new byte[0], new MessageProperties());
-    when(handler.inspect(task)).thenReturn(new ResumeAnalysisHandler.ResumeAnalysisTarget(42L, false));
-    when(claims.acquire(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
-        .thenReturn(Optional.of("token"));
-    when(handler.handle(task)).thenThrow(new ResumeAnalysisRetryableException(1));
-    when(retryPolicy.routeFailure(task, source))
-        .thenReturn(TaskRetryPolicy.RouteOutcome.DEAD_LETTER);
-    when(handler.markDead(task, 1))
-        .thenThrow(new IllegalStateException("database unavailable"));
-
-    assertThatThrownBy(() -> listener.receive(task, source))
-        .isInstanceOf(IllegalStateException.class);
+  @Test void retryPublicationFailureMustKeepTheDatabaseLease() {
+    when(handler.handle(task)).thenThrow(new ResumeAnalysisRetryableException(2, "owner"));
+    when(retries.routeFailure(task, source)).thenThrow(new AmqpException("broker unavailable"));
+    assertThatThrownBy(() -> listener.receive(task, source)).isInstanceOf(AmqpException.class);
+    verify(handler, never()).releaseForRetry(any(), anyInt(), any());
+    verify(handler, never()).markDead(any(), anyInt(), any());
   }
 
-  @Test
-  void exhaustedInspectFailureMustTerminalizeOnlyAValidatedCurrentMessage() {
-    ResumeAnalysisHandler handler = mock(ResumeAnalysisHandler.class);
-    TaskRetryPolicy retryPolicy = mock(TaskRetryPolicy.class);
-    var listener = new ResumeAnalysisListener(
-        handler, mock(ProcessingClaim.class), retryPolicy);
-    TaskMessage task = new TaskMessage(
-        UUID.randomUUID(), AsyncTaskType.RESUME_ANALYSIS, "resume:42");
-    Message source = new Message(new byte[0], new MessageProperties());
-    when(handler.inspect(task)).thenThrow(new IllegalStateException("database read failed"));
-    when(retryPolicy.routeFailure(task, source))
-        .thenReturn(TaskRetryPolicy.RouteOutcome.DEAD_LETTER);
-    when(handler.markDeadCurrent(task)).thenReturn(true);
-
+  @Test void confirmedRetryReleasesOnlyTheFailingExecution() {
+    when(handler.handle(task)).thenThrow(new ResumeAnalysisRetryableException(2, "owner"));
+    when(retries.routeFailure(task, source)).thenReturn(TaskRetryPolicy.RouteOutcome.RETRY);
     listener.receive(task, source);
-
-    verify(handler).markDeadCurrent(task);
+    var order = inOrder(retries, handler);
+    order.verify(retries).routeFailure(task, source);
+    order.verify(handler).releaseForRetry(task, 2, "owner");
   }
 
-  @Test
-  void exhaustedOccupiedClaimMustNotTerminalizeAnotherOwnersGeneration() {
-    ResumeFixture fixture = resumeFixture();
-    when(fixture.claims.acquire(
-        org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
-        .thenReturn(Optional.empty());
-
-
-    fixture.source.getMessageProperties().setHeader(interview.pilot.async.messaging.RabbitTopologyConfig.RETRY_COUNT_HEADER, 3);
-    fixture.listener.receive(fixture.task, fixture.source);
-    verify(fixture.retries).defer(fixture.task, fixture.source);
-    verify(fixture.retries, org.mockito.Mockito.never()).routeFailure(fixture.task, fixture.source);
-    verify(fixture.handler, org.mockito.Mockito.never())
-        .markDead(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt());
+  @Test void deadLetterUsesTheActualExecutionTokenAndDatabaseFailureEscapes() {
+    when(handler.handle(task)).thenThrow(new ResumeAnalysisRetryableException(2, "owner"));
+    when(retries.routeFailure(task, source)).thenReturn(TaskRetryPolicy.RouteOutcome.DEAD_LETTER);
+    when(handler.markDead(task, 2, "owner")).thenThrow(new IllegalStateException("database unavailable"));
+    assertThatThrownBy(() -> listener.receive(task, source)).isInstanceOf(IllegalStateException.class);
+    verify(handler, never()).releaseForRetry(any(), anyInt(), any());
   }
 
-  @Test
-  void exhaustedClaimInfrastructureFailureMustNotTerminalizeWithoutOwnership() {
-    ResumeFixture fixture = resumeFixture();
-    when(fixture.claims.acquire(
-        org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any()))
-        .thenThrow(new IllegalStateException("redis unavailable"));
-
-
-    fixture.source.getMessageProperties().setHeader(interview.pilot.async.messaging.RabbitTopologyConfig.RETRY_COUNT_HEADER, 3);
-    fixture.listener.receive(fixture.task, fixture.source);
-    verify(fixture.retries).defer(fixture.task, fixture.source);
-    verify(fixture.retries, org.mockito.Mockito.never()).routeFailure(fixture.task, fixture.source);
-    verify(fixture.handler, org.mockito.Mockito.never())
-        .markDead(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt());
+  @Test void aFailureWithoutExecutionIdentityIsDeferred() {
+    when(handler.handle(task)).thenThrow(new IllegalStateException("begin transaction failed"));
+    listener.receive(task, source);
+    verify(retries).defer(task, source);
+    verify(retries, never()).routeFailure(any(), any());
   }
 
-  @Test
-  void staleOwnedDeliveryReleasesItsTokenInsteadOfWritingDoneMarker() {
-    ResumeFixture fixture = resumeFixture();
-    when(fixture.handler.handle(fixture.task)).thenReturn(ResumeAnalysisHandler.Outcome.STALE);
-
-    fixture.listener.receive(fixture.task, fixture.source);
-
-    verify(fixture.claims).release(org.mockito.ArgumentMatchers.anyString(),
-        org.mockito.ArgumentMatchers.eq("token"));
-    verify(fixture.claims, org.mockito.Mockito.never()).complete(
-        org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
-        org.mockito.ArgumentMatchers.any());
+  @Test void staleExecutionDoesNotPublishAnotherRetry() {
+    when(handler.handle(task)).thenReturn(ResumeAnalysisHandler.Outcome.STALE);
+    listener.receive(task, source);
+    verifyNoInteractions(retries);
   }
 
-  private ResumeFixture resumeFixture() {
-    ResumeAnalysisHandler handler = mock(ResumeAnalysisHandler.class);
-    ProcessingClaim claims = mock(ProcessingClaim.class);
-    TaskRetryPolicy retries = mock(TaskRetryPolicy.class);
-    var listener = new ResumeAnalysisListener(handler, claims, retries);
-    TaskMessage task = new TaskMessage(
-        UUID.randomUUID(), AsyncTaskType.RESUME_ANALYSIS, "resume:42");
-    Message source = new Message(new byte[0], new MessageProperties());
-    when(handler.inspect(task)).thenReturn(
-        new ResumeAnalysisHandler.ResumeAnalysisTarget(42L, false));
-    when(claims.acquire(org.mockito.ArgumentMatchers.anyString(),
-        org.mockito.ArgumentMatchers.any())).thenReturn(Optional.of("token"));
-    return new ResumeFixture(handler, claims, retries, listener, task, source);
+  @Test void untrustedTaskTypeCannotRouteIntoAnotherPipeline() {
+    var untrusted = new TaskMessage(task.taskId(), AsyncTaskType.INTERVIEW_EVALUATION, task.bizKey());
+    when(handler.inspect(untrusted)).thenThrow(new IllegalArgumentException("wrong type"));
+    when(retries.routeFailure(task, source)).thenThrow(new AmqpException("publisher unavailable"));
+    assertThatThrownBy(() -> listener.receive(untrusted, source)).isInstanceOf(AmqpException.class);
+    verify(retries).routeFailure(task, source);
   }
-
-  private record ResumeFixture(
-      ResumeAnalysisHandler handler,
-      ProcessingClaim claims,
-      TaskRetryPolicy retries,
-      ResumeAnalysisListener listener,
-      TaskMessage task,
-      Message source) {}
 }

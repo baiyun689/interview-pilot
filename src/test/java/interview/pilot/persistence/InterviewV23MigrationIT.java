@@ -62,9 +62,10 @@ class InterviewV23MigrationIT {
         .isEqualTo(preserved);
 
     latest.clean();
+    int expectedMigrations = latest.info().pending().length;
     latest.migrate();
     assertThat(jdbc.queryForObject(
         "select count(*) from flyway_schema_history where success=true", Integer.class))
-        .isEqualTo(33);
+        .isEqualTo(expectedMigrations);
   }
 }
